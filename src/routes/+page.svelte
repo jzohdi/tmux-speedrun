@@ -231,13 +231,14 @@
 		padding: 0 24px 60px;
 		display: flex;
 		justify-content: center;
+		min-height: 400px;
 	}
 
 	/* Features Section */
 	/* Footer */
 	.footer {
 		position: relative;
-		z-index: 1;
+		z-index: 0;
 		text-align: center;
 		padding: 40px 24px;
 		border-top: 1px solid rgba(255, 255, 255, 0.05);

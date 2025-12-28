@@ -3,10 +3,11 @@
 
 	type ManpageProps = {
 		onQuit: () => void;
+		onToggleMaximize?: () => void;
 		containerRef?: HTMLDivElement | null;
 	};
 
-	let { onQuit, containerRef = $bindable(null) }: ManpageProps = $props();
+	let { onQuit, onToggleMaximize, containerRef = $bindable(null) }: ManpageProps = $props();
 
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	let containerElement = $state<HTMLDivElement | null>(null);
@@ -57,6 +58,16 @@
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
+		// Handle Ctrl+Enter / Cmd+Enter to toggle maximize (before stopping propagation)
+		if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+			event.preventDefault();
+			event.stopPropagation();
+			if (onToggleMaximize) {
+				onToggleMaximize();
+			}
+			return;
+		}
+
 		// Stop propagation to prevent parent Terminal from interfering
 		event.stopPropagation();
 		

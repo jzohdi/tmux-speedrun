@@ -34,6 +34,7 @@
 	let manpageRef = $state<HTMLDivElement | null>(null);
 	let ignoreNextEnter = $state(false);
 	let historyLengthBeforeMode = $state(0); // Track history length to clear on quit
+	let isMaximized = $state(false);
 
 	// Leaderboard mock data (will be fetched from API later)
 	const mockLeaderboard: Record<string, LeaderboardEntry[]> = {
@@ -104,7 +105,7 @@
 		}));
 
 		addOutput('');
-		addOutput('  Use ↑/↓ to navigate, Enter to start, q to quit');
+		addOutput('  Use ↑/↓ or j/k to navigate, Enter to start, q to quit');
 		addOutput('');
 	}
 
@@ -227,15 +228,26 @@
 		addOutput("Type 'help' for available commands.", 'error');
 	}
 
+	function toggleMaximize() {
+		isMaximized = !isMaximized;
+	}
+
 	function handleKeyDown(event: KeyboardEvent) {
+		// Global: Ctrl+Enter or Cmd+Enter to toggle maximize
+		if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+			event.preventDefault();
+			toggleMaximize();
+			return;
+		}
+
 		// Handle navigation modes
 		if (mode === 'list') {
-			if (event.key === 'ArrowUp') {
+			if (event.key === 'ArrowUp' || event.key === 'k') {
 				event.preventDefault();
 				selectedIndex = Math.max(0, selectedIndex - 1);
 				return;
 			}
-			if (event.key === 'ArrowDown') {
+			if (event.key === 'ArrowDown' || event.key === 'j') {
 				event.preventDefault();
 				selectedIndex = Math.min(listData.length - 1, selectedIndex + 1);
 				return;
@@ -307,10 +319,29 @@
 			containerRef.focus();
 		}
 	});
+
+	// Toggle body overflow when maximized to hide page scrollbar
+	$effect(() => {
+		if (typeof document !== 'undefined') {
+			if (isMaximized) {
+				document.body.style.overflow = 'hidden';
+			} else {
+				document.body.style.overflow = '';
+			}
+		}
+
+		// Cleanup on unmount
+		return () => {
+			if (typeof document !== 'undefined') {
+				document.body.style.overflow = '';
+			}
+		};
+	});
 </script>
 
 <button
 	class="terminal-container"
+	class:maximized={isMaximized}
 	bind:this={containerRef}
 	onclick={focusInput}
 	onkeydown={handleKeyDown}
@@ -322,7 +353,14 @@
 		<div class="terminal-buttons">
 			<span class="terminal-button close"></span>
 			<span class="terminal-button minimize"></span>
-			<span class="terminal-button maximize"></span>
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<span
+				class="terminal-button maximize"
+				role="button"
+				tabindex="-1"
+				title={isMaximized ? 'Restore (Ctrl+Enter)' : 'Maximize (Ctrl+Enter)'}
+				onclick={(e) => { e.stopPropagation(); toggleMaximize(); }}
+			></span>
 		</div>
 		<span class="terminal-title">tmux-speedrun</span>
 		<div class="terminal-buttons invisible">
@@ -335,7 +373,7 @@
 	<!-- Terminal Body -->
 	<div class="terminal-body" class:man-mode={mode === 'man'} bind:this={terminalRef}>
 		{#if mode === 'man'}
-			<Manpage onQuit={clearAndResetMode} bind:containerRef={manpageRef} />
+			<Manpage onQuit={clearAndResetMode} onToggleMaximize={toggleMaximize} bind:containerRef={manpageRef} />
 		{:else}
 		<!-- History -->
 		{#each history as entry}
@@ -391,6 +429,21 @@
 		line-height: 1.6;
 		display: block;
 		text-align: left;
+		transition: all 0.2s ease-out;
+		z-index: 1;
+	}
+
+	.terminal-container.maximized {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100vw;
+		height: 100vh;
+		max-width: none;
+		border-radius: 0;
+		z-index: 9999;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.terminal-header {
@@ -428,6 +481,12 @@
 
 	.terminal-button.maximize {
 		background: #27ca40;
+		cursor: pointer;
+	}
+
+	.terminal-button.maximize:hover {
+		background: #32d74b;
+		transform: scale(1.1);
 	}
 
 	.terminal-title {
@@ -442,6 +501,12 @@
 		overflow-y: auto;
 		background: #1c1c1c;
 		position: relative;
+	}
+
+	.maximized .terminal-body {
+		height: auto;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.terminal-body.man-mode {
