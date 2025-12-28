@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { CHALLENGES, getAllChallengesWithMeta, getDifficultyLabel } from '$lib/data/challenges';
-	import { COMMAND_CATEGORIES, getCommandsByCategory } from '$lib/data/tmux-commands';
+	import Manpage from './Manpage.svelte';
 
 	type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man';
 
@@ -31,6 +31,7 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let terminalRef = $state<HTMLDivElement | null>(null);
 	let containerRef = $state<HTMLButtonElement | null>(null);
+	let manpageRef = $state<HTMLDivElement | null>(null);
 	let ignoreNextEnter = $state(false);
 	let historyLengthBeforeMode = $state(0); // Track history length to clear on quit
 
@@ -142,36 +143,8 @@
 	}
 
 	function showManPage() {
-		historyLengthBeforeMode = history.length; // Track before adding output
+		historyLengthBeforeMode = history.length;
 		mode = 'man';
-
-		addOutput('');
-		addOutput('TMUX(1) MANUAL', 'header');
-		addOutput('──────────────', 'header');
-		addOutput('');
-		addOutput('NAME');
-		addOutput('       tmux - terminal multiplexer');
-		addOutput('');
-		addOutput('DESCRIPTION');
-		addOutput('       tmux enables multiple terminals in a single window.');
-		addOutput('       The prefix key is Ctrl+b by default.');
-		addOutput('');
-
-		for (const category of COMMAND_CATEGORIES) {
-			const commands = getCommandsByCategory(category.key);
-			if (commands.length === 0) continue;
-
-			addOutput(`${category.label.toUpperCase()}`);
-			addOutput('');
-
-			for (const cmd of commands) {
-				addOutput(`       ${cmd.shortcut.padEnd(25)} ${cmd.description}`);
-			}
-			addOutput('');
-		}
-
-		addOutput('  Press q to return');
-		addOutput('');
 	}
 
 	function startChallenge(challengeId: string) {
@@ -289,12 +262,17 @@
 			return;
 		}
 
-		if (mode === 'leaderboard' || mode === 'man') {
+		if (mode === 'leaderboard') {
 			if (event.key === 'q' || event.key === 'Escape') {
 				event.preventDefault();
 				clearAndResetMode();
 				return;
 			}
+			return;
+		}
+
+		// Man mode handles its own keyboard events via the Manpage component
+		if (mode === 'man') {
 			return;
 		}
 
@@ -309,6 +287,8 @@
 	function focusInput() {
 		if (mode === 'default') {
 			inputRef?.focus();
+		} else if (mode === 'man' && manpageRef) {
+			manpageRef.focus();
 		} else {
 			containerRef?.focus();
 		}
@@ -353,7 +333,10 @@
 	</div>
 
 	<!-- Terminal Body -->
-	<div class="terminal-body" bind:this={terminalRef}>
+	<div class="terminal-body" class:man-mode={mode === 'man'} bind:this={terminalRef}>
+		{#if mode === 'man'}
+			<Manpage onQuit={clearAndResetMode} bind:containerRef={manpageRef} />
+		{:else}
 		<!-- History -->
 		{#each history as entry}
 			<div class="terminal-line {entry.type}">
@@ -388,6 +371,7 @@
 					spellcheck="false"
 				/>
 			</div>
+		{/if}
 		{/if}
 	</div>
 </button>
@@ -457,6 +441,12 @@
 		height: 450px;
 		overflow-y: auto;
 		background: #1c1c1c;
+		position: relative;
+	}
+
+	.terminal-body.man-mode {
+		overflow: hidden;
+		padding: 0;
 	}
 
 	.terminal-body::-webkit-scrollbar {
