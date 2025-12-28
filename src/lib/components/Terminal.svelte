@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { CHALLENGES, getAllChallengesWithMeta, getDifficultyLabel } from '$lib/data/challenges';
 	import { COMMAND_CATEGORIES, getCommandsByCategory } from '$lib/data/tmux-commands';
@@ -29,8 +30,9 @@
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let terminalRef = $state<HTMLDivElement | null>(null);
-	let containerRef = $state<HTMLDivElement | null>(null);
+	let containerRef = $state<HTMLButtonElement | null>(null);
 	let ignoreNextEnter = $state(false);
+	let historyLengthBeforeMode = $state(0); // Track history length to clear on quit
 
 	// Leaderboard mock data (will be fetched from API later)
 	const mockLeaderboard: Record<string, LeaderboardEntry[]> = {
@@ -60,18 +62,25 @@
 		scrollToBottom();
 	}
 
-	function clearAndResetMode() {
+	async function clearAndResetMode() {
+		// Remove the header lines that were added when entering the mode
+		if (historyLengthBeforeMode > 0) {
+			history = history.slice(0, historyLengthBeforeMode);
+		}
 		mode = 'default';
 		selectedIndex = 0;
 		listData = [];
 		leaderboardData = null;
+		historyLengthBeforeMode = 0;
+		// Wait for Svelte to update the DOM, then focus the input
+		await tick();
+		inputRef?.focus();
 	}
 
 	function showHelp() {
 		addOutput('');
-		addOutput('╭─────────────────────────────────────────────────────────╮', 'header');
-		addOutput('│                    AVAILABLE COMMANDS                    │', 'header');
-		addOutput('╰─────────────────────────────────────────────────────────╯', 'header');
+		addOutput('AVAILABLE COMMANDS', 'header');
+		addOutput('──────────────────', 'header');
 		addOutput('');
 		addOutput('  tsr ls              List all available challenges');
 		addOutput('  tsr lb <id>         View leaderboard for a challenge');
@@ -84,6 +93,7 @@
 
 	function showChallengeList() {
 		const challenges = getAllChallengesWithMeta();
+		historyLengthBeforeMode = history.length; // Track before adding output
 		mode = 'list';
 		selectedIndex = 0;
 		ignoreNextEnter = true; // Prevent immediate Enter key from starting challenge
@@ -92,10 +102,6 @@
 			display: `${c.name} [${getDifficultyLabel(c.difficulty)}] - ${c.commandCount} commands`
 		}));
 
-		addOutput('');
-		addOutput('╭─────────────────────────────────────────────────────────╮', 'header');
-		addOutput('│                      CHALLENGES                          │', 'header');
-		addOutput('╰─────────────────────────────────────────────────────────╯', 'header');
 		addOutput('');
 		addOutput('  Use ↑/↓ to navigate, Enter to start, q to quit');
 		addOutput('');
@@ -110,13 +116,13 @@
 		}
 
 		const entries = mockLeaderboard[challengeId] || [];
+		historyLengthBeforeMode = history.length; // Track before adding output
 		mode = 'leaderboard';
 		leaderboardData = { challengeId, entries };
 
 		addOutput('');
-		addOutput('╭─────────────────────────────────────────────────────────╮', 'header');
-		addOutput(`│  LEADERBOARD: ${challenge.name.toUpperCase().padEnd(40)}│`, 'header');
-		addOutput('╰─────────────────────────────────────────────────────────╯', 'header');
+		addOutput(`LEADERBOARD: ${challenge.name.toUpperCase()}`, 'header');
+		addOutput('─'.repeat(40), 'header');
 		addOutput('');
 
 		if (entries.length === 0) {
@@ -136,12 +142,12 @@
 	}
 
 	function showManPage() {
+		historyLengthBeforeMode = history.length; // Track before adding output
 		mode = 'man';
 
 		addOutput('');
-		addOutput('╭─────────────────────────────────────────────────────────╮', 'header');
-		addOutput('│                    TMUX(1) MANUAL                        │', 'header');
-		addOutput('╰─────────────────────────────────────────────────────────╯', 'header');
+		addOutput('TMUX(1) MANUAL', 'header');
+		addOutput('──────────────', 'header');
 		addOutput('');
 		addOutput('NAME');
 		addOutput('       tmux - terminal multiplexer');
@@ -278,7 +284,6 @@
 			if (event.key === 'q' || event.key === 'Escape') {
 				event.preventDefault();
 				clearAndResetMode();
-				addOutput('');
 				return;
 			}
 			return;
@@ -288,7 +293,6 @@
 			if (event.key === 'q' || event.key === 'Escape') {
 				event.preventDefault();
 				clearAndResetMode();
-				addOutput('');
 				return;
 			}
 			return;
@@ -323,33 +327,13 @@
 			containerRef.focus();
 		}
 	});
-
-	// Handle global keyboard events for non-input modes
-	function handleGlobalKeyDown(event: KeyboardEvent) {
-		// Only handle keys when in interactive modes and terminal is focused
-		if (mode === 'default') {
-			return;
-		}
-
-		// Check if the terminal container or its children have focus
-		const activeElement = document.activeElement;
-		const isTerminalFocused = containerRef?.contains(activeElement) || activeElement === containerRef;
-		if (!isTerminalFocused) {
-			return;
-		}
-
-		handleKeyDown(event);
-	}
 </script>
 
-<svelte:window onkeydown={handleGlobalKeyDown} />
-
-<div
+<button
 	class="terminal-container"
 	bind:this={containerRef}
 	onclick={focusInput}
 	onkeydown={handleKeyDown}
-	role="application"
 	aria-label="Terminal emulator"
 	tabindex="0"
 >
@@ -403,11 +387,10 @@
 					autocapitalize="off"
 					spellcheck="false"
 				/>
-				<span class="cursor"></span>
 			</div>
 		{/if}
 	</div>
-</div>
+</button>
 
 <style>
 	.terminal-container {
@@ -422,6 +405,8 @@
 		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
 		font-size: 14px;
 		line-height: 1.6;
+		display: block;
+		text-align: left;
 	}
 
 	.terminal-header {
@@ -469,8 +454,7 @@
 
 	.terminal-body {
 		padding: 20px;
-		min-height: 400px;
-		max-height: 500px;
+		height: 450px;
 		overflow-y: auto;
 		background: #1c1c1c;
 	}
@@ -560,27 +544,6 @@
 
 	.terminal-input::placeholder {
 		color: #4d4d4d;
-	}
-
-	.cursor {
-		display: inline-block;
-		width: 8px;
-		height: 18px;
-		background: #50fa7b;
-		animation: blink 1s infinite;
-		margin-left: 2px;
-		vertical-align: middle;
-	}
-
-	@keyframes blink {
-		0%,
-		50% {
-			opacity: 1;
-		}
-		51%,
-		100% {
-			opacity: 0;
-		}
 	}
 
 	/* Responsive */

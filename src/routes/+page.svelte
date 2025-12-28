@@ -204,7 +204,7 @@
 	.command-hints {
 		display: flex;
 		flex-wrap: wrap;
-		justify-content: center;
+		/* justify-content: center; */
 		gap: 16px;
 		margin-bottom: 40px;
 	}
