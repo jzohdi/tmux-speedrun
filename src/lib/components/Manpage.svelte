@@ -10,6 +10,7 @@
 
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	let containerElement = $state<HTMLDivElement | null>(null);
+	let isFocused = $state(true); // Start focused since we auto-focus on mount
 	const SCROLL_STEP = 24; // pixels per line (approx line height)
 
 	// Sync containerElement to the bindable containerRef for parent access
@@ -101,6 +102,14 @@
 		containerElement?.focus();
 	}
 
+	function handleFocus() {
+		isFocused = true;
+	}
+
+	function handleBlur() {
+		isFocused = false;
+	}
+
 	// Focus container on mount
 	$effect(() => {
 		if (containerElement) {
@@ -119,6 +128,8 @@
 	bind:this={containerElement}
 	onkeydown={handleKeyDown}
 	onclick={handleClick}
+	onfocus={handleFocus}
+	onblur={handleBlur}
 	tabindex="0"
 	role="application"
 	aria-label="Manual page viewer - use arrow keys or j/k to scroll, q to quit"
@@ -230,7 +241,7 @@
 	<!-- Status Bar -->
 	<div class="status-bar">
 		<span class="colon">:</span>
-		<span class="cursor"></span>
+		<span class="cursor" class:visible={isFocused}></span>
 	</div>
 </div>
 
@@ -363,10 +374,14 @@
 		display: inline-block;
 		width: 8px;
 		height: 18px;
-		background: #e0e0e0;
-		animation: blink 1s step-end infinite;
+		background: transparent;
 		vertical-align: middle;
 		margin-left: 1px;
+	}
+
+	.cursor.visible {
+		background: #e0e0e0;
+		animation: blink 1s step-end infinite;
 	}
 
 	@keyframes blink {
