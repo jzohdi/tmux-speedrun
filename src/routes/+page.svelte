@@ -183,13 +183,6 @@
 		color: #50fa7b;
 	}
 
-	.subtitle {
-		font-size: clamp(1.1rem, 3vw, 1.4rem);
-		color: #888;
-		margin: 0 0 24px;
-		font-weight: 400;
-	}
-
 	.description {
 		font-size: 1.05rem;
 		line-height: 1.7;
@@ -241,52 +234,6 @@
 	}
 
 	/* Features Section */
-	.features {
-		position: relative;
-		z-index: 1;
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-		gap: 24px;
-		max-width: 900px;
-		margin: 0 auto;
-		padding: 40px 24px 80px;
-	}
-
-	.feature {
-		padding: 28px;
-		background: rgba(255, 255, 255, 0.02);
-		border: 1px solid rgba(255, 255, 255, 0.05);
-		border-radius: 12px;
-		text-align: center;
-		transition:
-			transform 0.2s ease,
-			border-color 0.2s ease;
-	}
-
-	.feature:hover {
-		transform: translateY(-4px);
-		border-color: rgba(80, 250, 123, 0.2);
-	}
-
-	.feature-icon {
-		font-size: 2rem;
-		margin-bottom: 16px;
-	}
-
-	.feature h3 {
-		font-size: 1.1rem;
-		font-weight: 600;
-		margin: 0 0 12px;
-		color: #fff;
-	}
-
-	.feature p {
-		font-size: 0.95rem;
-		line-height: 1.6;
-		color: #888;
-		margin: 0;
-	}
-
 	/* Footer */
 	.footer {
 		position: relative;
@@ -296,20 +243,6 @@
 		border-top: 1px solid rgba(255, 255, 255, 0.05);
 	}
 
-	.footer p {
-		font-size: 0.9rem;
-		color: #666;
-		margin: 0;
-	}
-
-	.footer code {
-		font-family: 'JetBrains Mono', monospace;
-		color: #50fa7b;
-		background: rgba(50, 255, 150, 0.1);
-		padding: 2px 8px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-	}
 
 	/* Responsive */
 	@media (max-width: 640px) {
@@ -330,10 +263,6 @@
 
 		.terminal-section {
 			padding: 0 0 40px;
-		}
-
-		.features {
-			padding: 30px 16px 60px;
 		}
 	}
 </style>
