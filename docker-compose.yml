@@ -1,43 +1,20 @@
 services:
-  # PostgreSQL database (leaderboard storage only)
+  # PostgreSQL database for local development
   db:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: tmux-speedrun-db
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: tmux
-      POSTGRES_PASSWORD: tmux
-      POSTGRES_DB: tmux_speedrun
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tmux -d tmux_speedrun"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # Application (for production deployment)
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: tmux-speedrun-app
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      DATABASE_URL: postgresql://tmux:tmux@db:5432/tmux_speedrun
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
-      ORIGIN: ${ORIGIN:-http://localhost:3000}
-      NODE_ENV: production
-    depends_on:
-      db:
-        condition: service_healthy
-    profiles:
-      - production
 
 volumes:
   postgres_data:
