@@ -58,7 +58,6 @@
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
-		// Handle Ctrl+Enter / Cmd+Enter to toggle maximize (before stopping propagation)
 		if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
 			event.preventDefault();
 			event.stopPropagation();

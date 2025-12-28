@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { CHALLENGES, getAllChallengesWithMeta, getDifficultyLabel } from '$lib/data/challenges';
+	import {
+		getAllChallengesWithMeta,
+		getDifficultyLabel,
+		getChallengeByIndex,
+		getChallengeCount,
+		getMaxChallengeIndex
+	} from '$lib/data/challenges';
 	import Manpage from './Manpage.svelte';
 
 	type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man';
@@ -37,13 +43,14 @@
 	let isMaximized = $state(false);
 
 	// Leaderboard mock data (will be fetched from API later)
-	const mockLeaderboard: Record<string, LeaderboardEntry[]> = {
-		'basics-101': [
+	// Keys are 0-based challenge indices
+	const mockLeaderboard: Record<number, LeaderboardEntry[]> = {
+		0: [
 			{ rank: 1, username: 'speedster', time: '12.3s' },
 			{ rank: 2, username: 'tmux_pro', time: '14.7s' },
 			{ rank: 3, username: 'terminal_king', time: '18.2s' }
 		],
-		'pane-master': [
+		1: [
 			{ rank: 1, username: 'pane_wizard', time: '25.1s' },
 			{ rank: 2, username: 'split_master', time: '28.4s' }
 		]
@@ -85,8 +92,8 @@
 		addOutput('──────────────────', 'header');
 		addOutput('');
 		addOutput('  tsr ls              List all available challenges');
-		addOutput('  tsr lb <id>         View leaderboard for a challenge');
-		addOutput('  tsr start <id>      Start a challenge');
+		addOutput('  tsr lb <num>        View leaderboard for a challenge');
+		addOutput('  tsr start <num>     Start a challenge (e.g. tsr start 0)');
 		addOutput('  man tmux            Show tmux command reference');
 		addOutput('  clear               Clear the terminal');
 		addOutput('  help                Show this help message');
@@ -100,30 +107,40 @@
 		selectedIndex = 0;
 		ignoreNextEnter = true; // Prevent immediate Enter key from starting challenge
 		listData = challenges.map((c) => ({
-			id: c.id,
-			display: `${c.name} [${getDifficultyLabel(c.difficulty)}] - ${c.commandCount} commands`
+			id: String(c.index), // Use 0-based index for routing
+			display: `Challenge ${c.index}  [${getDifficultyLabel(c.difficulty)}]  ${c.commandCount} commands`
 		}));
 
 		addOutput('');
-		addOutput('  Use ↑/↓ or j/k to navigate, Enter to start, q to quit');
+		addOutput(' Enter to start, q to quit');
 		addOutput('');
 	}
 
-	function showLeaderboard(challengeId: string) {
-		const challenge = CHALLENGES.find((c) => c.id === challengeId);
-		if (!challenge) {
-			addOutput(`Error: Challenge '${challengeId}' not found.`, 'error');
-			addOutput('Use "tsr ls" to see available challenges.', 'error');
+	function showLeaderboard(challengeIndex: string | number) {
+		const numericIndex = typeof challengeIndex === 'string' 
+			? parseInt(challengeIndex, 10) 
+			: challengeIndex;
+
+		if (Number.isNaN(numericIndex) || numericIndex < 0 || numericIndex > getMaxChallengeIndex()) {
+			addOutput(`Error: Invalid challenge ID '${challengeIndex}'.`, 'error');
+			addOutput(`Use "tsr ls" to see available challenges (0-${getMaxChallengeIndex()}).`, 'error');
 			return;
 		}
 
-		const entries = mockLeaderboard[challengeId] || [];
+		const challenge = getChallengeByIndex(numericIndex);
+		if (!challenge) {
+			addOutput(`Error: Challenge ${numericIndex} not found.`, 'error');
+			return;
+		}
+
+		// Use index as key for mock data lookup
+		const entries = mockLeaderboard[numericIndex] || [];
 		historyLengthBeforeMode = history.length; // Track before adding output
 		mode = 'leaderboard';
-		leaderboardData = { challengeId, entries };
+		leaderboardData = { challengeId: String(numericIndex), entries };
 
 		addOutput('');
-		addOutput(`LEADERBOARD: ${challenge.name.toUpperCase()}`, 'header');
+		addOutput(`LEADERBOARD: CHALLENGE ${numericIndex}`, 'header');
 		addOutput('─'.repeat(40), 'header');
 		addOutput('');
 
@@ -148,16 +165,25 @@
 		mode = 'man';
 	}
 
-	function startChallenge(challengeId: string) {
-		const challenge = CHALLENGES.find((c) => c.id === challengeId);
-		if (!challenge) {
-			addOutput(`Error: Challenge '${challengeId}' not found.`, 'error');
-			addOutput('Use "tsr ls" to see available challenges.', 'error');
+	function startChallenge(challengeIndex: string | number) {
+		const numericIndex = typeof challengeIndex === 'string' 
+			? parseInt(challengeIndex, 10) 
+			: challengeIndex;
+
+		if (Number.isNaN(numericIndex) || numericIndex < 0 || numericIndex > getMaxChallengeIndex()) {
+			addOutput(`Error: Invalid challenge ID '${challengeIndex}'.`, 'error');
+			addOutput(`Use "tsr ls" to see available challenges (0-${getMaxChallengeIndex()}).`, 'error');
 			return;
 		}
 
-		addOutput(`Starting challenge: ${challenge.name}...`);
-		goto(`/challenge/${challengeId}`);
+		const challenge = getChallengeByIndex(numericIndex);
+		if (!challenge) {
+			addOutput(`Error: Challenge ${numericIndex} not found.`, 'error');
+			return;
+		}
+
+		addOutput(`Starting Challenge ${numericIndex}...`);
+		goto(`/challenge/${numericIndex}`);
 	}
 
 	function processCommand(cmd: string) {
@@ -198,24 +224,24 @@
 			}
 
 			if (subcommand === 'lb') {
-				const challengeId = args[1];
-				if (!challengeId) {
-					addOutput('Usage: tsr lb <challenge-id>', 'error');
-					addOutput('Example: tsr lb basics-101', 'error');
+				const challengeNum = args[1];
+				if (!challengeNum) {
+					addOutput('Usage: tsr lb <number>', 'error');
+					addOutput('Example: tsr lb 1', 'error');
 					return;
 				}
-				showLeaderboard(challengeId);
+				showLeaderboard(challengeNum);
 				return;
 			}
 
 			if (subcommand === 'start') {
-				const challengeId = args[1];
-				if (!challengeId) {
-					addOutput('Usage: tsr start <challenge-id>', 'error');
-					addOutput('Example: tsr start basics-101', 'error');
+				const challengeNum = args[1];
+				if (!challengeNum) {
+					addOutput('Usage: tsr start <number>', 'error');
+					addOutput('Example: tsr start 1', 'error');
 					return;
 				}
-				startChallenge(challengeId);
+				startChallenge(challengeNum);
 				return;
 			}
 

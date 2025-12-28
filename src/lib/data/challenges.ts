@@ -8,9 +8,6 @@ import type { TmuxCommand } from './tmux-commands';
 import { getCommandByName } from './tmux-commands';
 
 export type Challenge = {
-	id: string;
-	name: string;
-	description: string;
 	difficulty: number; // 0-30 scale
 	commandNames: string[]; // References to TmuxCommand.name
 };
@@ -23,37 +20,22 @@ export type ChallengeWithCommands = Challenge & {
 // Hardcoded challenges - will be moved to database later
 export const CHALLENGES: Challenge[] = [
 	{
-		id: 'basics-101',
-		name: 'Basics 101',
-		description: 'Learn the fundamental tmux commands: create sessions, windows, and navigate between them.',
 		difficulty: 5,
 		commandNames: ['new-session', 'new-window', 'next-window', 'previous-window', 'detach']
 	},
 	{
-		id: 'pane-master',
-		name: 'Pane Master',
-		description: 'Master pane management: split, navigate, and resize panes efficiently.',
 		difficulty: 12,
 		commandNames: ['split-horizontal', 'split-vertical', 'select-pane', 'kill-pane', 'toggle-zoom']
 	},
 	{
-		id: 'window-warrior',
-		name: 'Window Warrior',
-		description: 'Become proficient with window operations and fast navigation.',
 		difficulty: 15,
 		commandNames: ['new-window', 'select-window', 'rename-window', 'kill-window', 'list-windows', 'last-window']
 	},
 	{
-		id: 'session-ninja',
-		name: 'Session Ninja',
-		description: 'Handle multiple sessions like a pro: create, switch, and manage sessions.',
 		difficulty: 18,
 		commandNames: ['new-session', 'attach-session', 'list-sessions', 'kill-session', 'detach']
 	},
 	{
-		id: 'speed-demon',
-		name: 'Speed Demon',
-		description: 'Put it all together in a high-intensity challenge using all core tmux features.',
 		difficulty: 25,
 		commandNames: [
 			'new-session',
@@ -70,12 +52,24 @@ export const CHALLENGES: Challenge[] = [
 ];
 
 // Helper functions
-export function getChallengeById(id: string): Challenge | undefined {
-	return CHALLENGES.find((c) => c.id === id);
+
+/**
+ * Get a challenge by its numerical index (0-based).
+ * challenge/0 returns CHALLENGES[0], challenge/1 returns CHALLENGES[1], etc.
+ */
+export function getChallengeByIndex(index: number): Challenge | undefined {
+	if (index < 0 || index >= CHALLENGES.length) {
+		return undefined;
+	}
+
+	return CHALLENGES[index];
 }
 
-export function getChallengeWithCommands(id: string): ChallengeWithCommands | undefined {
-	const challenge = getChallengeById(id);
+/**
+ * Get challenge with commands by numerical index (0-based).
+ */
+export function getChallengeWithCommandsByIndex(index: number): ChallengeWithCommands | undefined {
+	const challenge = getChallengeByIndex(index);
 	if (!challenge) {
 		return undefined;
 	}
@@ -91,9 +85,24 @@ export function getChallengeWithCommands(id: string): ChallengeWithCommands | un
 	};
 }
 
-export function getAllChallengesWithMeta(): Array<Challenge & { commandCount: number }> {
-	return CHALLENGES.map((challenge) => ({
+/**
+ * Get the total number of available challenges.
+ */
+export function getChallengeCount(): number {
+	return CHALLENGES.length;
+}
+
+/**
+ * Get the maximum valid challenge index (0-based).
+ */
+export function getMaxChallengeIndex(): number {
+	return CHALLENGES.length - 1;
+}
+
+export function getAllChallengesWithMeta(): Array<Challenge & { commandCount: number; index: number }> {
+	return CHALLENGES.map((challenge, index) => ({
 		...challenge,
+		index,
 		commandCount: challenge.commandNames.length
 	}));
 }
