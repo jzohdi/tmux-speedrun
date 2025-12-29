@@ -66,6 +66,30 @@ function formatPaneList(panes: Pane[], focusedId: string): string {
 		.join('\n');
 }
 
+/**
+ * Format session list output (simulates 'tmux ls' / 'tmux list-sessions').
+ * Format: "0: 2 windows (created Mon Dec 29 13:37:03 2025) (attached)"
+ */
+function formatSessionList(windows: TmuxWindow[]): string {
+	const now = new Date();
+	const dateStr = now.toLocaleString('en-US', {
+		weekday: 'short',
+		month: 'short',
+		day: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		year: 'numeric',
+		hour12: false
+	});
+
+	// In our simulation, we have a single session (session 0) that is always attached
+	const windowCount = windows.length;
+	const windowWord = windowCount === 1 ? 'window' : 'windows';
+
+	return `0: ${windowCount} ${windowWord} (created ${dateStr}) (attached)`;
+}
+
 // ============================================================================
 // STORE OPTIONS
 // ============================================================================
@@ -158,6 +182,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		switch (type) {
 			case 'pane-list':
 				return formatPaneList(allPanesInActiveWindow, focusedPaneId);
+			case 'session-list':
+				return formatSessionList(windows);
 			//   case 'window-list':
 			// 	return formatWindowList(windows, activeWindowIndex);
 			default:

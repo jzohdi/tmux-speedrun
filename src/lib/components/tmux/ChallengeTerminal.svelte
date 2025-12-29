@@ -112,6 +112,7 @@
 		if (!inputModeCommand) {
 			inputModeCommand = null;
 			inputModeValue = '';
+			restoreFocusAfterInputMode();
 			return;
 		}
 
@@ -120,6 +121,7 @@
 			console.error(`Invalid command name: ${inputModeCommand.name}`);
 			inputModeCommand = null;
 			inputModeValue = '';
+			restoreFocusAfterInputMode();
 			return;
 		}
 
@@ -138,9 +140,10 @@
 		// Emit the command signal for challenge tracking
 		tmux.executeTmuxCommand(commandName, trimmedValue);
 
-		// Reset input mode
+		// Reset input mode and restore focus to terminal
 		inputModeCommand = null;
 		inputModeValue = '';
+		restoreFocusAfterInputMode();
 	}
 
 	/**
@@ -149,6 +152,17 @@
 	function handleStatusBarInputCancel(): void {
 		inputModeCommand = null;
 		inputModeValue = '';
+		restoreFocusAfterInputMode();
+	}
+
+	/**
+	 * Restore focus to the terminal container after exiting input mode.
+	 * Uses requestAnimationFrame to ensure DOM updates are complete.
+	 */
+	function restoreFocusAfterInputMode(): void {
+		requestAnimationFrame(() => {
+			containerRef?.focus();
+		});
 	}
 
 	/**

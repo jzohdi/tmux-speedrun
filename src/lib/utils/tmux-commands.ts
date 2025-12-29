@@ -142,7 +142,7 @@ export type CommandResult = {
 		data?: Record<string, unknown>;
 	};
 	/** Type of output to generate (handled by store) */
-	generateOutput?: 'pane-list' | 'window-list';
+	generateOutput?: 'pane-list' | 'window-list' | 'session-list';
 	/**
 	 * Special exit behavior:
 	 * - 'close-pane-or-detach': If multiple panes, close current pane; otherwise detach from tmux
@@ -163,6 +163,13 @@ export type CommandDefinition = {
 	name: CommandIdType;
 	/** Optional aliases - must also be CommandIdType values */
 	aliases?: CommandIdType[];
+	/**
+	 * Optional match patterns for text input.
+	 * If provided, these patterns are used to match user input instead of the name.
+	 * Useful for commands where the typed text differs from the canonical name.
+	 * Example: name='list-sessions', matchPatterns=['tmux list-sessions', 'tmux ls']
+	 */
+	matchPatterns?: string[];
 	/** Description for help text */
 	description: string;
 	/** The handler function */
@@ -216,33 +223,65 @@ function parseCommand(command: string): string[] {
 }
 
 /**
+ * Check if a pattern matches the input command.
+ */
+function matchesPattern(
+	normalizedCommand: string,
+	pattern: string,
+	matchMode: 'exact' | 'prefix'
+): boolean {
+	const normalizedPattern = pattern.toLowerCase();
+
+	if (matchMode === 'exact') {
+		return (
+			normalizedCommand === normalizedPattern ||
+			normalizedCommand.startsWith(normalizedPattern + ' ')
+		);
+	}
+
+	// prefix mode
+	return normalizedCommand.startsWith(normalizedPattern);
+}
+
+/**
  * Find a matching command definition.
  * Returns the definition and the canonical command name.
  */
 function findCommand(fullCommand: string): { definition: CommandDefinition } | null {
 	const normalizedCommand = fullCommand.trim().toLowerCase();
 
-	// Sort by name length (descending) to match longer commands first
-	const sortedRegistry = [...commandRegistry].sort((a, b) => b.name.length - a.name.length);
+	// Sort by pattern length (descending) to match longer patterns first
+	// This ensures "tmux list-sessions" matches before "tmux ls"
+	const sortedRegistry = [...commandRegistry].sort((a, b) => {
+		const aMaxLen = Math.max(a.name.length, ...(a.matchPatterns?.map((p) => p.length) ?? []));
+		const bMaxLen = Math.max(b.name.length, ...(b.matchPatterns?.map((p) => p.length) ?? []));
+
+		return bMaxLen - aMaxLen;
+	});
 
 	for (const def of sortedRegistry) {
 		const matchMode = def.matchMode ?? 'exact';
 
+		// If matchPatterns is provided, use those instead of name/aliases
+		if (def.matchPatterns && def.matchPatterns.length > 0) {
+			for (const pattern of def.matchPatterns) {
+				if (matchesPattern(normalizedCommand, pattern, matchMode)) {
+					return { definition: def };
+				}
+			}
+			// If matchPatterns is defined, don't fall back to name matching
+			continue;
+		}
+
 		// Check main name
-		if (matchMode === 'exact') {
-			if (normalizedCommand === def.name || normalizedCommand.startsWith(def.name + ' ')) {
-				return { definition: def };
-			}
-		} else if (matchMode === 'prefix') {
-			if (normalizedCommand.startsWith(def.name)) {
-				return { definition: def };
-			}
+		if (matchesPattern(normalizedCommand, def.name, matchMode)) {
+			return { definition: def };
 		}
 
 		// Check aliases
 		if (def.aliases) {
 			for (const alias of def.aliases) {
-				if (normalizedCommand === alias || normalizedCommand.startsWith(alias + ' ')) {
+				if (matchesPattern(normalizedCommand, alias, matchMode)) {
 					return { definition: def };
 				}
 			}
@@ -333,7 +372,14 @@ registerCommand({
 		const commands = getRegisteredCommands();
 		const helpText = commands
 			.map((cmd) => {
+				// Show match patterns if available, otherwise show name with aliases
+				if (cmd.matchPatterns && cmd.matchPatterns.length > 0) {
+					const patterns = cmd.matchPatterns.join(', ');
+
+					return `  ${patterns} - ${cmd.description}`;
+				}
 				const aliases = cmd.aliases ? ` (aliases: ${cmd.aliases.join(', ')})` : '';
+
 				return `  ${cmd.name}${aliases} - ${cmd.description}`;
 			})
 			.join('\n');
@@ -368,6 +414,21 @@ registerCommand({
 	handler: () => ({
 		handled: true,
 		generateOutput: 'pane-list'
+	})
+});
+
+/**
+ * List sessions command (tmux-style).
+ * Supports: tmux list-sessions, tmux ls
+ * Uses LIST_SESSIONS as canonical name to match challenge expectations.
+ */
+registerCommand({
+	name: CommandId.LIST_SESSIONS,
+	matchPatterns: ['tmux list-sessions', 'tmux ls'],
+	description: 'List all tmux sessions',
+	handler: () => ({
+		handled: true,
+		generateOutput: 'session-list'
 	})
 });
 

@@ -43,7 +43,7 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 	},
 	{
 		name: 'list-sessions',
-		shortcut: 'tmux ls',
+		shortcut: 'tmux ls, tmux list-sessions',
 		description: 'List all active tmux sessions',
 		difficulty: 'beginner',
 		category: 'session'

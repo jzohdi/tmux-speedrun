@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChallengeTerminal, type TmuxSignal, type CommandIdType } from '$lib/components/tmux';
+	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
 	import PromptBox from '$lib/components/PromptBox.svelte';
 	import { createChallengeStore } from '$lib/client/challenge-store.svelte';
 	import type { PageData } from './$types';
@@ -40,8 +40,10 @@
 	 * Handle signals from the terminal.
 	 *
 	 * The terminal emits structured signals including:
-	 * - { type: 'command-executed', commandName: 'tmux list-panes', command: 'lsp' }
-	 *   Recognized commands with type-safe commandName (from CommandId)
+	 * - { type: 'command-executed', command: 'rename-window:my-name', commandName: 'rename-window' }
+	 *   Recognized commands with:
+	 *     - command: Full answer including input value for input commands
+	 *     - commandName: Type-safe command ID (from CommandId)
 	 * - { type: 'command', command: 'unknown-cmd' }
 	 *   Unrecognized commands (raw string, not type-safe)
 	 * - { type: 'tmux-entered' } when user types 'tmux'
@@ -49,14 +51,17 @@
 	async function handleSignal(signal: TmuxSignal): Promise<void> {
 		// Process recognized command signals for challenge verification
 		if (signal.type === 'command-executed') {
-			const commandName: CommandIdType | undefined = signal.commandName;
-			if (!commandName || challenge.status !== 'active') {
+			// Use signal.command which contains the full answer including input value
+			// For simple commands: "split-vertical"
+			// For input commands: "rename-window:swift-tiger-42"
+			const answer = signal.command;
+			if (!answer || challenge.status !== 'active') {
 				return;
 			}
 
-			// Submit the canonical command name for challenge verification
-			// This is type-safe: commandName is guaranteed to be a valid CommandIdType
-			const wasCorrect = await challenge.submitAnswer(commandName);
+			// Submit the full command string for challenge verification
+			// This includes the input value for commands that require it
+			const wasCorrect = await challenge.submitAnswer(answer);
 
 			// Clear input regardless of result
 			terminalRef?.clearInput();
