@@ -128,6 +128,26 @@
 
 <svelte:head>
 	<title>Challenge {data.challengeIndex} | tmux-speedrun</title>
+	<meta
+		name="description"
+		content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings."
+	/>
+	
+	<!-- Open Graph -->
+	<meta property="og:type" content="website" />
+	<meta property="og:site_name" content="tmux-speedrun" />
+	<meta property="og:title" content="Challenge {data.challengeIndex} | tmux-speedrun" />
+	<meta property="og:description" content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings." />
+	<meta property="og:image" content="/og-image.png" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	
+	<!-- Twitter Card -->
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="Challenge {data.challengeIndex} | tmux-speedrun" />
+	<meta name="twitter:description" content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings." />
+	<meta name="twitter:image" content="/og-image.png" />
+	
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link

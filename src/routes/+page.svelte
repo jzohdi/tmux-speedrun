@@ -3,11 +3,31 @@
 </script>
 
 <svelte:head>
-	<title>tmux-speedrun</title>
+	<title>tmux-speedrun | Master tmux with timed challenges</title>
 	<meta
 		name="description"
 		content="Practice tmux commands in timed challenges. Compete on leaderboards and become a terminal power user."
 	/>
+	
+	<!-- Open Graph -->
+	<meta property="og:type" content="website" />
+	<meta property="og:site_name" content="tmux-speedrun" />
+	<meta property="og:title" content="tmux-speedrun | Master tmux with timed challenges" />
+	<meta property="og:description" content="Practice tmux commands in timed challenges. Compete on leaderboards and become a terminal power user." />
+	<meta property="og:image" content="/og-image.png" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	
+	<!-- Twitter Card -->
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="tmux-speedrun | Master tmux with timed challenges" />
+	<meta name="twitter:description" content="Practice tmux commands in timed challenges. Compete on leaderboards and become a terminal power user." />
+	<meta name="twitter:image" content="/og-image.png" />
+	
+	<!-- Additional SEO -->
+	<meta name="theme-color" content="#0d0d0d" />
+	<meta name="keywords" content="tmux, terminal, multiplexer, speedrun, challenges, keyboard shortcuts, cli, command line" />
+	
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link

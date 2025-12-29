@@ -130,6 +130,9 @@
 
 <svelte:head>
 	<title>{errorCode} | tmux-speedrun</title>
+	<meta name="description" content="Error {errorCode}: {errorMessage}" />
+	<meta name="robots" content="noindex, nofollow" />
+	
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
