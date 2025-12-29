@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import ChallengeTerminal from '$lib/components/ChallengeTerminal.svelte';
+	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
 	import PromptBox from '$lib/components/PromptBox.svelte';
 	import { createChallengeStore } from '$lib/client/challenge-store.svelte';
-	import { getCommandByName } from '$lib/data/tmux-commands';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -38,26 +37,26 @@
 	}
 
 	/**
-	 * Handle command submission from the terminal.
+	 * Handle signals from the terminal.
 	 *
-	 * We need to determine the canonical action from the user's input.
-	 * For input commands (rename-window, etc), the answer includes the required input.
+	 * The terminal emits structured signals including:
+	 * - { type: 'command', command: 'split-vertical' }
+	 * - { type: 'command', command: 'rename-window:swift-tiger-42' }
+	 * - { type: 'tmux-entered' } when user types 'tmux'
 	 */
-	async function handleCommand(command: string) {
-		if (challenge.status !== 'active') {
+	async function handleSignal(signal: TmuxSignal): Promise<void> {
+		// Only process command signals for challenge verification
+		if (signal.type !== 'command') {
 			return;
 		}
 
-		// Determine the canonical action from the command
-		const answer = parseCommandToAction(command);
-
-		if (!answer) {
-			// Invalid command format - show feedback
+		const command = signal.command;
+		if (!command || challenge.status !== 'active') {
 			return;
 		}
 
-		// Submit the answer
-		const wasCorrect = await challenge.submitAnswer(answer);
+		// Submit the answer - the terminal formats it correctly
+		const wasCorrect = await challenge.submitAnswer(command);
 
 		// Clear input regardless of result
 		terminalRef?.clearInput();
@@ -66,116 +65,6 @@
 		if (challenge.status === 'active') {
 			terminalRef?.focus();
 		}
-	}
-
-	/**
-	 * Parse a user command into a canonical action.
-	 *
-	 * This maps user input to the expected action format.
-	 * For input commands, combines the command with the required input.
-	 *
-	 * @param command - Raw user input
-	 * @returns Canonical action string or null if invalid
-	 */
-	function parseCommandToAction(command: string): string | null {
-		const trimmed = command.trim().toLowerCase();
-
-		// If there's a required input, the answer is "command:input"
-		if (challenge.currentRequiredInput) {
-			// User should have typed the required input as part of their command
-			// For rename commands, we expect them to use the rename command
-			// and the input should match
-			if (trimmed === challenge.currentRequiredInput) {
-				// User typed just the input - need to determine which command
-				// Based on the prompt, we can infer the command type
-				const prompt = challenge.currentPrompt ?? '';
-
-				if (prompt.toLowerCase().includes('window')) {
-					return `rename-window:${challenge.currentRequiredInput}`;
-				}
-				if (prompt.toLowerCase().includes('session')) {
-					return `rename-session:${challenge.currentRequiredInput}`;
-				}
-			}
-
-			// Check if they typed a command like "rename-window swift-tiger-42"
-			// or just the input value
-			const parts = trimmed.split(/\s+/);
-			const firstPart = parts[0];
-
-			// Check if first part is a known command
-			const cmd = getCommandByName(firstPart);
-
-			if (cmd && cmd.requiresInput) {
-				// They typed the command, use the required input from the challenge
-				return `${cmd.name}:${challenge.currentRequiredInput}`;
-			}
-
-			// If they typed exactly the required input
-			if (trimmed === challenge.currentRequiredInput.toLowerCase()) {
-				// Infer command from prompt
-				const prompt = challenge.currentPrompt ?? '';
-
-				if (prompt.toLowerCase().includes('window')) {
-					return `rename-window:${challenge.currentRequiredInput}`;
-				}
-				if (prompt.toLowerCase().includes('session')) {
-					return `rename-session:${challenge.currentRequiredInput}`;
-				}
-			}
-
-			// Try matching the input as-is
-			return `${inferCommandFromPrompt(challenge.currentPrompt ?? '')}:${challenge.currentRequiredInput}`;
-		}
-
-		// For simple commands, just use the command name
-		// Try to match to a known command
-		const cmd = getCommandByName(trimmed);
-
-		if (cmd) {
-			return cmd.name;
-		}
-
-		// Try common aliases/shortcuts
-		const aliases: Record<string, string> = {
-			'split-h': 'split-horizontal',
-			'split-v': 'split-vertical',
-			'splitv': 'split-vertical',
-			'splith': 'split-horizontal',
-			'split vertical': 'split-vertical',
-			'split horizontal': 'split-horizontal',
-			'next': 'next-window',
-			'prev': 'previous-window',
-			'kill': 'kill-pane',
-			'zoom': 'toggle-zoom',
-			'detach': 'detach',
-			'new': 'new-window',
-			'neww': 'new-window',
-			'news': 'new-session'
-		};
-
-		if (aliases[trimmed]) {
-			return aliases[trimmed];
-		}
-
-		// Return as-is and let the crypto layer validate
-		return trimmed;
-	}
-
-	/**
-	 * Infer command type from the prompt text.
-	 */
-	function inferCommandFromPrompt(prompt: string): string {
-		const lower = prompt.toLowerCase();
-
-		if (lower.includes('rename') && lower.includes('window')) {
-			return 'rename-window';
-		}
-		if (lower.includes('rename') && lower.includes('session')) {
-			return 'rename-session';
-		}
-
-		return 'unknown';
 	}
 
 	/**
@@ -264,21 +153,13 @@
 			</section>
 		{/if}
 
-		<!-- Required Input Hint (for rename commands) -->
-		{#if challenge.currentRequiredInput}
-			<div class="input-hint">
-				<span class="hint-label">Type:</span>
-				<code class="hint-value">{challenge.currentRequiredInput}</code>
-			</div>
-		{/if}
-
 		<!-- Terminal -->
 		<section class="terminal-section">
 			<ChallengeTerminal
 				bind:this={terminalRef}
-				onCommand={handleCommand}
+				onSignal={handleSignal}
 				disabled={!showInput}
-				placeholder={showInput ? 'Enter command...' : ''}
+				expectedInput={challenge.currentRequiredInput ?? undefined}
 			/>
 		</section>
 
@@ -481,36 +362,12 @@
 		}
 	}
 
-	.input-hint {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		padding: 12px 16px;
-		background: rgba(255, 184, 108, 0.1);
-		border-left: 3px solid #ffb86c;
-	}
-
-	.hint-label {
-		font-size: 13px;
-		color: #a0a0a0;
-	}
-
-	.hint-value {
-		font-family: 'JetBrains Mono', monospace;
-		font-size: 15px;
-		font-weight: 600;
-		color: #ffb86c;
-		background: rgba(255, 184, 108, 0.1);
-		padding: 4px 8px;
-		border-radius: 4px;
-	}
-
 	.prompt-section {
 		/* Container for prompt */
 	}
 
 	.terminal-section {
-		/* Container for terminal */
+		height: 500px;
 	}
 
 	/* Completion Overlay */

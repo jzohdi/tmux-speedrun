@@ -94,6 +94,7 @@
 		addOutput('  tsr ls              List all available challenges');
 		addOutput('  tsr lb <num>        View leaderboard for a challenge');
 		addOutput('  tsr start <num>     Start a challenge (e.g. tsr start 0)');
+		addOutput('  tsr free-play       Practice keybindings in free play mode');
 		addOutput('  man tmux            Show tmux command reference');
 		addOutput('  clear               Clear the terminal');
 		addOutput('  help                Show this help message');
@@ -245,8 +246,14 @@
 				return;
 			}
 
+			if (subcommand === 'free-play') {
+				addOutput('Entering free play mode...');
+				goto('/free-play');
+				return;
+			}
+
 			addOutput(`Unknown subcommand: ${subcommand}`, 'error');
-			addOutput('Available: ls, lb, start', 'error');
+			addOutput('Available: ls, lb, start, free-play', 'error');
 			return;
 		}
 
