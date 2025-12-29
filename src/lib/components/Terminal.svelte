@@ -2,11 +2,9 @@
 	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
-		getAllChallengesWithMeta,
-		getDifficultyLabel,
-		getChallengeByIndex,
-		getChallengeCount,
-		getMaxChallengeIndex
+		getAllChallengeMetadata,
+		getChallengePoolCount,
+		isValidChallengeId
 	} from '$lib/data/challenges';
 	import Manpage from './Manpage.svelte';
 
@@ -102,14 +100,14 @@
 	}
 
 	function showChallengeList() {
-		const challenges = getAllChallengesWithMeta();
+		const challenges = getAllChallengeMetadata();
 		historyLengthBeforeMode = history.length; // Track before adding output
 		mode = 'list';
 		selectedIndex = 0;
 		ignoreNextEnter = true; // Prevent immediate Enter key from starting challenge
 		listData = challenges.map((c) => ({
 			id: String(c.index), // Use 0-based index for routing
-			display: `Challenge ${c.index}  [${getDifficultyLabel(c.difficulty)}]  ${c.commandCount} commands`
+			display: `Challenge ${c.index}  [${c.difficultyLabel}]  ${c.instructionCount} commands`
 		}));
 
 		addOutput('');
@@ -122,15 +120,10 @@
 			? parseInt(challengeIndex, 10) 
 			: challengeIndex;
 
-		if (Number.isNaN(numericIndex) || numericIndex < 0 || numericIndex > getMaxChallengeIndex()) {
+		const maxIndex = getChallengePoolCount() - 1;
+		if (Number.isNaN(numericIndex) || !isValidChallengeId(numericIndex)) {
 			addOutput(`Error: Invalid challenge ID '${challengeIndex}'.`, 'error');
-			addOutput(`Use "tsr ls" to see available challenges (0-${getMaxChallengeIndex()}).`, 'error');
-			return;
-		}
-
-		const challenge = getChallengeByIndex(numericIndex);
-		if (!challenge) {
-			addOutput(`Error: Challenge ${numericIndex} not found.`, 'error');
+			addOutput(`Use "tsr ls" to see available challenges (0-${maxIndex}).`, 'error');
 			return;
 		}
 
@@ -171,15 +164,10 @@
 			? parseInt(challengeIndex, 10) 
 			: challengeIndex;
 
-		if (Number.isNaN(numericIndex) || numericIndex < 0 || numericIndex > getMaxChallengeIndex()) {
+		const maxIndex = getChallengePoolCount() - 1;
+		if (Number.isNaN(numericIndex) || !isValidChallengeId(numericIndex)) {
 			addOutput(`Error: Invalid challenge ID '${challengeIndex}'.`, 'error');
-			addOutput(`Use "tsr ls" to see available challenges (0-${getMaxChallengeIndex()}).`, 'error');
-			return;
-		}
-
-		const challenge = getChallengeByIndex(numericIndex);
-		if (!challenge) {
-			addOutput(`Error: Challenge ${numericIndex} not found.`, 'error');
+			addOutput(`Use "tsr ls" to see available challenges (0-${maxIndex}).`, 'error');
 			return;
 		}
 

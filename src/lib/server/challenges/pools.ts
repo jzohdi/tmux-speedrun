@@ -214,3 +214,43 @@ export function getAllChallengeCommands(): TmuxCommand[] {
 
 	return commands;
 }
+
+/**
+ * Get the difficulty label for a challenge based on its pool configuration.
+ *
+ * @param challengeId - The challenge level (0-5)
+ * @returns A human-readable difficulty label
+ */
+export function getChallengeDifficultyLabel(challengeId: number): string {
+	if (challengeId <= 0) {
+		return 'Beginner';
+	}
+	if (challengeId <= 2) {
+		return 'Intermediate';
+	}
+
+	return 'Advanced';
+}
+
+/**
+ * Challenge metadata for display in the UI.
+ */
+export type ChallengeMetadata = {
+	index: number;
+	instructionCount: number;
+	difficultyLabel: string;
+};
+
+/**
+ * Get metadata for all challenges.
+ * This is used by the terminal to display the challenge list.
+ *
+ * @returns Array of challenge metadata objects
+ */
+export function getAllChallengeMetadata(): ChallengeMetadata[] {
+	return CHALLENGE_POOLS.map((pool) => ({
+		index: pool.challengeId,
+		instructionCount: pool.instructionCount,
+		difficultyLabel: getChallengeDifficultyLabel(pool.challengeId)
+	}));
+}

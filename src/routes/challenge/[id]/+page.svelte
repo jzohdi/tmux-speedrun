@@ -106,7 +106,12 @@
 	// Start challenge on mount
 	onMount(async () => {
 		await challenge.start(data.challengeIndex);
-		terminalRef?.focus();
+		
+		// Focus the terminal after a short delay to ensure DOM is ready
+		// Use requestAnimationFrame to ensure the browser has rendered
+		requestAnimationFrame(() => {
+			terminalRef?.focus();
+		});
 
 		// Cleanup on unmount
 		return () => {

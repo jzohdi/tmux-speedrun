@@ -366,10 +366,15 @@
 
 	/**
 	 * Focus the terminal.
+	 * Uses tick() to ensure Svelte DOM updates are complete,
+	 * then requestAnimationFrame to ensure browser has rendered.
 	 */
 	export async function focus(): Promise<void> {
 		await tick();
-		containerRef?.focus();
+		// Use requestAnimationFrame to ensure browser has rendered
+		requestAnimationFrame(() => {
+			containerRef?.focus();
+		});
 	}
 
 	/**

@@ -33,9 +33,11 @@ export {
 	getMinInputCommands,
 	getChallengePoolCount,
 	isValidChallengeId,
-	getAllChallengeCommands
+	getAllChallengeCommands,
+	getChallengeDifficultyLabel,
+	getAllChallengeMetadata
 } from './pools';
-export type { PoolConfig } from './pools';
+export type { PoolConfig, ChallengeMetadata } from './pools';
 
 // Instruction generation
 export {

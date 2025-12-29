@@ -34,7 +34,12 @@ import {
 	type HistoryEntry
 } from '$lib/utils/pane-tree';
 
-import { executeCommand, type ExecuteResult, type CommandIdType } from '$lib/utils/tmux-commands';
+import {
+	executeCommand,
+	type ExecuteResult,
+	type CommandIdType,
+	type CommandResult
+} from '$lib/utils/tmux-commands';
 
 function formatPaneList(panes: Pane[], focusedId: string): string {
 	const currentPanes =
