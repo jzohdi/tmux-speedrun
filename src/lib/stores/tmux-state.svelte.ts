@@ -517,6 +517,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 	/**
 	 * Set a pane's mode.
+	 * When entering man mode, stores the current mode as previousMode.
+	 * When exiting man mode (via exitManMode), restores the previous mode.
 	 */
 	function setMode(mode: PaneMode, paneId?: string): void {
 		if (!activeWindow) {
@@ -527,8 +529,17 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		const oldPane = findPaneById(activeWindow.paneTree, targetPaneId);
 		const oldMode = oldPane?.mode;
 
-		const newTree = setPaneMode(activeWindow.paneTree, targetPaneId, mode);
-		updateActiveWindowTree(newTree);
+		// When entering man mode, store the current mode so we can restore it later
+		if (mode === 'man' && oldMode !== 'man') {
+			const treeWithPreviousMode = updatePane(activeWindow.paneTree, targetPaneId, {
+				previousMode: oldMode
+			});
+			const newTree = setPaneMode(treeWithPreviousMode, targetPaneId, mode);
+			updateActiveWindowTree(newTree);
+		} else {
+			const newTree = setPaneMode(activeWindow.paneTree, targetPaneId, mode);
+			updateActiveWindowTree(newTree);
+		}
 
 		if (oldMode !== mode) {
 			emitSignal('mode-changed', {
@@ -543,6 +554,44 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			} else if (mode === 'default' && oldMode === 'tmux') {
 				emitSignal('tmux-exited', { paneId: targetPaneId });
 			}
+		}
+	}
+
+	/**
+	 * Exit man mode and restore the previous mode.
+	 * If no previous mode is stored, defaults to 'default'.
+	 */
+	function exitManMode(paneId?: string): void {
+		if (!activeWindow) {
+			return;
+		}
+
+		const targetPaneId = paneId ?? state.focusedPaneId;
+		const pane = findPaneById(activeWindow.paneTree, targetPaneId);
+
+		if (!pane || pane.mode !== 'man') {
+			return;
+		}
+
+		// Restore the previous mode, default to 'default' if not set
+		const modeToRestore = pane.previousMode ?? 'default';
+
+		// Clear previousMode and set the restored mode
+		const treeWithClearedPrevious = updatePane(activeWindow.paneTree, targetPaneId, {
+			previousMode: undefined
+		});
+		const newTree = setPaneMode(treeWithClearedPrevious, targetPaneId, modeToRestore);
+		updateActiveWindowTree(newTree);
+
+		emitSignal('mode-changed', {
+			paneId: targetPaneId,
+			newMode: modeToRestore,
+			metadata: { oldMode: 'man' }
+		});
+
+		// Emit tmux-entered if restoring to tmux mode
+		if (modeToRestore === 'tmux') {
+			emitSignal('tmux-entered', { paneId: targetPaneId });
 		}
 	}
 
@@ -660,8 +709,14 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			return;
 		}
 
-		// In tmux mode, try the command registry first
+		// In tmux mode, handle special commands first, then try the command registry
 		if (focusedPane.mode === 'tmux') {
+			// Handle 'man tmux' command - switch to man mode while preserving tmux state
+			if (trimmedCommand === 'man tmux') {
+				setMode('man');
+				return;
+			}
+
 			const execution = executeCommand(trimmedCommand, focusedPane.id, focusedPane.mode);
 
 			if (execution && execution.result.handled) {
@@ -846,6 +901,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		addHistory,
 		clearHistory,
 		setMode,
+		exitManMode,
 		setInput,
 		updateFocusedPane,
 

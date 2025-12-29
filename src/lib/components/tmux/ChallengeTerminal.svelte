@@ -336,10 +336,10 @@
 
 	/**
 	 * Handle exiting man mode.
+	 * Uses exitManMode to restore the previous mode (tmux or default).
 	 */
 	function handleExitMan(paneId: string): void {
-		// Switch back to the previous mode (tmux if was in tmux before man)
-		tmux.setMode('default', paneId);
+		tmux.exitManMode(paneId);
 	}
 
 	// ========================================================================

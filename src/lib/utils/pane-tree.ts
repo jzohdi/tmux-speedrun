@@ -42,6 +42,8 @@ export type Pane = {
 	id: string;
 	history: HistoryEntry[];
 	mode: PaneMode;
+	/** The mode before entering man mode (for restoring when exiting man) */
+	previousMode?: PaneMode;
 	inputValue: string;
 };
 
