@@ -164,6 +164,31 @@
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
+		/**
+		 * Critical for nested splits:
+		 * Make each split child a flex container so the nested PaneGrid root
+		 * can size via flex (rather than relying on height: 100% through an
+		 * auto-sized parent, which breaks nested horizontal/column splits).
+		 */
+		display: flex;
+		flex-direction: column;
+	}
+
+	/**
+	 * Ensure the nested PaneGrid root element fills the split child.
+	 * 
+	 * Critical: Override height/width: 100% with auto.
+	 * When the parent (split-first/split-second) has no explicit height (it's
+	 * sized via flex-stretch in a row container), height: 100% doesn't resolve
+	 * and collapses. By setting height: auto, we let flex: 1 control the sizing.
+	 */
+	.split-first > :global(*),
+	.split-second > :global(*) {
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
+		height: auto;
+		width: auto;
 	}
 
 	/* Divider between panes */

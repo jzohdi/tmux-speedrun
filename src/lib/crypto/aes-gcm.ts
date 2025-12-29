@@ -25,7 +25,9 @@ export const AES_GCM_NONCE_SIZE = 12;
  * @param keyBytes - 32 bytes (256 bits) of key material
  * @returns CryptoKey for AES-GCM operations
  */
-export async function importAesGcmKey(keyBytes: ArrayBuffer | Uint8Array): Promise<CryptoKey> {
+export async function importAesGcmKey(
+	keyBytes: ArrayBuffer | Uint8Array<ArrayBuffer>
+): Promise<CryptoKey> {
 	return crypto.subtle.importKey(
 		'raw',
 		keyBytes,
@@ -44,10 +46,10 @@ export async function importAesGcmKey(keyBytes: ArrayBuffer | Uint8Array): Promi
  * @returns Ciphertext with authentication tag appended
  */
 export async function aesGcmEncrypt(
-	key: CryptoKey | ArrayBuffer | Uint8Array,
-	nonce: Uint8Array,
-	plaintext: Uint8Array
-): Promise<Uint8Array> {
+	key: CryptoKey | ArrayBuffer | Uint8Array<ArrayBuffer>,
+	nonce: Uint8Array<ArrayBuffer>,
+	plaintext: Uint8Array<ArrayBuffer>
+): Promise<Uint8Array<ArrayBuffer>> {
 	// Import key if raw bytes provided
 	const cryptoKey = key instanceof CryptoKey ? key : await importAesGcmKey(key);
 
@@ -73,10 +75,10 @@ export async function aesGcmEncrypt(
  * @throws Error if authentication fails (wrong key or tampered data)
  */
 export async function aesGcmDecrypt(
-	key: CryptoKey | ArrayBuffer | Uint8Array,
-	nonce: Uint8Array,
-	ciphertext: Uint8Array
-): Promise<Uint8Array> {
+	key: CryptoKey | ArrayBuffer | Uint8Array<ArrayBuffer>,
+	nonce: Uint8Array<ArrayBuffer>,
+	ciphertext: Uint8Array<ArrayBuffer>
+): Promise<Uint8Array<ArrayBuffer>> {
 	// Import key if raw bytes provided
 	const cryptoKey = key instanceof CryptoKey ? key : await importAesGcmKey(key);
 
@@ -101,7 +103,7 @@ export async function aesGcmDecrypt(
  * @returns Object with nonceB64 and ciphertextB64
  */
 export async function encryptString(
-	key: CryptoKey | ArrayBuffer | Uint8Array,
+	key: CryptoKey | ArrayBuffer | Uint8Array<ArrayBuffer>,
 	plaintext: string
 ): Promise<{ nonceB64: string; ciphertextB64: string }> {
 	const { bytesToBase64 } = await import('./utils');
@@ -127,7 +129,7 @@ export async function encryptString(
  * @throws Error if authentication fails
  */
 export async function decryptString(
-	key: CryptoKey | ArrayBuffer | Uint8Array,
+	key: CryptoKey | ArrayBuffer | Uint8Array<ArrayBuffer>,
 	nonceB64: string,
 	ciphertextB64: string
 ): Promise<string> {
@@ -145,7 +147,7 @@ export async function decryptString(
  *
  * @returns 12-byte random nonce
  */
-export function generateNonce(): Uint8Array {
+export function generateNonce(): Uint8Array<ArrayBuffer> {
 	return randomBytes(AES_GCM_NONCE_SIZE);
 }
 

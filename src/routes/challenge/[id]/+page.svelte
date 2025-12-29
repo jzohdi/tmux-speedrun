@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
 	import PromptBox from '$lib/components/PromptBox.svelte';
@@ -118,11 +118,12 @@
 			terminalRef?.focus();
 		});
 
-		// Cleanup on unmount
-		return () => {
-			challenge.reset();
-		};
 	});
+
+	onDestroy(() => {
+		challenge.reset();
+	});
+
 </script>
 
 <svelte:head>
@@ -389,10 +390,6 @@
 			opacity: 1;
 			transform: translateY(0);
 		}
-	}
-
-	.prompt-section {
-		/* Container for prompt */
 	}
 
 	.terminal-section {

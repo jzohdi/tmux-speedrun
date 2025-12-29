@@ -10,11 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-	randomBytes,
-	bytesToBase64,
-	base64ToBytes
-} from '$lib/crypto';
+import { randomBytes, bytesToBase64, base64ToBytes } from '$lib/crypto';
 import {
 	SESSION_SALT_SIZE,
 	generateSessionSalt,
@@ -280,7 +276,10 @@ describe('Encrypt All Steps', () => {
 			}
 		];
 
-		const keys = await deriveKeyChain(k0, instructions.map((i) => i.expectedAction));
+		const keys = await deriveKeyChain(
+			k0,
+			instructions.map((i) => i.expectedAction)
+		);
 		const encryptedSteps = await encryptAllSteps(keys, instructions);
 
 		const decrypted = await decryptStep(keys[0], encryptedSteps[0]);
@@ -296,7 +295,12 @@ describe('Encrypt All Steps', () => {
 
 		const keys = [randomBytes(32)]; // Only 1 key for 2 instructions
 
-		await expect(encryptAllSteps(keys.map((k) => k.buffer), instructions)).rejects.toThrow();
+		await expect(
+			encryptAllSteps(
+				keys.map((k) => k.buffer),
+				instructions
+			)
+		).rejects.toThrow();
 	});
 });
 
@@ -438,12 +442,7 @@ describe('End-to-End Challenge Flow', () => {
 		// Wrong proof
 		const wrongProof = bytesToBase64(randomBytes(32));
 
-		const isValid = await validateChallenge(
-			serverSecret,
-			sessionId,
-			encryptedProof,
-			wrongProof
-		);
+		const isValid = await validateChallenge(serverSecret, sessionId, encryptedProof, wrongProof);
 
 		expect(isValid).toBe(false);
 	});
@@ -538,4 +537,3 @@ describe('End-to-End Challenge Flow', () => {
 		await expect(decryptStep(k0, encryptedSteps[2])).rejects.toThrow();
 	});
 });
-

@@ -838,9 +838,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				}
 
 				// Emit command-executed signal for challenge tracking (type-safe)
+				// Use commandName as the answer (canonical name like 'list-sessions')
+				// NOT trimmedCommand (which is what user typed like 'tmux ls')
 				emitSignal('command-executed', {
 					commandName,
-					command: trimmedCommand,
+					command: commandName,
 					paneId: focusedPane.id
 				});
 

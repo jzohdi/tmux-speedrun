@@ -265,7 +265,7 @@ export class ChallengeSession {
  */
 async function deriveK0(
 	sharedSecret: ArrayBuffer,
-	sessionSalt: Uint8Array
+	sessionSalt: Uint8Array<ArrayBuffer>
 ): Promise<ArrayBuffer> {
 	return hkdf(sharedSecret, sessionSalt, 'k0', 32);
 }

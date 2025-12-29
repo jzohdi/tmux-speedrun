@@ -24,7 +24,7 @@ import { stringToBytes } from '$lib/crypto';
  * @returns Session secret as Uint8Array
  * @throws Error if SESSION_SECRET is not set or too short
  */
-export function getSessionSecret(): Uint8Array {
+export function getSessionSecret(): Uint8Array<ArrayBuffer> {
 	const secret = env.SESSION_SECRET;
 
 	if (!secret) {
