@@ -4,6 +4,7 @@
 	import type { TmuxSignal, PaneMode } from '$lib/utils/pane-tree';
 	import { isPrefixKey, lookupKeybinding } from '$lib/data/keybindings';
 	import { getCommandByName, type TmuxCommand } from '$lib/data/tmux-commands';
+	import { CommandId, type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';
 	import TabBar from './TabBar.svelte';
 	import PaneGrid from './PaneGrid.svelte';
 	import StatusBar from './StatusBar.svelte';
@@ -106,6 +107,14 @@
 				return;
 			}
 
+			// Validate the command name is a valid CommandIdType
+			if (!isValidCommandId(inputModeCommand.name)) {
+				console.error(`Invalid command name: ${inputModeCommand.name}`);
+				inputModeCommand = null;
+				inputModeValue = '';
+				return;
+			}
+
 			// Execute the command with the input value
 			tmux.executeTmuxCommand(inputModeCommand.name, value);
 
@@ -152,8 +161,9 @@
 
 	/**
 	 * Handle a detected keybinding command.
+	 * @param commandName - The type-safe command ID from the keybinding
 	 */
-	async function handleKeybinding(commandName: string): Promise<void> {
+	async function handleKeybinding(commandName: CommandIdType): Promise<void> {
 		tmux.deactivatePrefix();
 
 		if (disabled) {
@@ -182,48 +192,49 @@
 
 	/**
 	 * Execute commands that affect local terminal state.
+	 * @param commandName - The type-safe command ID
 	 */
-	function executeLocalCommand(commandName: string): void {
+	function executeLocalCommand(commandName: CommandIdType): void {
 		switch (commandName) {
 			// Window commands
-			case 'new-window':
+			case CommandId.NEW_WINDOW:
 				tmux.createWindow();
 				break;
-			case 'next-window':
+			case CommandId.NEXT_WINDOW:
 				tmux.nextWindow();
 				break;
-			case 'previous-window':
+			case CommandId.PREVIOUS_WINDOW:
 				tmux.previousWindow();
 				break;
-			case 'kill-window':
+			case CommandId.KILL_WINDOW:
 				tmux.closeWindow();
 				break;
-			case 'list-windows':
+			case CommandId.LIST_WINDOWS:
 				// Show window list - could be a feedback message or special UI
 				showFeedback(`Windows: ${tmux.windows.map((w, i) => `${i}:${w.name}`).join(', ')}`);
 				break;
 
 			// Pane commands
-			case 'split-horizontal':
+			case CommandId.SPLIT_HORIZONTAL:
 				tmux.splitPane('horizontal');
 				break;
-			case 'split-vertical':
+			case CommandId.SPLIT_VERTICAL:
 				tmux.splitPane('vertical');
 				break;
-			case 'kill-pane':
+			case CommandId.KILL_PANE:
 				tmux.closePane();
 				break;
 
 			// Navigation
-			case 'select-pane':
+			case CommandId.SELECT_PANE:
 				// This is handled via arrow key direction in the keybinding
 				// For now, just cycle to next pane
 				tmux.focusNextPane();
 				break;
-			case 'last-pane':
+			case CommandId.LAST_PANE:
 				tmux.focusLastPane();
 				break;
-			case 'last-window':
+			case CommandId.LAST_WINDOW:
 				// Toggle between last two windows
 				if (tmux.windowCount > 1) {
 					tmux.previousWindow();
@@ -231,12 +242,12 @@
 				break;
 
 			// Select window by number (0-9)
-			case 'select-window':
+			case CommandId.SELECT_WINDOW:
 				// Handled specially - need to know which number was pressed
 				break;
 
 			// Session commands
-			case 'detach':
+			case CommandId.DETACH:
 				// Exit tmux mode back to default
 				tmux.setMode('default');
 				tmux.addHistory({
@@ -265,7 +276,7 @@
 		tmux.deactivatePrefix();
 
 		// Also emit the select-pane command
-		tmux.executeTmuxCommand('select-pane');
+		tmux.executeTmuxCommand(CommandId.SELECT_PANE);
 	}
 
 	/**

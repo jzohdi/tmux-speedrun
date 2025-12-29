@@ -1,11 +1,106 @@
 /**
- * Tmux Text Command System
+ * Tmux Command System
  *
- * A registry-based architecture for handling text commands in tmux mode.
- * This allows for clean, extensible command handling with varying side effects.
+ * SINGLE SOURCE OF TRUTH for all command identifiers used in the application.
+ * Both text commands (typed in input) and prefix commands (keybindings) use these IDs.
+ *
+ * This ensures type safety across:
+ * - Command registration
+ * - Keybinding definitions
+ * - Signal emission
+ * - Challenge verification
  */
 
 import type { PaneMode } from './pane-tree';
+
+// ============================================================================
+// COMMAND IDENTIFIERS - SINGLE SOURCE OF TRUTH
+// ============================================================================
+
+/**
+ * Command identifiers - SINGLE SOURCE OF TRUTH for ALL command names.
+ *
+ * Includes:
+ * - Text commands (typed in terminal input)
+ * - Prefix commands (triggered via Ctrl+B + key)
+ *
+ * Use these constants when:
+ * - Registering text commands
+ * - Defining keybindings
+ * - Emitting signals
+ * - Defining challenge expectations
+ * - Checking executed commands
+ */
+export const CommandId = {
+	// ========================================================================
+	// TEXT COMMANDS (typed in terminal input)
+	// ========================================================================
+	EXIT: 'exit',
+	CLEAR: 'clear',
+	HELP: 'help',
+	TMUX_LIST_PANES: 'tmux list-panes',
+	TMUX_LIST_WINDOWS: 'tmux list-windows',
+
+	// Text command aliases
+	LSP: 'tmux lsp',
+	LSW: 'tmux lsw',
+
+	// ========================================================================
+	// PREFIX COMMANDS (triggered via Ctrl+B + key)
+	// ========================================================================
+
+	// Session Management
+	NEW_SESSION: 'new-session',
+	ATTACH_SESSION: 'attach-session',
+	DETACH: 'detach',
+	LIST_SESSIONS: 'list-sessions',
+	KILL_SESSION: 'kill-session',
+	RENAME_SESSION: 'rename-session',
+
+	// Window Management
+	NEW_WINDOW: 'new-window',
+	NEXT_WINDOW: 'next-window',
+	PREVIOUS_WINDOW: 'previous-window',
+	SELECT_WINDOW: 'select-window',
+	RENAME_WINDOW: 'rename-window',
+	KILL_WINDOW: 'kill-window',
+	LIST_WINDOWS: 'list-windows',
+
+	// Pane Management
+	SPLIT_HORIZONTAL: 'split-horizontal',
+	SPLIT_VERTICAL: 'split-vertical',
+	KILL_PANE: 'kill-pane',
+	TOGGLE_ZOOM: 'toggle-zoom',
+	RESIZE_PANE: 'resize-pane',
+	SWAP_PANE: 'swap-pane',
+	ROTATE_PANES: 'rotate-panes',
+
+	// Navigation
+	SELECT_PANE: 'select-pane',
+	LAST_PANE: 'last-pane',
+	LAST_WINDOW: 'last-window',
+	DISPLAY_PANES: 'display-panes',
+
+	// Miscellaneous
+	COPY_MODE: 'copy-mode',
+	PASTE_BUFFER: 'paste-buffer',
+	COMMAND_PROMPT: 'command-prompt',
+	SHOW_TIME: 'show-time',
+	RELOAD_CONFIG: 'reload-config'
+} as const;
+
+/**
+ * Union type of all valid command identifiers.
+ * Derived automatically from CommandId.
+ */
+export type CommandIdType = (typeof CommandId)[keyof typeof CommandId];
+
+/**
+ * Type guard to check if a string is a valid CommandIdType.
+ */
+export function isValidCommandId(value: string): value is CommandIdType {
+	return Object.values(CommandId).includes(value as CommandIdType);
+}
 
 // ============================================================================
 // TYPES
@@ -46,7 +141,8 @@ export type CommandResult = {
 		type: string;
 		data?: Record<string, unknown>;
 	};
-	generateOutput?: 'pane-list';
+	/** Type of output to generate (handled by store) */
+	generateOutput?: 'pane-list' | 'window-list';
 };
 
 /**
@@ -58,16 +154,26 @@ export type CommandHandler = (context: CommandContext) => CommandResult;
  * Command definition for registration.
  */
 export type CommandDefinition = {
-	/** Command name or pattern */
-	name: string;
-	/** Optional aliases */
-	aliases?: string[];
+	/** Command name - must be a value from CommandId */
+	name: CommandIdType;
+	/** Optional aliases - must also be CommandIdType values */
+	aliases?: CommandIdType[];
 	/** Description for help text */
 	description: string;
 	/** The handler function */
 	handler: CommandHandler;
 	/** Whether to match exactly or as a prefix (default: exact) */
 	matchMode?: 'exact' | 'prefix';
+};
+
+/**
+ * Result of command execution including the matched command name.
+ */
+export type ExecuteResult = {
+	/** The command result from the handler */
+	result: CommandResult;
+	/** The canonical command name that was matched */
+	commandName: CommandIdType;
 };
 
 // ============================================================================
@@ -106,26 +212,38 @@ function parseCommand(command: string): string[] {
 
 /**
  * Find a matching command definition.
+ * Returns the definition and the canonical command name.
  */
-function findCommand(fullCommand: string): CommandDefinition | null {
-	for (const def of commandRegistry) {
+function findCommand(fullCommand: string): { definition: CommandDefinition } | null {
+	const normalizedCommand = fullCommand.trim().toLowerCase();
+
+	// Sort by name length (descending) to match longer commands first
+	const sortedRegistry = [...commandRegistry].sort((a, b) => b.name.length - a.name.length);
+
+	for (const def of sortedRegistry) {
 		const matchMode = def.matchMode ?? 'exact';
+
+		// Check main name
 		if (matchMode === 'exact') {
-			if (def.name === fullCommand) {
-				return def;
-			}
-			if (
-				def.aliases?.some((alias) => alias === fullCommand) ||
-				def.aliases?.some((alias) => fullCommand.startsWith(alias + ' '))
-			) {
-				return def;
+			if (normalizedCommand === def.name || normalizedCommand.startsWith(def.name + ' ')) {
+				return { definition: def };
 			}
 		} else if (matchMode === 'prefix') {
-			if (fullCommand.startsWith(def.name)) {
-				return def;
+			if (normalizedCommand.startsWith(def.name)) {
+				return { definition: def };
+			}
+		}
+
+		// Check aliases
+		if (def.aliases) {
+			for (const alias of def.aliases) {
+				if (normalizedCommand === alias || normalizedCommand.startsWith(alias + ' ')) {
+					return { definition: def };
+				}
 			}
 		}
 	}
+
 	return null;
 }
 
@@ -135,25 +253,26 @@ function findCommand(fullCommand: string): CommandDefinition | null {
  * @param command - The full command string
  * @param paneId - The ID of the pane executing the command
  * @param mode - The current pane mode
- * @returns The command result, or null if no command matched
+ * @returns The execute result with command name, or null if no command matched
  */
 export function executeCommand(
 	command: string,
 	paneId: string,
 	mode: PaneMode
-): CommandResult | null {
+): ExecuteResult | null {
 	const args = parseCommand(command);
 
 	if (args.length === 0) {
 		return null;
 	}
 
-	const commandName = args;
-	const definition = findCommand(commandName.join(' '));
+	const match = findCommand(command);
 
-	if (!definition) {
+	if (!match) {
 		return null;
 	}
+
+	const { definition } = match;
 
 	const context: CommandContext = {
 		command: command.trim(),
@@ -162,26 +281,28 @@ export function executeCommand(
 		mode
 	};
 
-	return definition.handler(context);
+	const result = definition.handler(context);
+
+	return {
+		result,
+		commandName: definition.name
+	};
 }
 
 // ============================================================================
-// BUILT-IN COMMANDS
+// BUILT-IN TEXT COMMANDS
 // ============================================================================
 
 /**
  * Exit command - exits tmux mode back to default shell.
  */
 registerCommand({
-	name: 'exit',
+	name: CommandId.EXIT,
 	description: 'Exit tmux session and return to default shell',
 	handler: () => ({
 		handled: true,
 		system: '[detached (from session 0)]',
-		newMode: 'default',
-		signal: {
-			type: 'tmux-exited'
-		}
+		newMode: 'default'
 	})
 });
 
@@ -189,7 +310,7 @@ registerCommand({
  * Clear command - clears the pane history.
  */
 registerCommand({
-	name: 'clear',
+	name: CommandId.CLEAR,
 	description: 'Clear the terminal history',
 	handler: () => ({
 		handled: true,
@@ -201,7 +322,7 @@ registerCommand({
  * Help command - displays available commands.
  */
 registerCommand({
-	name: 'help',
+	name: CommandId.HELP,
 	description: 'Display available commands',
 	handler: () => {
 		const commands = getRegisteredCommands();
@@ -223,14 +344,12 @@ registerCommand({
  * List windows command (tmux-style).
  */
 registerCommand({
-	name: 'list-windows',
-	aliases: ['lsw'],
+	name: CommandId.TMUX_LIST_WINDOWS,
+	aliases: [CommandId.LSW],
 	description: 'List all windows',
 	handler: () => ({
 		handled: true,
-		signal: {
-			type: 'list-windows'
-		}
+		generateOutput: 'window-list'
 	})
 });
 
@@ -238,14 +357,11 @@ registerCommand({
  * List panes command (tmux-style).
  */
 registerCommand({
-	name: 'list-panes',
-	aliases: ['tmux lsp'],
+	name: CommandId.TMUX_LIST_PANES,
+	aliases: [CommandId.LSP],
 	description: 'List all panes in current window',
 	handler: () => ({
 		handled: true,
-		signal: {
-			type: 'list-panes'
-		},
 		generateOutput: 'pane-list'
 	})
 });

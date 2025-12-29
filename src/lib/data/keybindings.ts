@@ -3,9 +3,12 @@
  *
  * Maps keyboard keys to tmux command names.
  * The prefix (Ctrl+b) must be pressed first, then the command key.
+ *
+ * Uses CommandIdType from tmux-commands.ts for type safety.
  */
 
 import { TMUX_COMMANDS, type TmuxCommand } from './tmux-commands';
+import { type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';
 
 /**
  * Keybinding type for prefix-based commands.
@@ -17,8 +20,8 @@ export type Keybinding = {
 	withCtrl?: boolean;
 	/** Whether Shift must be held with the key */
 	withShift?: boolean;
-	/** The command name this binding triggers */
-	commandName: string;
+	/** The command name this binding triggers (type-safe) */
+	commandName: CommandIdType;
 	/** Human-readable description of the key */
 	keyDisplay: string;
 };
@@ -27,15 +30,25 @@ export type Keybinding = {
  * Parse a shortcut string like "prefix + %" into a key binding.
  *
  * @param shortcut - The shortcut string from TmuxCommand
- * @param commandName - The command name
+ * @param commandName - The command name (must be a valid CommandIdType)
  * @returns Keybinding or null if not a prefix-based shortcut
  */
-function parseShortcut(shortcut: string, commandName: string): Keybinding | Keybinding[] | null {
+function parseShortcut(
+	shortcut: string,
+	commandName: string
+): Keybinding | Keybinding[] | null {
 	// Skip non-prefix shortcuts (CLI commands like "tmux new -s <name>")
 	if (!shortcut.startsWith('prefix + ')) {
 		return null;
 	}
 
+	// Validate that the command name is a valid CommandIdType
+	if (!isValidCommandId(commandName)) {
+		console.warn(`Unknown command name in keybindings: ${commandName}`);
+		return null;
+	}
+
+	const typedCommandName: CommandIdType = commandName;
 	const keyPart = shortcut.replace('prefix + ', '').trim();
 
 	// Handle special cases
@@ -43,7 +56,7 @@ function parseShortcut(shortcut: string, commandName: string): Keybinding | Keyb
 		// select-window: any digit key
 		return Array.from({ length: 10 }, (_, i) => ({
 			key: String(i),
-			commandName,
+			commandName: typedCommandName,
 			keyDisplay: String(i)
 		}));
 	}
@@ -52,7 +65,7 @@ function parseShortcut(shortcut: string, commandName: string): Keybinding | Keyb
 		// select-pane: any arrow key
 		return ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].map((arrow) => ({
 			key: arrow,
-			commandName,
+			commandName: typedCommandName,
 			keyDisplay: arrow.replace(
 				'Arrow',
 				'↑↓←→'.charAt(['Up', 'Down', 'Left', 'Right'].indexOf(arrow.replace('Arrow', '')))
@@ -65,7 +78,7 @@ function parseShortcut(shortcut: string, commandName: string): Keybinding | Keyb
 		return ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].map((arrow) => ({
 			key: arrow,
 			withCtrl: true,
-			commandName,
+			commandName: typedCommandName,
 			keyDisplay: `Ctrl+${arrow.replace('Arrow', '')}`
 		}));
 	}
@@ -74,7 +87,7 @@ function parseShortcut(shortcut: string, commandName: string): Keybinding | Keyb
 		return {
 			key: 'o',
 			withCtrl: true,
-			commandName,
+			commandName: typedCommandName,
 			keyDisplay: 'Ctrl+o'
 		};
 	}
@@ -82,8 +95,8 @@ function parseShortcut(shortcut: string, commandName: string): Keybinding | Keyb
 	if (keyPart === '{ or }') {
 		// swap-pane: either { or }
 		return [
-			{ key: '{', commandName, keyDisplay: '{' },
-			{ key: '}', commandName, keyDisplay: '}' }
+			{ key: '{', commandName: typedCommandName, keyDisplay: '{' },
+			{ key: '}', commandName: typedCommandName, keyDisplay: '}' }
 		];
 	}
 
@@ -91,7 +104,7 @@ function parseShortcut(shortcut: string, commandName: string): Keybinding | Keyb
 	// Note: For special characters, we use the actual character as the key
 	return {
 		key: keyPart,
-		commandName,
+		commandName: typedCommandName,
 		keyDisplay: keyPart
 	};
 }
@@ -208,7 +221,7 @@ export function getPrefixKeybindings(): Keybinding[] {
  * @param commandName - The command name
  * @returns true if the command has a prefix-based shortcut
  */
-export function hasPrefixKeybinding(commandName: string): boolean {
+export function hasPrefixKeybinding(commandName: CommandIdType): boolean {
 	for (const binding of KEYBINDING_MAP.values()) {
 		if (binding.commandName === commandName) {
 			return true;
@@ -224,7 +237,7 @@ export function hasPrefixKeybinding(commandName: string): boolean {
  * @param commandName - The command name
  * @returns Array of keybindings for this command
  */
-export function getKeybindingsForCommand(commandName: string): Keybinding[] {
+export function getKeybindingsForCommand(commandName: CommandIdType): Keybinding[] {
 	const bindings: Keybinding[] = [];
 
 	for (const binding of KEYBINDING_MAP.values()) {

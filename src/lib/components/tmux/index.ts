@@ -29,5 +29,11 @@ export type {
 } from '$lib/utils/pane-tree';
 
 // Re-export store
-export { createTmuxStore, type TmuxStore, type TmuxStoreOptions } from '$lib/stores/tmux-state.svelte';
+export {
+	createTmuxStore,
+	type TmuxStore,
+	type TmuxStoreOptions
+} from '$lib/stores/tmux-state.svelte';
 
+// Re-export command types for challenge integration
+export { CommandId, type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';

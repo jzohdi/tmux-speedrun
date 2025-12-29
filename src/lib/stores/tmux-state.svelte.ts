@@ -34,7 +34,7 @@ import {
 	type HistoryEntry
 } from '$lib/utils/pane-tree';
 
-import { executeCommand, type CommandResult } from '$lib/utils/tmux-commands';
+import { executeCommand, type ExecuteResult, type CommandIdType } from '$lib/utils/tmux-commands';
 
 function formatPaneList(panes: Pane[], focusedId: string): string {
 	const currentPanes =
@@ -657,9 +657,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 		// In tmux mode, try the command registry first
 		if (focusedPane.mode === 'tmux') {
-			const result = executeCommand(trimmedCommand, focusedPane.id, focusedPane.mode);
+			const execution = executeCommand(trimmedCommand, focusedPane.id, focusedPane.mode);
 
-			if (result && result.handled) {
+			if (execution && execution.result.handled) {
+				const { result, commandName } = execution;
+
 				// Apply command result side effects
 				if (result.output) {
 					addHistory({
@@ -704,6 +706,13 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 					}
 				}
 
+				// Emit command-executed signal for challenge tracking (type-safe)
+				emitSignal('command-executed', {
+					commandName,
+					command: trimmedCommand,
+					paneId: focusedPane.id
+				});
+
 				return;
 			}
 
@@ -714,23 +723,29 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				timestamp: Date.now()
 			});
 
-			// Still emit the command signal for challenge handling
+			// Emit unrecognized command signal (not type-safe, just raw command)
 			emitSignal('command', { command: trimmedCommand, paneId: focusedPane.id });
 		}
 	}
 
 	/**
 	 * Execute a tmux command (called from keybinding handler).
+	 * Emits a type-safe 'command-executed' signal for challenge integration.
+	 *
+	 * @param commandName - The command ID (type-safe from CommandIdType)
+	 * @param value - Optional value for commands that require input (e.g., rename)
 	 */
-	function executeTmuxCommand(commandName: string, value?: string): void {
+	function executeTmuxCommand(commandName: CommandIdType, value?: string): void {
 		if (!focusedPane || focusedPane.mode !== 'tmux') {
 			return;
 		}
 
-		// Format the command with optional value
+		// Format the command with optional value for display
 		const fullCommand = value ? `${commandName}:${value}` : commandName;
 
-		emitSignal('command', {
+		// Emit type-safe command-executed signal for challenge tracking
+		emitSignal('command-executed', {
+			commandName,
 			command: fullCommand,
 			paneId: focusedPane.id
 		});

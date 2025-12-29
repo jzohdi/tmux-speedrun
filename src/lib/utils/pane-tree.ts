@@ -91,7 +91,8 @@ export type TmuxState = {
  * Signal types emitted when tmux state changes.
  */
 export type TmuxSignalType =
-	| 'command' // User executed a command
+	| 'command' // User executed an unrecognized command
+	| 'command-executed' // User executed a recognized command (for challenge tracking)
 	| 'window-created' // New window created
 	| 'window-closed' // Window closed
 	| 'window-switched' // Active window changed
@@ -104,11 +105,20 @@ export type TmuxSignalType =
 	| 'tmux-exited'; // User exited tmux (detached)
 
 /**
+ * Import CommandIdType for type-safe command signals.
+ * This creates a dependency, but ensures type safety across the system.
+ */
+import type { CommandIdType } from './tmux-commands';
+
+/**
  * Signal payload emitted on state changes.
  */
 export type TmuxSignal = {
 	type: TmuxSignalType;
+	/** The raw command string entered by user */
 	command?: string;
+	/** The canonical command name (type-safe, from CommandId) */
+	commandName?: CommandIdType;
 	windowId?: string;
 	paneId?: string;
 	direction?: SplitDirection;

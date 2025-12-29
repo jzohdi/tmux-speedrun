@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
+	import { ChallengeTerminal, type TmuxSignal, type CommandIdType } from '$lib/components/tmux';
 	import PromptBox from '$lib/components/PromptBox.svelte';
 	import { createChallengeStore } from '$lib/client/challenge-store.svelte';
 	import type { PageData } from './$types';
@@ -40,30 +40,49 @@
 	 * Handle signals from the terminal.
 	 *
 	 * The terminal emits structured signals including:
-	 * - { type: 'command', command: 'split-vertical' }
-	 * - { type: 'command', command: 'rename-window:swift-tiger-42' }
+	 * - { type: 'command-executed', commandName: 'tmux list-panes', command: 'lsp' }
+	 *   Recognized commands with type-safe commandName (from CommandId)
+	 * - { type: 'command', command: 'unknown-cmd' }
+	 *   Unrecognized commands (raw string, not type-safe)
 	 * - { type: 'tmux-entered' } when user types 'tmux'
 	 */
 	async function handleSignal(signal: TmuxSignal): Promise<void> {
-		// Only process command signals for challenge verification
-		if (signal.type !== 'command') {
+		// Process recognized command signals for challenge verification
+		if (signal.type === 'command-executed') {
+			const commandName: CommandIdType | undefined = signal.commandName;
+			if (!commandName || challenge.status !== 'active') {
+				return;
+			}
+
+			// Submit the canonical command name for challenge verification
+			// This is type-safe: commandName is guaranteed to be a valid CommandIdType
+			const wasCorrect = await challenge.submitAnswer(commandName);
+
+			// Clear input regardless of result
+			terminalRef?.clearInput();
+
+			// Focus terminal for next input
+			if (challenge.status === 'active') {
+				terminalRef?.focus();
+			}
 			return;
 		}
 
-		const command = signal.command;
-		if (!command || challenge.status !== 'active') {
-			return;
-		}
+		// Also handle raw 'command' signals for unrecognized commands
+		// (These won't typically match challenge steps, but we process them for completeness)
+		if (signal.type === 'command') {
+			const command = signal.command;
+			if (!command || challenge.status !== 'active') {
+				return;
+			}
 
-		// Submit the answer - the terminal formats it correctly
-		const wasCorrect = await challenge.submitAnswer(command);
+			// Submit raw command (not type-safe, likely won't match)
+			await challenge.submitAnswer(command);
+			terminalRef?.clearInput();
 
-		// Clear input regardless of result
-		terminalRef?.clearInput();
-
-		// Focus terminal for next input
-		if (challenge.status === 'active') {
-			terminalRef?.focus();
+			if (challenge.status === 'active') {
+				terminalRef?.focus();
+			}
 		}
 	}
 
