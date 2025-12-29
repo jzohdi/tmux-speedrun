@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
+	import { onMount, tick } from 'svelte';
 
 	// Component ref
 	let terminalRef = $state<ReturnType<typeof ChallengeTerminal> | null>(null);
@@ -35,8 +36,13 @@
 
 	// Auto-focus terminal on mount
 	$effect(() => {
-		terminalRef?.focus();
+
 	});
+
+	onMount(async() => {
+		await tick();
+		terminalRef?.focus();
+	})
 </script>
 
 <svelte:head>

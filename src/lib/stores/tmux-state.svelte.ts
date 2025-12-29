@@ -301,12 +301,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	/**
 	 * Trigger a focus refresh on the currently focused pane's input.
 	 * Call this after operations that should maintain focus (e.g., command output).
-	 * Uses requestAnimationFrame to defer until after Svelte renders and the browser paints.
+	 * Increments synchronously - the PaneView effect handles the DOM timing via tick().
 	 */
 	function triggerInputFocus(): void {
-		requestAnimationFrame(() => {
-			focusTrigger++;
-		});
+		focusTrigger++;
 	}
 
 	// ========================================================================
@@ -425,6 +423,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			sessionName: detachedSessionName
 		});
 
+		// Focus the shell pane input after detaching
+		triggerInputFocus();
+
 		return detachedSessionName;
 	}
 
@@ -533,6 +534,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			sessionName: name,
 			metadata: { oldName }
 		});
+
+		// Restore focus to the pane input after renaming
+		triggerInputFocus();
 
 		return true;
 	}
@@ -707,6 +711,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		});
 
 		emitSignal('window-closed', { windowId: closedWindow.id });
+
+		// Focus the new active window's pane input
+		triggerInputFocus();
+
 		return true;
 	}
 
@@ -792,6 +800,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			windowId: attachedSession.windows[targetIndex].id,
 			metadata: { name }
 		});
+
+		// Restore focus to the pane input after renaming
+		triggerInputFocus();
 	}
 
 	/**
@@ -1124,6 +1135,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			if (modeToRestore === 'tmux') {
 				emitSignal('tmux-entered', { paneId: state.shellPane.id });
 			}
+
+			// Restore focus to the pane input after exiting man mode
+			triggerInputFocus();
 			return;
 		}
 
@@ -1158,6 +1172,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		if (modeToRestore === 'tmux') {
 			emitSignal('tmux-entered', { paneId: targetPaneId });
 		}
+
+		// Restore focus to the pane input after exiting man mode
+		triggerInputFocus();
 	}
 
 	/**
@@ -1251,68 +1268,15 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 		// Handle mode-switching commands in default mode
 		if (focusedPane.mode === 'default') {
-			// Handle tmux attach command
-			if (
-				trimmedCommand.startsWith('tmux attach') ||
-				trimmedCommand.startsWith('tmux a ') ||
-				trimmedCommand === 'tmux a'
-			) {
-				// Parse -t <target> argument
-				const args = trimmedCommand.split(/\s+/);
-				const tIndex = args.indexOf('-t');
-
-				if (tIndex !== -1 && args[tIndex + 1]) {
-					const target = args[tIndex + 1];
-					const numTarget = parseInt(target, 10);
-					const parsedTarget = isNaN(numTarget) ? target : numTarget;
-					const success = attachSessionByTarget(parsedTarget);
-
-					if (!success) {
-						addHistory({
-							type: 'error',
-							content: `can't find session: ${target}`,
-							timestamp: Date.now()
-						});
-						triggerInputFocus();
-						return;
-					}
-				} else {
-					// No target - attach to first available session
-					if (state.sessions.length === 0) {
-						addHistory({
-							type: 'error',
-							content: 'no sessions',
-							timestamp: Date.now()
-						});
-						triggerInputFocus();
-						return;
-					}
-					attachSessionByTarget(0);
-				}
-
-				setMode('tmux');
-				addHistory({
-					type: 'system',
-					content: `[attached to session ${attachedSession?.name ?? '0'}]`,
-					timestamp: Date.now()
-				});
+			// Handle 'man tmux' command
+			if (trimmedCommand === 'man tmux') {
+				setMode('man');
 				return;
 			}
 
-			// Handle tmux new-session command
-			if (trimmedCommand.startsWith('tmux new-session') || trimmedCommand.startsWith('tmux new ')) {
-				// Parse -s <name> argument
-				const args = trimmedCommand.split(/\s+/);
-				const sIndex = args.indexOf('-s');
-				const sessionName = sIndex !== -1 && args[sIndex + 1] ? args[sIndex + 1] : undefined;
-
-				createNewSession(sessionName, true);
-				setMode('tmux');
-				addHistory({
-					type: 'system',
-					content: `[new session created: ${attachedSession?.name ?? '0'}]`,
-					timestamp: Date.now()
-				});
+			// Handle 'clear' command
+			if (trimmedCommand === 'clear') {
+				clearHistory();
 				return;
 			}
 
@@ -1335,26 +1299,111 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				return;
 			}
 
-			// Handle tmux ls / list-sessions in default mode
-			if (trimmedCommand === 'tmux ls' || trimmedCommand === 'tmux list-sessions') {
-				const output = formatSessionList(sessions, attachedSessionIndex);
-				addHistory({
-					type: 'output',
-					content: output,
-					timestamp: Date.now()
-				});
-				triggerInputFocus();
-				return;
-			}
+			// Try to execute tmux commands through the command registry
+			// This ensures proper signal emission for challenge tracking
+			if (trimmedCommand.startsWith('tmux ')) {
+				const execution = executeCommand(trimmedCommand, focusedPane.id, focusedPane.mode);
 
-			if (trimmedCommand === 'man tmux') {
-				setMode('man');
-				return;
-			}
+				if (execution && execution.result.handled) {
+					const { result, commandName } = execution;
 
-			if (trimmedCommand === 'clear') {
-				clearHistory();
-				return;
+					// Handle output/error/system messages
+					if (result.output) {
+						addHistory({
+							type: 'output',
+							content: result.output,
+							timestamp: Date.now()
+						});
+					}
+
+					if (result.error) {
+						addHistory({
+							type: 'error',
+							content: result.error,
+							timestamp: Date.now()
+						});
+						triggerInputFocus();
+						// Emit signal even for errors so challenge can track attempts
+						emitSignal('command-executed', {
+							commandName,
+							command: commandName,
+							paneId: focusedPane.id
+						});
+						return;
+					}
+
+					if (result.system) {
+						addHistory({
+							type: 'system',
+							content: result.system,
+							timestamp: Date.now()
+						});
+					}
+
+					// Handle generated output (like session-list)
+					if (result.generateOutput) {
+						const output = generateOutput(result.generateOutput);
+						if (output) {
+							addHistory({ type: 'output', content: output, timestamp: Date.now() });
+						}
+					}
+
+					// Handle session operations (attach, new-session, etc.)
+					if (result.sessionOperation) {
+						const op = result.sessionOperation;
+
+						switch (op.type) {
+							case 'attach': {
+								const success = attachSessionByTarget(op.target);
+								if (!success) {
+									addHistory({
+										type: 'error',
+										content: `can't find session: ${op.target}`,
+										timestamp: Date.now()
+									});
+									triggerInputFocus();
+									// Still emit signal for challenge tracking
+									emitSignal('command-executed', {
+										commandName,
+										command: commandName,
+										paneId: focusedPane.id
+									});
+									return;
+								}
+								setMode('tmux');
+								addHistory({
+									type: 'system',
+									content: `[attached to session ${attachedSession?.name ?? '0'}]`,
+									timestamp: Date.now()
+								});
+								break;
+							}
+							case 'create': {
+								createNewSession(op.name, op.attach ?? true);
+								setMode('tmux');
+								addHistory({
+									type: 'system',
+									content: `[new session created: ${attachedSession?.name ?? '0'}]`,
+									timestamp: Date.now()
+								});
+								break;
+							}
+							default:
+								// Other session operations (detach, kill, rename) shouldn't happen in default mode
+								break;
+						}
+					}
+
+					// Emit command-executed signal for challenge tracking
+					emitSignal('command-executed', {
+						commandName,
+						command: commandName,
+						paneId: focusedPane.id
+					});
+
+					triggerInputFocus();
+					return;
+				}
 			}
 
 			// Unknown command in default mode
