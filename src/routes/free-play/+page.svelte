@@ -6,17 +6,19 @@
 
 	// Debug state - track last signals
 	let lastSignal = $state<TmuxSignal | null>(null);
-	let signalHistory = $state<Array<{ signal: TmuxSignal; timestamp: Date }>>([]);
+	let signalHistory = $state<Array<{ id: number; signal: TmuxSignal; timestamp: Date }>>([]);
+	let signalIdCounter = $state(0);
 
 	/**
 	 * Handle signals from the terminal.
 	 * In free-play mode, we track signals for debugging.
 	 */
 	function handleSignal(signal: TmuxSignal): void {
-		// Track signal for debugging
+		// Track signal for debugging with unique ID
 		lastSignal = signal;
+		signalIdCounter += 1;
 		signalHistory = [
-			{ signal, timestamp: new Date() },
+			{ id: signalIdCounter, signal, timestamp: new Date() },
 			...signalHistory.slice(0, 9) // Keep last 10
 		];
 
@@ -109,7 +111,7 @@
 			{#if signalHistory.length > 0}
 				<div class="signal-history">
 					<div class="history-label">Recent Signals:</div>
-					{#each signalHistory as entry (entry.timestamp.getTime())}
+					{#each signalHistory as entry (entry.id)}
 						<div class="history-entry" class:executed={entry.signal.type === 'command-executed'}>
 							<span class="history-type">{entry.signal.type}</span>
 							{#if entry.signal.type === 'command-executed'}

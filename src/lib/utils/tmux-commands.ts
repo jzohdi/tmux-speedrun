@@ -143,6 +143,11 @@ export type CommandResult = {
 	};
 	/** Type of output to generate (handled by store) */
 	generateOutput?: 'pane-list' | 'window-list';
+	/**
+	 * Special exit behavior:
+	 * - 'close-pane-or-detach': If multiple panes, close current pane; otherwise detach from tmux
+	 */
+	exitBehavior?: 'close-pane-or-detach';
 };
 
 /**
@@ -294,15 +299,15 @@ export function executeCommand(
 // ============================================================================
 
 /**
- * Exit command - exits tmux mode back to default shell.
+ * Exit command - closes current pane if multiple panes exist,
+ * otherwise exits tmux mode back to default shell.
  */
 registerCommand({
 	name: CommandId.EXIT,
-	description: 'Exit tmux session and return to default shell',
+	description: 'Exit current pane or detach from tmux session',
 	handler: () => ({
 		handled: true,
-		system: '[detached (from session 0)]',
-		newMode: 'default'
+		exitBehavior: 'close-pane-or-detach'
 	})
 });
 

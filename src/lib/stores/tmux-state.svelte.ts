@@ -706,6 +706,27 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 					}
 				}
 
+				// Handle special exit behavior
+				if (result.exitBehavior === 'close-pane-or-detach') {
+					if (paneCount > 1) {
+						// Multiple panes: close current pane and focus another
+						closeFocusedPane();
+						addHistory({
+							type: 'system',
+							content: '[pane closed]',
+							timestamp: Date.now()
+						});
+					} else {
+						// Single pane: detach from tmux (exit to default mode)
+						setMode('default');
+						addHistory({
+							type: 'system',
+							content: '[detached (from session 0)]',
+							timestamp: Date.now()
+						});
+					}
+				}
+
 				// Emit command-executed signal for challenge tracking (type-safe)
 				emitSignal('command-executed', {
 					commandName,
