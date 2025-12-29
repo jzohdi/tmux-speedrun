@@ -19,19 +19,15 @@ import { stringToBytes } from './utils';
  * @returns Derived key material as ArrayBuffer
  */
 export async function hkdf(
-	ikm: ArrayBuffer | Uint8Array,
-	salt: ArrayBuffer | Uint8Array,
+	ikm: ArrayBuffer | Uint8Array<ArrayBuffer>,
+	salt: ArrayBuffer | Uint8Array<ArrayBuffer>,
 	info: string,
 	length = 32
 ): Promise<ArrayBuffer> {
 	// Import the input key material
-	const keyMaterial = await crypto.subtle.importKey(
-		'raw',
-		ikm,
-		{ name: 'HKDF' },
-		false,
-		['deriveBits']
-	);
+	const keyMaterial = await crypto.subtle.importKey('raw', ikm, { name: 'HKDF' }, false, [
+		'deriveBits'
+	]);
 
 	// Derive bits using HKDF
 	const derivedBits = await crypto.subtle.deriveBits(
@@ -59,18 +55,14 @@ export async function hkdf(
  * @returns CryptoKey for AES-GCM encryption/decryption
  */
 export async function hkdfDeriveAesKey(
-	ikm: ArrayBuffer | Uint8Array,
-	salt: ArrayBuffer | Uint8Array,
+	ikm: ArrayBuffer | Uint8Array<ArrayBuffer>,
+	salt: ArrayBuffer | Uint8Array<ArrayBuffer>,
 	info: string
 ): Promise<CryptoKey> {
 	// Import the input key material
-	const keyMaterial = await crypto.subtle.importKey(
-		'raw',
-		ikm,
-		{ name: 'HKDF' },
-		false,
-		['deriveKey']
-	);
+	const keyMaterial = await crypto.subtle.importKey('raw', ikm, { name: 'HKDF' }, false, [
+		'deriveKey'
+	]);
 
 	// Derive an AES-GCM key
 	const derivedKey = await crypto.subtle.deriveKey(
@@ -114,4 +106,3 @@ export async function sha256Bytes(input: string): Promise<Uint8Array> {
 
 	return new Uint8Array(hash);
 }
-

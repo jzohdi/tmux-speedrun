@@ -112,6 +112,7 @@
 		if (!inputModeCommand) {
 			inputModeCommand = null;
 			inputModeValue = '';
+			restoreFocusAfterInputMode();
 			return;
 		}
 
@@ -120,6 +121,7 @@
 			console.error(`Invalid command name: ${inputModeCommand.name}`);
 			inputModeCommand = null;
 			inputModeValue = '';
+			restoreFocusAfterInputMode();
 			return;
 		}
 
@@ -138,9 +140,10 @@
 		// Emit the command signal for challenge tracking
 		tmux.executeTmuxCommand(commandName, trimmedValue);
 
-		// Reset input mode
+		// Reset input mode and restore focus to terminal
 		inputModeCommand = null;
 		inputModeValue = '';
+		restoreFocusAfterInputMode();
 	}
 
 	/**
@@ -149,6 +152,17 @@
 	function handleStatusBarInputCancel(): void {
 		inputModeCommand = null;
 		inputModeValue = '';
+		restoreFocusAfterInputMode();
+	}
+
+	/**
+	 * Restore focus to the terminal container after exiting input mode.
+	 * Uses requestAnimationFrame to ensure DOM updates are complete.
+	 */
+	function restoreFocusAfterInputMode(): void {
+		requestAnimationFrame(() => {
+			containerRef?.focus();
+		});
 	}
 
 	/**
@@ -292,15 +306,19 @@
 				break;
 
 			// Session commands
-			case CommandId.DETACH:
-				// Exit tmux mode back to default
-				tmux.setMode('default');
-				tmux.addHistory({
-					type: 'system',
-					content: '[detached from session]',
-					timestamp: Date.now()
-				});
+			case CommandId.DETACH: {
+				// Detach from the current session (session is preserved in background)
+				const detachedSessionName = tmux.detachSession();
+				if (detachedSessionName !== null) {
+					tmux.setMode('default');
+					tmux.addHistory({
+						type: 'system',
+						content: `[detached (from session ${detachedSessionName})]`,
+						timestamp: Date.now()
+					});
+				}
 				break;
+			}
 		}
 	}
 
@@ -526,12 +544,25 @@
 				onExitMan={handleExitMan}
 				onKeyDown={handleKeyDown}
 			/>
+		{:else if tmux.focusedPane}
+			<!-- Detached state: render the shell pane directly -->
+			<PaneGrid
+				node={tmux.focusedPane}
+				focusedPaneId={tmux.focusedPaneId}
+				focusTrigger={tmux.focusTrigger}
+				onInputChange={handlePaneInputChange}
+				onSubmit={handlePaneSubmit}
+				onFocusPane={handlePaneFocus}
+				onExitMan={handleExitMan}
+				onKeyDown={handleKeyDown}
+			/>
 		{/if}
 	</div>
 
 	<!-- Status Bar (only show in tmux mode) -->
 	{#if isInTmuxMode}
 		<StatusBar
+			sessionName={tmux.attachedSession?.name ?? 'tmux-speedrun'}
 			windows={tmux.windows}
 			activeWindowIndex={tmux.activeWindowIndex}
 			focusedPane={tmux.focusedPane}

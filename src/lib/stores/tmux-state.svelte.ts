@@ -7,6 +7,7 @@
 
 import {
 	createInitialState,
+	createSession,
 	createWindow,
 	createPane,
 	findPaneById,
@@ -24,6 +25,7 @@ import {
 	getNextPane,
 	getPreviousPane,
 	type TmuxState,
+	type TmuxSession,
 	type TmuxWindow,
 	type TmuxSignal,
 	type TmuxSignalType,
@@ -38,7 +40,8 @@ import {
 	executeCommand,
 	type ExecuteResult,
 	type CommandIdType,
-	type CommandResult
+	type CommandResult,
+	type SessionOperation
 } from '$lib/utils/tmux-commands';
 
 function formatPaneList(panes: Pane[], focusedId: string): string {
@@ -62,6 +65,40 @@ function formatPaneList(panes: Pane[], focusedId: string): string {
 			// Format: "0: [160x24] [history 0/2000, 0 bytes] %0 (active)"
 			const percentFull = Math.round((pane.history.length / 2000) * 100);
 			return `${index}: [${currentPanes[index].width}x${currentPanes[index].height}] [history ${pane.history.length}/2000, 0 bytes] %${percentFull}${activeMarker}`;
+		})
+		.join('\n');
+}
+
+/**
+ * Format a date for session list output.
+ */
+function formatSessionDate(timestamp: number): string {
+	const date = new Date(timestamp);
+	return date.toLocaleString('en-US', {
+		weekday: 'short',
+		month: 'short',
+		day: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		year: 'numeric',
+		hour12: false
+	});
+}
+
+/**
+ * Format session list output (simulates 'tmux ls' / 'tmux list-sessions').
+ * Format: "0: 2 windows (created Mon Dec 29 13:37:03 2025) (attached)"
+ */
+function formatSessionList(sessions: TmuxSession[], attachedSessionIndex: number | null): string {
+	return sessions
+		.map((session, index) => {
+			const windowCount = session.windows.length;
+			const windowWord = windowCount === 1 ? 'window' : 'windows';
+			const dateStr = formatSessionDate(session.createdAt);
+			const attachedMarker = index === attachedSessionIndex ? ' (attached)' : '';
+
+			return `${session.name}: ${windowCount} ${windowWord} (created ${dateStr})${attachedMarker}`;
 		})
 		.join('\n');
 }
@@ -127,18 +164,47 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	// DERIVED STATE
 	// ========================================================================
 
-	const windows = $derived(state.windows);
-	const activeWindowIndex = $derived(state.activeWindowIndex);
-	const activeWindow = $derived(state.windows[state.activeWindowIndex]);
-	const focusedPaneId = $derived(state.focusedPaneId);
-	const focusedPane = $derived(
-		activeWindow ? findPaneById(activeWindow.paneTree, state.focusedPaneId) : null
+	// Session-level derived state
+	const sessions = $derived(state.sessions);
+	const attachedSessionIndex = $derived(state.attachedSessionIndex);
+	const attachedSession = $derived(
+		state.attachedSessionIndex !== null ? state.sessions[state.attachedSessionIndex] : null
 	);
-	const allPanesInActiveWindow = $derived(
-		activeWindow ? collectAllPanes(activeWindow.paneTree) : []
+	const sessionCount = $derived(state.sessions.length);
+	const isDetached = $derived(state.attachedSessionIndex === null);
+
+	// Shell pane (used when not attached to any session)
+	const shellPane = $derived(state.shellPane);
+
+	// Window/Pane derived state (scoped to the attached session, or shell pane when detached)
+	const windows = $derived(attachedSession?.windows ?? []);
+	const activeWindowIndex = $derived(attachedSession?.activeWindowIndex ?? 0);
+	const activeWindow = $derived(
+		attachedSession?.windows[attachedSession.activeWindowIndex] ?? null
 	);
-	const paneCount = $derived(activeWindow ? countPanes(activeWindow.paneTree) : 0);
-	const windowCount = $derived(state.windows.length);
+	const focusedPaneId = $derived(
+		isDetached ? shellPane.id : (attachedSession?.focusedPaneId ?? '')
+	);
+	const focusedPane = $derived.by(() => {
+		if (isDetached) {
+			return shellPane;
+		}
+
+		if (activeWindow) {
+			return findPaneById(activeWindow.paneTree, attachedSession?.focusedPaneId ?? '');
+		}
+
+		return null;
+	});
+	const allPanesInActiveWindow = $derived.by(() => {
+		if (isDetached) {
+			return [shellPane];
+		}
+
+		return activeWindow ? collectAllPanes(activeWindow.paneTree) : [];
+	});
+	const paneCount = $derived(isDetached ? 1 : activeWindow ? countPanes(activeWindow.paneTree) : 0);
+	const windowCount = $derived(attachedSession?.windows.length ?? 0);
 
 	// ========================================================================
 	// SIGNAL EMISSION
@@ -158,6 +224,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		switch (type) {
 			case 'pane-list':
 				return formatPaneList(allPanesInActiveWindow, focusedPaneId);
+			case 'session-list':
+				return formatSessionList(sessions, attachedSessionIndex);
 			//   case 'window-list':
 			// 	return formatWindowList(windows, activeWindowIndex);
 			default:
@@ -165,19 +233,65 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		}
 	}
 
+	/**
+	 * Update the pane tree of the active window in the attached session.
+	 */
 	function updateActiveWindowTree(newTree: PaneNode): void {
+		if (state.attachedSessionIndex === null) {
+			return;
+		}
+
 		state = {
 			...state,
-			windows: state.windows.map((w, i) =>
-				i === state.activeWindowIndex ? { ...w, paneTree: newTree } : w
+			sessions: state.sessions.map((session, sessionIdx) => {
+				if (sessionIdx !== state.attachedSessionIndex) {
+					return session;
+				}
+
+				return {
+					...session,
+					windows: session.windows.map((w, windowIdx) =>
+						windowIdx === session.activeWindowIndex ? { ...w, paneTree: newTree } : w
+					)
+				};
+			})
+		};
+	}
+
+	/**
+	 * Update a property on the attached session.
+	 */
+	function updateAttachedSession(updates: Partial<Omit<TmuxSession, 'id' | 'createdAt'>>): void {
+		if (state.attachedSessionIndex === null) {
+			return;
+		}
+
+		state = {
+			...state,
+			sessions: state.sessions.map((session, idx) =>
+				idx === state.attachedSessionIndex ? { ...session, ...updates } : session
 			)
 		};
 	}
 
+	/**
+	 * Update the shell pane (used when detached).
+	 */
+	function updateShellPane(updates: Partial<Omit<Pane, 'type' | 'id'>>): void {
+		state = {
+			...state,
+			shellPane: { ...state.shellPane, ...updates }
+		};
+	}
+
 	function setFocusedPane(paneId: string): void {
-		if (state.focusedPaneId !== paneId) {
-			lastFocusedPaneId = state.focusedPaneId;
-			state = { ...state, focusedPaneId: paneId };
+		if (!attachedSession) {
+			return;
+		}
+
+		if (attachedSession.focusedPaneId !== paneId) {
+			lastFocusedPaneId = attachedSession.focusedPaneId;
+			updateAttachedSession({ focusedPaneId: paneId });
 			emitSignal('focus-changed', { paneId });
 		}
 		// Always trigger focus refresh when explicitly focusing a pane
@@ -196,6 +310,335 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	}
 
 	// ========================================================================
+	// SESSION OPERATIONS
+	// ========================================================================
+
+	/**
+	 * Create a new session.
+	 *
+	 * @param name - Optional session name (defaults to numeric index)
+	 * @param attach - Whether to attach to the new session immediately (default: true)
+	 * @returns The index of the new session
+	 */
+	function createNewSession(name?: string, attach = true): number {
+		const newSession = createSession(name);
+		const newSessionIndex = state.sessions.length;
+
+		state = {
+			...state,
+			sessions: [...state.sessions, newSession],
+			attachedSessionIndex: attach ? newSessionIndex : state.attachedSessionIndex
+		};
+
+		emitSignal('session-created', {
+			sessionId: newSession.id,
+			sessionName: newSession.name
+		});
+
+		if (attach) {
+			emitSignal('session-attached', {
+				sessionId: newSession.id,
+				sessionName: newSession.name
+			});
+			// Focus the new session's pane input
+			triggerInputFocus();
+		}
+
+		return newSessionIndex;
+	}
+
+	/**
+	 * Find a session by index or name.
+	 *
+	 * @param target - Session index (number) or session name (string)
+	 * @returns The session index, or -1 if not found
+	 */
+	function findSessionIndex(target: number | string): number {
+		if (typeof target === 'number') {
+			if (target >= 0 && target < state.sessions.length) {
+				return target;
+			}
+
+			return -1;
+		}
+
+		// Search by name
+		return state.sessions.findIndex((s) => s.name === target);
+	}
+
+	/**
+	 * Attach to a session by index or name.
+	 *
+	 * @param target - Session index (0, 1, 2...) or session name
+	 * @returns true if attached, false if session not found
+	 */
+	function attachSessionByTarget(target: number | string): boolean {
+		const sessionIndex = findSessionIndex(target);
+
+		if (sessionIndex === -1) {
+			return false;
+		}
+
+		if (state.attachedSessionIndex === sessionIndex) {
+			// Already attached to this session
+			return true;
+		}
+
+		const targetSession = state.sessions[sessionIndex];
+
+		state = {
+			...state,
+			attachedSessionIndex: sessionIndex
+		};
+
+		emitSignal('session-attached', {
+			sessionId: targetSession.id,
+			sessionName: targetSession.name
+		});
+
+		// Focus the session's pane input
+		triggerInputFocus();
+
+		return true;
+	}
+
+	/**
+	 * Detach from the current session.
+	 * The session continues to exist in the background.
+	 * Returns the name of the detached session for display purposes.
+	 */
+	function detachFromSession(): string | null {
+		if (state.attachedSessionIndex === null) {
+			return null;
+		}
+
+		const detachedSession = state.sessions[state.attachedSessionIndex];
+		const detachedSessionName = detachedSession.name;
+
+		state = {
+			...state,
+			attachedSessionIndex: null
+		};
+
+		emitSignal('session-detached', {
+			sessionId: detachedSession.id,
+			sessionName: detachedSessionName
+		});
+
+		return detachedSessionName;
+	}
+
+	/**
+	 * Kill (destroy) a session.
+	 *
+	 * @param target - Session index or name. If not provided, kills the attached session.
+	 * @returns true if killed, false if not found or cannot kill
+	 */
+	function killSessionByTarget(target?: number | string): boolean {
+		let sessionIndex: number;
+
+		if (target === undefined) {
+			// Kill the attached session
+			if (state.attachedSessionIndex === null) {
+				return false;
+			}
+			sessionIndex = state.attachedSessionIndex;
+		} else {
+			sessionIndex = findSessionIndex(target);
+			if (sessionIndex === -1) {
+				return false;
+			}
+		}
+
+		// Cannot kill the last session
+		if (state.sessions.length <= 1) {
+			return false;
+		}
+
+		const killedSession = state.sessions[sessionIndex];
+		const newSessions = state.sessions.filter((_, i) => i !== sessionIndex);
+
+		// Adjust attached session index if needed
+		let newAttachedIndex = state.attachedSessionIndex;
+
+		if (state.attachedSessionIndex === sessionIndex) {
+			// We're killing the attached session - attach to the previous one, or first available
+			newAttachedIndex = Math.max(0, sessionIndex - 1);
+			if (newAttachedIndex >= newSessions.length) {
+				newAttachedIndex = newSessions.length - 1;
+			}
+		} else if (state.attachedSessionIndex !== null && sessionIndex < state.attachedSessionIndex) {
+			// Killed a session before the attached one - adjust index
+			newAttachedIndex = state.attachedSessionIndex - 1;
+		}
+
+		state = {
+			...state,
+			sessions: newSessions,
+			attachedSessionIndex: newAttachedIndex
+		};
+
+		emitSignal('session-killed', {
+			sessionId: killedSession.id,
+			sessionName: killedSession.name
+		});
+
+		// If we attached to a new session, emit that signal too
+		if (newAttachedIndex !== null && newAttachedIndex !== state.attachedSessionIndex) {
+			const newAttachedSession = newSessions[newAttachedIndex];
+			emitSignal('session-attached', {
+				sessionId: newAttachedSession.id,
+				sessionName: newAttachedSession.name
+			});
+			triggerInputFocus();
+		}
+
+		return true;
+	}
+
+	/**
+	 * Rename a session.
+	 *
+	 * @param name - New name for the session
+	 * @param target - Session index or name. If not provided, renames the attached session.
+	 * @returns true if renamed, false if session not found
+	 */
+	function renameSessionByTarget(name: string, target?: number | string): boolean {
+		let sessionIndex: number;
+
+		if (target === undefined) {
+			// Rename the attached session
+			if (state.attachedSessionIndex === null) {
+				return false;
+			}
+			sessionIndex = state.attachedSessionIndex;
+		} else {
+			sessionIndex = findSessionIndex(target);
+			if (sessionIndex === -1) {
+				return false;
+			}
+		}
+
+		const oldName = state.sessions[sessionIndex].name;
+
+		state = {
+			...state,
+			sessions: state.sessions.map((session, idx) =>
+				idx === sessionIndex ? { ...session, name } : session
+			)
+		};
+
+		emitSignal('session-renamed', {
+			sessionId: state.sessions[sessionIndex].id,
+			sessionName: name,
+			metadata: { oldName }
+		});
+
+		return true;
+	}
+
+	/**
+	 * Check if currently attached to a session.
+	 */
+	function isAttached(): boolean {
+		return state.attachedSessionIndex !== null;
+	}
+
+	/**
+	 * Handle a session operation from a command result.
+	 * This bridges the command system with the session management methods.
+	 */
+	function handleSessionOperation(operation: SessionOperation): void {
+		switch (operation.type) {
+			case 'create': {
+				createNewSession(operation.name, operation.attach ?? true);
+				addHistory({
+					type: 'system',
+					content: `[new session created]`,
+					timestamp: Date.now()
+				});
+				break;
+			}
+			case 'attach': {
+				const success = attachSessionByTarget(operation.target);
+				if (!success) {
+					addHistory({
+						type: 'error',
+						content: `can't find session: ${operation.target}`,
+						timestamp: Date.now()
+					});
+				} else {
+					addHistory({
+						type: 'system',
+						content: `[attached to session ${operation.target}]`,
+						timestamp: Date.now()
+					});
+				}
+				break;
+			}
+			case 'detach': {
+				const detachedName = detachFromSession();
+				if (detachedName !== null) {
+					setMode('default');
+					addHistory({
+						type: 'system',
+						content: `[detached (from session ${detachedName})]`,
+						timestamp: Date.now()
+					});
+				}
+				break;
+			}
+			case 'kill': {
+				const targetSession =
+					operation.target !== undefined
+						? state.sessions[findSessionIndex(operation.target)]
+						: attachedSession;
+				const sessionName = targetSession?.name ?? 'unknown';
+				const success = killSessionByTarget(operation.target);
+				if (!success) {
+					if (state.sessions.length <= 1) {
+						addHistory({
+							type: 'error',
+							content: `can't kill last session`,
+							timestamp: Date.now()
+						});
+					} else {
+						addHistory({
+							type: 'error',
+							content: `can't find session: ${operation.target}`,
+							timestamp: Date.now()
+						});
+					}
+				} else {
+					addHistory({
+						type: 'system',
+						content: `[killed session ${sessionName}]`,
+						timestamp: Date.now()
+					});
+				}
+				break;
+			}
+			case 'rename': {
+				const success = renameSessionByTarget(operation.name, operation.target);
+				if (!success) {
+					addHistory({
+						type: 'error',
+						content: `can't find session: ${operation.target}`,
+						timestamp: Date.now()
+					});
+				} else {
+					addHistory({
+						type: 'system',
+						content: `[renamed session to ${operation.name}]`,
+						timestamp: Date.now()
+					});
+				}
+				break;
+			}
+		}
+	}
+
+	// ========================================================================
 	// WINDOW OPERATIONS
 	// ========================================================================
 
@@ -205,15 +648,18 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @param name - Optional name for the window
 	 */
 	function createNewWindow(name?: string): void {
-		const newWindow = createWindow(name);
-		const newWindowIndex = state.windows.length;
+		if (!attachedSession) {
+			return;
+		}
 
-		state = {
-			...state,
-			windows: [...state.windows, newWindow],
+		const newWindow = createWindow(name);
+		const newWindowIndex = attachedSession.windows.length;
+
+		updateAttachedSession({
+			windows: [...attachedSession.windows, newWindow],
 			activeWindowIndex: newWindowIndex,
 			focusedPaneId: (newWindow.paneTree as Pane).id
-		};
+		});
 
 		emitSignal('window-created', { windowId: newWindow.id });
 		// Focus the new window's pane input
@@ -228,20 +674,24 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @returns true if closed, false if refused (last window)
 	 */
 	function closeWindow(index?: number): boolean {
-		const targetIndex = index ?? state.activeWindowIndex;
-
-		// Guard: cannot close last window
-		if (state.windows.length <= 1) {
+		if (!attachedSession) {
 			return false;
 		}
 
-		const closedWindow = state.windows[targetIndex];
-		const newWindows = state.windows.filter((_, i) => i !== targetIndex);
+		const targetIndex = index ?? attachedSession.activeWindowIndex;
+
+		// Guard: cannot close last window
+		if (attachedSession.windows.length <= 1) {
+			return false;
+		}
+
+		const closedWindow = attachedSession.windows[targetIndex];
+		const newWindows = attachedSession.windows.filter((_, i) => i !== targetIndex);
 
 		// Adjust active index if needed
-		let newActiveIndex = state.activeWindowIndex;
-		if (targetIndex <= state.activeWindowIndex) {
-			newActiveIndex = Math.max(0, state.activeWindowIndex - 1);
+		let newActiveIndex = attachedSession.activeWindowIndex;
+		if (targetIndex <= attachedSession.activeWindowIndex) {
+			newActiveIndex = Math.max(0, attachedSession.activeWindowIndex - 1);
 		}
 		if (newActiveIndex >= newWindows.length) {
 			newActiveIndex = newWindows.length - 1;
@@ -250,12 +700,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		const newActiveWindow = newWindows[newActiveIndex];
 		const firstPane = getFirstPane(newActiveWindow.paneTree);
 
-		state = {
-			...state,
+		updateAttachedSession({
 			windows: newWindows,
 			activeWindowIndex: newActiveIndex,
 			focusedPaneId: firstPane.id
-		};
+		});
 
 		emitSignal('window-closed', { windowId: closedWindow.id });
 		return true;
@@ -267,22 +716,25 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @param index - Window index to switch to
 	 */
 	function switchWindow(index: number): void {
-		if (index < 0 || index >= state.windows.length) {
+		if (!attachedSession) {
 			return;
 		}
 
-		if (index === state.activeWindowIndex) {
+		if (index < 0 || index >= attachedSession.windows.length) {
 			return;
 		}
 
-		const targetWindow = state.windows[index];
+		if (index === attachedSession.activeWindowIndex) {
+			return;
+		}
+
+		const targetWindow = attachedSession.windows[index];
 		const firstPane = getFirstPane(targetWindow.paneTree);
 
-		state = {
-			...state,
+		updateAttachedSession({
 			activeWindowIndex: index,
 			focusedPaneId: firstPane.id
-		};
+		});
 
 		emitSignal('window-switched', { windowId: targetWindow.id });
 		// Focus the switched window's pane input
@@ -293,7 +745,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Switch to the next window (wraps around).
 	 */
 	function nextWindow(): void {
-		const newIndex = (state.activeWindowIndex + 1) % state.windows.length;
+		if (!attachedSession) {
+			return;
+		}
+
+		const newIndex = (attachedSession.activeWindowIndex + 1) % attachedSession.windows.length;
 		switchWindow(newIndex);
 	}
 
@@ -301,7 +757,13 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Switch to the previous window (wraps around).
 	 */
 	function previousWindow(): void {
-		const newIndex = (state.activeWindowIndex - 1 + state.windows.length) % state.windows.length;
+		if (!attachedSession) {
+			return;
+		}
+
+		const newIndex =
+			(attachedSession.activeWindowIndex - 1 + attachedSession.windows.length) %
+			attachedSession.windows.length;
 		switchWindow(newIndex);
 	}
 
@@ -312,19 +774,22 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @param name - New name for the window
 	 */
 	function renameWindow(name: string, index?: number): void {
-		const targetIndex = index ?? state.activeWindowIndex;
-
-		if (targetIndex < 0 || targetIndex >= state.windows.length) {
+		if (!attachedSession) {
 			return;
 		}
 
-		state = {
-			...state,
-			windows: state.windows.map((w, i) => (i === targetIndex ? { ...w, name } : w))
-		};
+		const targetIndex = index ?? attachedSession.activeWindowIndex;
+
+		if (targetIndex < 0 || targetIndex >= attachedSession.windows.length) {
+			return;
+		}
+
+		updateAttachedSession({
+			windows: attachedSession.windows.map((w, i) => (i === targetIndex ? { ...w, name } : w))
+		});
 
 		emitSignal('window-renamed', {
-			windowId: state.windows[targetIndex].id,
+			windowId: attachedSession.windows[targetIndex].id,
 			metadata: { name }
 		});
 	}
@@ -336,35 +801,44 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @param toIndex - New index
 	 */
 	function reorderWindows(fromIndex: number, toIndex: number): void {
+		if (!attachedSession) {
+			return;
+		}
+
 		if (
 			fromIndex < 0 ||
-			fromIndex >= state.windows.length ||
+			fromIndex >= attachedSession.windows.length ||
 			toIndex < 0 ||
-			toIndex >= state.windows.length ||
+			toIndex >= attachedSession.windows.length ||
 			fromIndex === toIndex
 		) {
 			return;
 		}
 
-		const newWindows = [...state.windows];
+		const newWindows = [...attachedSession.windows];
 		const [removed] = newWindows.splice(fromIndex, 1);
 		newWindows.splice(toIndex, 0, removed);
 
 		// Adjust active index
-		let newActiveIndex = state.activeWindowIndex;
-		if (fromIndex === state.activeWindowIndex) {
+		let newActiveIndex = attachedSession.activeWindowIndex;
+		if (fromIndex === attachedSession.activeWindowIndex) {
 			newActiveIndex = toIndex;
-		} else if (fromIndex < state.activeWindowIndex && toIndex >= state.activeWindowIndex) {
+		} else if (
+			fromIndex < attachedSession.activeWindowIndex &&
+			toIndex >= attachedSession.activeWindowIndex
+		) {
 			newActiveIndex--;
-		} else if (fromIndex > state.activeWindowIndex && toIndex <= state.activeWindowIndex) {
+		} else if (
+			fromIndex > attachedSession.activeWindowIndex &&
+			toIndex <= attachedSession.activeWindowIndex
+		) {
 			newActiveIndex++;
 		}
 
-		state = {
-			...state,
+		updateAttachedSession({
 			windows: newWindows,
 			activeWindowIndex: newActiveIndex
-		};
+		});
 	}
 
 	// ========================================================================
@@ -381,7 +855,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			return;
 		}
 
-		const result = splitPane(activeWindow.paneTree, state.focusedPaneId, direction);
+		const result = splitPane(activeWindow.paneTree, focusedPaneId, direction);
 
 		if (!result) {
 			return;
@@ -414,7 +888,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			return false;
 		}
 
-		const closedPaneId = state.focusedPaneId;
+		const closedPaneId = focusedPaneId;
 		const newTree = removePane(activeWindow.paneTree, closedPaneId);
 
 		if (!newTree) {
@@ -462,7 +936,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			return;
 		}
 
-		const targetPane = findPaneInDirection(activeWindow.paneTree, state.focusedPaneId, direction);
+		const targetPane = findPaneInDirection(activeWindow.paneTree, focusedPaneId, direction);
 
 		if (targetPane) {
 			setFocusedPane(targetPane.id);
@@ -477,7 +951,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			return;
 		}
 
-		const nextPane = getNextPane(activeWindow.paneTree, state.focusedPaneId);
+		const nextPane = getNextPane(activeWindow.paneTree, focusedPaneId);
 		setFocusedPane(nextPane.id);
 	}
 
@@ -489,7 +963,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			return;
 		}
 
-		const prevPane = getPreviousPane(activeWindow.paneTree, state.focusedPaneId);
+		const prevPane = getPreviousPane(activeWindow.paneTree, focusedPaneId);
 		setFocusedPane(prevPane.id);
 	}
 
@@ -515,11 +989,19 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Add a history entry to a pane.
 	 */
 	function addHistory(entry: HistoryEntry, paneId?: string): void {
+		// When detached, add history to the shell pane
+		if (isDetached) {
+			updateShellPane({
+				history: [...state.shellPane.history, entry]
+			});
+			return;
+		}
+
 		if (!activeWindow) {
 			return;
 		}
 
-		const targetPaneId = paneId ?? state.focusedPaneId;
+		const targetPaneId = paneId ?? focusedPaneId;
 		const newTree = addPaneHistory(activeWindow.paneTree, targetPaneId, entry);
 		updateActiveWindowTree(newTree);
 	}
@@ -528,11 +1010,17 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Clear a pane's history.
 	 */
 	function clearHistory(paneId?: string): void {
+		// When detached, clear the shell pane history
+		if (isDetached) {
+			updateShellPane({ history: [] });
+			return;
+		}
+
 		if (!activeWindow) {
 			return;
 		}
 
-		const targetPaneId = paneId ?? state.focusedPaneId;
+		const targetPaneId = paneId ?? focusedPaneId;
 		const newTree = clearPaneHistory(activeWindow.paneTree, targetPaneId);
 		updateActiveWindowTree(newTree);
 	}
@@ -543,11 +1031,39 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * When exiting man mode (via exitManMode), restores the previous mode.
 	 */
 	function setMode(mode: PaneMode, paneId?: string): void {
+		// When detached, set mode on the shell pane
+		if (isDetached) {
+			const oldMode = state.shellPane.mode;
+
+			// When entering man mode, store the current mode so we can restore it later
+			if (mode === 'man' && oldMode !== 'man') {
+				updateShellPane({ previousMode: oldMode, mode });
+			} else {
+				updateShellPane({ mode });
+			}
+
+			if (oldMode !== mode) {
+				emitSignal('mode-changed', {
+					paneId: state.shellPane.id,
+					newMode: mode,
+					metadata: { oldMode }
+				});
+
+				// Special signals for tmux enter/exit
+				if (mode === 'tmux' && oldMode === 'default') {
+					emitSignal('tmux-entered', { paneId: state.shellPane.id });
+				} else if (mode === 'default' && oldMode === 'tmux') {
+					emitSignal('tmux-exited', { paneId: state.shellPane.id });
+				}
+			}
+			return;
+		}
+
 		if (!activeWindow) {
 			return;
 		}
 
-		const targetPaneId = paneId ?? state.focusedPaneId;
+		const targetPaneId = paneId ?? focusedPaneId;
 		const oldPane = findPaneById(activeWindow.paneTree, targetPaneId);
 		const oldMode = oldPane?.mode;
 
@@ -584,11 +1100,38 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * If no previous mode is stored, defaults to 'default'.
 	 */
 	function exitManMode(paneId?: string): void {
+		// When detached, exit man mode on the shell pane
+		if (isDetached) {
+			if (state.shellPane.mode !== 'man') {
+				return;
+			}
+
+			// Restore the previous mode, default to 'default' if not set
+			const modeToRestore = state.shellPane.previousMode ?? 'default';
+
+			updateShellPane({
+				previousMode: undefined,
+				mode: modeToRestore
+			});
+
+			emitSignal('mode-changed', {
+				paneId: state.shellPane.id,
+				newMode: modeToRestore,
+				metadata: { oldMode: 'man' }
+			});
+
+			// Emit tmux-entered if restoring to tmux mode (unlikely when detached)
+			if (modeToRestore === 'tmux') {
+				emitSignal('tmux-entered', { paneId: state.shellPane.id });
+			}
+			return;
+		}
+
 		if (!activeWindow) {
 			return;
 		}
 
-		const targetPaneId = paneId ?? state.focusedPaneId;
+		const targetPaneId = paneId ?? focusedPaneId;
 		const pane = findPaneById(activeWindow.paneTree, targetPaneId);
 
 		if (!pane || pane.mode !== 'man') {
@@ -621,11 +1164,17 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Set a pane's input value.
 	 */
 	function setInput(value: string, paneId?: string): void {
+		// When detached, set input on the shell pane
+		if (isDetached) {
+			updateShellPane({ inputValue: value });
+			return;
+		}
+
 		if (!activeWindow) {
 			return;
 		}
 
-		const targetPaneId = paneId ?? state.focusedPaneId;
+		const targetPaneId = paneId ?? focusedPaneId;
 		const newTree = setPaneInput(activeWindow.paneTree, targetPaneId, value);
 		updateActiveWindowTree(newTree);
 	}
@@ -638,7 +1187,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			return;
 		}
 
-		const newTree = updatePane(activeWindow.paneTree, state.focusedPaneId, updates);
+		const newTree = updatePane(activeWindow.paneTree, focusedPaneId, updates);
 		updateActiveWindowTree(newTree);
 	}
 
@@ -702,13 +1251,99 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 		// Handle mode-switching commands in default mode
 		if (focusedPane.mode === 'default') {
-			if (trimmedCommand === 'tmux' || trimmedCommand.startsWith('tmux ')) {
+			// Handle tmux attach command
+			if (
+				trimmedCommand.startsWith('tmux attach') ||
+				trimmedCommand.startsWith('tmux a ') ||
+				trimmedCommand === 'tmux a'
+			) {
+				// Parse -t <target> argument
+				const args = trimmedCommand.split(/\s+/);
+				const tIndex = args.indexOf('-t');
+
+				if (tIndex !== -1 && args[tIndex + 1]) {
+					const target = args[tIndex + 1];
+					const numTarget = parseInt(target, 10);
+					const parsedTarget = isNaN(numTarget) ? target : numTarget;
+					const success = attachSessionByTarget(parsedTarget);
+
+					if (!success) {
+						addHistory({
+							type: 'error',
+							content: `can't find session: ${target}`,
+							timestamp: Date.now()
+						});
+						triggerInputFocus();
+						return;
+					}
+				} else {
+					// No target - attach to first available session
+					if (state.sessions.length === 0) {
+						addHistory({
+							type: 'error',
+							content: 'no sessions',
+							timestamp: Date.now()
+						});
+						triggerInputFocus();
+						return;
+					}
+					attachSessionByTarget(0);
+				}
+
+				setMode('tmux');
+				addHistory({
+					type: 'system',
+					content: `[attached to session ${attachedSession?.name ?? '0'}]`,
+					timestamp: Date.now()
+				});
+				return;
+			}
+
+			// Handle tmux new-session command
+			if (trimmedCommand.startsWith('tmux new-session') || trimmedCommand.startsWith('tmux new ')) {
+				// Parse -s <name> argument
+				const args = trimmedCommand.split(/\s+/);
+				const sIndex = args.indexOf('-s');
+				const sessionName = sIndex !== -1 && args[sIndex + 1] ? args[sIndex + 1] : undefined;
+
+				createNewSession(sessionName, true);
+				setMode('tmux');
+				addHistory({
+					type: 'system',
+					content: `[new session created: ${attachedSession?.name ?? '0'}]`,
+					timestamp: Date.now()
+				});
+				return;
+			}
+
+			// Handle basic "tmux" command - create new session or attach to existing
+			if (trimmedCommand === 'tmux') {
+				if (state.sessions.length === 0) {
+					// No sessions exist - create one
+					createNewSession(undefined, true);
+				} else if (state.attachedSessionIndex === null) {
+					// Have sessions but not attached - attach to first
+					attachSessionByTarget(0);
+				}
+				// If already attached, just switch to tmux mode
 				setMode('tmux');
 				addHistory({
 					type: 'system',
 					content: '[tmux session started]',
 					timestamp: Date.now()
 				});
+				return;
+			}
+
+			// Handle tmux ls / list-sessions in default mode
+			if (trimmedCommand === 'tmux ls' || trimmedCommand === 'tmux list-sessions') {
+				const output = formatSessionList(sessions, attachedSessionIndex);
+				addHistory({
+					type: 'output',
+					content: output,
+					timestamp: Date.now()
+				});
+				triggerInputFocus();
 				return;
 			}
 
@@ -801,20 +1436,28 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 							timestamp: Date.now()
 						});
 					} else {
-						// Single pane: detach from tmux (exit to default mode)
+						// Single pane: detach from tmux session (preserves session in background)
+						const detachedSessionName = detachFromSession();
 						setMode('default');
 						addHistory({
 							type: 'system',
-							content: '[detached (from session 0)]',
+							content: `[detached (from session ${detachedSessionName ?? '0'})]`,
 							timestamp: Date.now()
 						});
 					}
 				}
 
+				// Handle session operations
+				if (result.sessionOperation) {
+					handleSessionOperation(result.sessionOperation);
+				}
+
 				// Emit command-executed signal for challenge tracking (type-safe)
+				// Use commandName as the answer (canonical name like 'list-sessions')
+				// NOT trimmedCommand (which is what user typed like 'tmux ls')
 				emitSignal('command-executed', {
 					commandName,
-					command: trimmedCommand,
+					command: commandName,
 					paneId: focusedPane.id
 				});
 
@@ -880,6 +1523,24 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 	return {
 		// Reactive state (read-only via getters)
+		// Session-level state
+		get sessions() {
+			return sessions;
+		},
+		get attachedSessionIndex() {
+			return attachedSessionIndex;
+		},
+		get attachedSession() {
+			return attachedSession;
+		},
+		get sessionCount() {
+			return sessionCount;
+		},
+		get isDetached() {
+			return isDetached;
+		},
+
+		// Window/Pane state (scoped to attached session, or shell pane when detached)
 		get windows() {
 			return windows;
 		},
@@ -914,6 +1575,14 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		get focusTrigger() {
 			return focusTrigger;
 		},
+
+		// Session operations
+		createSession: createNewSession,
+		attachSession: attachSessionByTarget,
+		detachSession: detachFromSession,
+		killSession: killSessionByTarget,
+		renameSession: renameSessionByTarget,
+		isAttached,
 
 		// Window operations
 		createWindow: createNewWindow,

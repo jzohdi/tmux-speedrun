@@ -121,6 +121,16 @@ export type CommandContext = {
 };
 
 /**
+ * Session operation types for command results.
+ */
+export type SessionOperation =
+	| { type: 'create'; name?: string; attach?: boolean }
+	| { type: 'attach'; target: string | number }
+	| { type: 'detach' }
+	| { type: 'kill'; target?: string | number }
+	| { type: 'rename'; name: string; target?: string | number };
+
+/**
  * Result returned from a command handler.
  */
 export type CommandResult = {
@@ -142,12 +152,16 @@ export type CommandResult = {
 		data?: Record<string, unknown>;
 	};
 	/** Type of output to generate (handled by store) */
-	generateOutput?: 'pane-list' | 'window-list';
+	generateOutput?: 'pane-list' | 'window-list' | 'session-list';
 	/**
 	 * Special exit behavior:
 	 * - 'close-pane-or-detach': If multiple panes, close current pane; otherwise detach from tmux
 	 */
 	exitBehavior?: 'close-pane-or-detach';
+	/**
+	 * Session operation to perform (handled by store).
+	 */
+	sessionOperation?: SessionOperation;
 };
 
 /**
@@ -163,6 +177,13 @@ export type CommandDefinition = {
 	name: CommandIdType;
 	/** Optional aliases - must also be CommandIdType values */
 	aliases?: CommandIdType[];
+	/**
+	 * Optional match patterns for text input.
+	 * If provided, these patterns are used to match user input instead of the name.
+	 * Useful for commands where the typed text differs from the canonical name.
+	 * Example: name='list-sessions', matchPatterns=['tmux list-sessions', 'tmux ls']
+	 */
+	matchPatterns?: string[];
 	/** Description for help text */
 	description: string;
 	/** The handler function */
@@ -216,33 +237,65 @@ function parseCommand(command: string): string[] {
 }
 
 /**
+ * Check if a pattern matches the input command.
+ */
+function matchesPattern(
+	normalizedCommand: string,
+	pattern: string,
+	matchMode: 'exact' | 'prefix'
+): boolean {
+	const normalizedPattern = pattern.toLowerCase();
+
+	if (matchMode === 'exact') {
+		return (
+			normalizedCommand === normalizedPattern ||
+			normalizedCommand.startsWith(normalizedPattern + ' ')
+		);
+	}
+
+	// prefix mode
+	return normalizedCommand.startsWith(normalizedPattern);
+}
+
+/**
  * Find a matching command definition.
  * Returns the definition and the canonical command name.
  */
 function findCommand(fullCommand: string): { definition: CommandDefinition } | null {
 	const normalizedCommand = fullCommand.trim().toLowerCase();
 
-	// Sort by name length (descending) to match longer commands first
-	const sortedRegistry = [...commandRegistry].sort((a, b) => b.name.length - a.name.length);
+	// Sort by pattern length (descending) to match longer patterns first
+	// This ensures "tmux list-sessions" matches before "tmux ls"
+	const sortedRegistry = [...commandRegistry].sort((a, b) => {
+		const aMaxLen = Math.max(a.name.length, ...(a.matchPatterns?.map((p) => p.length) ?? []));
+		const bMaxLen = Math.max(b.name.length, ...(b.matchPatterns?.map((p) => p.length) ?? []));
+
+		return bMaxLen - aMaxLen;
+	});
 
 	for (const def of sortedRegistry) {
 		const matchMode = def.matchMode ?? 'exact';
 
+		// If matchPatterns is provided, use those instead of name/aliases
+		if (def.matchPatterns && def.matchPatterns.length > 0) {
+			for (const pattern of def.matchPatterns) {
+				if (matchesPattern(normalizedCommand, pattern, matchMode)) {
+					return { definition: def };
+				}
+			}
+			// If matchPatterns is defined, don't fall back to name matching
+			continue;
+		}
+
 		// Check main name
-		if (matchMode === 'exact') {
-			if (normalizedCommand === def.name || normalizedCommand.startsWith(def.name + ' ')) {
-				return { definition: def };
-			}
-		} else if (matchMode === 'prefix') {
-			if (normalizedCommand.startsWith(def.name)) {
-				return { definition: def };
-			}
+		if (matchesPattern(normalizedCommand, def.name, matchMode)) {
+			return { definition: def };
 		}
 
 		// Check aliases
 		if (def.aliases) {
 			for (const alias of def.aliases) {
-				if (normalizedCommand === alias || normalizedCommand.startsWith(alias + ' ')) {
+				if (matchesPattern(normalizedCommand, alias, matchMode)) {
 					return { definition: def };
 				}
 			}
@@ -333,7 +386,14 @@ registerCommand({
 		const commands = getRegisteredCommands();
 		const helpText = commands
 			.map((cmd) => {
+				// Show match patterns if available, otherwise show name with aliases
+				if (cmd.matchPatterns && cmd.matchPatterns.length > 0) {
+					const patterns = cmd.matchPatterns.join(', ');
+
+					return `  ${patterns} - ${cmd.description}`;
+				}
 				const aliases = cmd.aliases ? ` (aliases: ${cmd.aliases.join(', ')})` : '';
+
 				return `  ${cmd.name}${aliases} - ${cmd.description}`;
 			})
 			.join('\n');
@@ -369,6 +429,170 @@ registerCommand({
 		handled: true,
 		generateOutput: 'pane-list'
 	})
+});
+
+/**
+ * List sessions command (tmux-style).
+ * Supports: tmux list-sessions, tmux ls
+ * Uses LIST_SESSIONS as canonical name to match challenge expectations.
+ */
+registerCommand({
+	name: CommandId.LIST_SESSIONS,
+	matchPatterns: ['tmux list-sessions', 'tmux ls'],
+	description: 'List all tmux sessions',
+	handler: () => ({
+		handled: true,
+		generateOutput: 'session-list'
+	})
+});
+
+/**
+ * New session command (tmux-style).
+ * Supports: tmux new-session, tmux new, tmux new-session -s <name>
+ */
+registerCommand({
+	name: CommandId.NEW_SESSION,
+	matchPatterns: ['tmux new-session', 'tmux new'],
+	matchMode: 'prefix',
+	description: 'Create a new tmux session',
+	handler: (ctx) => {
+		// Parse optional -s <name> argument
+		// Example: "tmux new-session -s mysession" or "tmux new -s mysession"
+		let sessionName: string | undefined;
+		const sIndex = ctx.args.indexOf('-s');
+		if (sIndex !== -1 && ctx.args[sIndex + 1]) {
+			sessionName = ctx.args[sIndex + 1];
+		}
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'create', name: sessionName, attach: true }
+		};
+	}
+});
+
+/**
+ * Attach session command (tmux-style).
+ * Supports: tmux attach, tmux attach-session, tmux attach -t <target>, tmux a
+ */
+registerCommand({
+	name: CommandId.ATTACH_SESSION,
+	matchPatterns: ['tmux attach-session', 'tmux attach', 'tmux a'],
+	matchMode: 'prefix',
+	description: 'Attach to an existing tmux session',
+	handler: (ctx) => {
+		// Parse -t <target> argument
+		// Example: "tmux attach -t 0" or "tmux attach -t mysession"
+		const tIndex = ctx.args.indexOf('-t');
+		if (tIndex === -1 || !ctx.args[tIndex + 1]) {
+			// No target specified - attach to most recent session (index 0)
+			return {
+				handled: true,
+				sessionOperation: { type: 'attach', target: 0 }
+			};
+		}
+
+		const target = ctx.args[tIndex + 1];
+		// Try to parse as number, otherwise use as string name
+		const numTarget = parseInt(target, 10);
+		const parsedTarget = isNaN(numTarget) ? target : numTarget;
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'attach', target: parsedTarget }
+		};
+	}
+});
+
+/**
+ * Detach command (tmux-style).
+ * Supports: tmux detach, tmux detach-client
+ * Also triggered by prefix + d keybinding.
+ */
+registerCommand({
+	name: CommandId.DETACH,
+	matchPatterns: ['tmux detach', 'tmux detach-client'],
+	description: 'Detach from the current tmux session',
+	handler: () => ({
+		handled: true,
+		sessionOperation: { type: 'detach' }
+	})
+});
+
+/**
+ * Kill session command (tmux-style).
+ * Supports: tmux kill-session, tmux kill-session -t <target>
+ */
+registerCommand({
+	name: CommandId.KILL_SESSION,
+	matchPatterns: ['tmux kill-session'],
+	matchMode: 'prefix',
+	description: 'Kill a tmux session',
+	handler: (ctx) => {
+		// Parse optional -t <target> argument
+		const tIndex = ctx.args.indexOf('-t');
+
+		if (tIndex === -1 || !ctx.args[tIndex + 1]) {
+			// No target - kill current session
+			return {
+				handled: true,
+				sessionOperation: { type: 'kill' }
+			};
+		}
+
+		const target = ctx.args[tIndex + 1];
+		const numTarget = parseInt(target, 10);
+		const parsedTarget = isNaN(numTarget) ? target : numTarget;
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'kill', target: parsedTarget }
+		};
+	}
+});
+
+/**
+ * Rename session command (tmux-style).
+ * Supports: tmux rename-session <name>, tmux rename-session -t <target> <name>
+ */
+registerCommand({
+	name: CommandId.RENAME_SESSION,
+	matchPatterns: ['tmux rename-session'],
+	matchMode: 'prefix',
+	description: 'Rename a tmux session',
+	handler: (ctx) => {
+		// Parse: tmux rename-session <name>
+		// Or: tmux rename-session -t <target> <name>
+		const tIndex = ctx.args.indexOf('-t');
+
+		if (tIndex !== -1 && ctx.args[tIndex + 1] && ctx.args[tIndex + 2]) {
+			// Has -t <target> <name>
+			const target = ctx.args[tIndex + 1];
+			const name = ctx.args[tIndex + 2];
+			const numTarget = parseInt(target, 10);
+			const parsedTarget = isNaN(numTarget) ? target : numTarget;
+
+			return {
+				handled: true,
+				sessionOperation: { type: 'rename', name, target: parsedTarget }
+			};
+		}
+
+		// Just <name> - rename current session
+		// Args: ['tmux', 'rename-session', '<name>']
+		const name = ctx.args[2];
+		if (!name) {
+			return {
+				handled: true,
+				error: 'usage: rename-session [-t target-session] new-name'
+			};
+		}
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'rename', name }
+		};
+	}
 });
 
 // ============================================================================

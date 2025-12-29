@@ -28,7 +28,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
  * @returns Decoded bytes
  * @throws Error if the string is not valid Base64
  */
-export function base64ToBytes(base64: string): Uint8Array {
+export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
 	const binary = atob(base64);
 	const bytes = new Uint8Array(binary.length);
 
@@ -45,7 +45,7 @@ export function base64ToBytes(base64: string): Uint8Array {
  * @param buffer - The ArrayBuffer to convert
  * @returns Uint8Array view of the buffer
  */
-export function bufferToBytes(buffer: ArrayBuffer): Uint8Array {
+export function bufferToBytes(buffer: ArrayBuffer): Uint8Array<ArrayBuffer> {
 	return new Uint8Array(buffer);
 }
 
@@ -55,7 +55,7 @@ export function bufferToBytes(buffer: ArrayBuffer): Uint8Array {
  * @param str - The string to encode
  * @returns UTF-8 encoded bytes
  */
-export function stringToBytes(str: string): Uint8Array {
+export function stringToBytes(str: string): Uint8Array<ArrayBuffer> {
 	return new TextEncoder().encode(str);
 }
 
@@ -75,7 +75,7 @@ export function bytesToString(bytes: Uint8Array): string {
  * @param length - Number of bytes to generate
  * @returns Random bytes
  */
-export function randomBytes(length: number): Uint8Array {
+export function randomBytes(length: number): Uint8Array<ArrayBuffer> {
 	return crypto.getRandomValues(new Uint8Array(length));
 }
 
@@ -107,7 +107,7 @@ export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
  * @param arrays - Arrays to concatenate
  * @returns Combined array
  */
-export function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+export function concatBytes(...arrays: Uint8Array<ArrayBuffer>[]): Uint8Array<ArrayBuffer> {
 	const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
 	const result = new Uint8Array(totalLength);
 

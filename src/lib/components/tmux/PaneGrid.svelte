@@ -164,6 +164,39 @@
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
+		/**
+		 * Critical for nested splits:
+		 * Make each split child a flex container so the nested PaneGrid root
+		 * can size via flex (rather than relying on height: 100% through an
+		 * auto-sized parent, which breaks nested horizontal/column splits).
+		 */
+		display: flex;
+		flex-direction: column;
+	}
+
+	/**
+	 * Ensure the nested PaneGrid root element fills the split child.
+	 * 
+	 * Critical: Override height: 100% with auto, but KEEP width: 100%.
+	 * 
+	 * Why height: auto?
+	 *   When the parent (split-first/split-second) is inside a row flex (vertical split),
+	 *   it has no explicit height—only stretch. height: 100% doesn't resolve properly,
+	 *   so we use auto to let flex: 1 control the height.
+	 * 
+	 * Why NOT width: auto?
+	 *   The nested element may be a flex container (split-container) whose children
+	 *   size as 50% of the parent width. If we set width: auto, that creates a circular
+	 *   dependency (50% of auto = 0), collapsing the layout. We keep width: 100% because
+	 *   the parent split-first/split-second has a definite width from flex sizing.
+	 */
+	.split-first > :global(*),
+	.split-second > :global(*) {
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
+		height: auto;
+		/* width stays at 100% from the element's own class - DO NOT set width: auto */
 	}
 
 	/* Divider between panes */
@@ -172,12 +205,13 @@
 		background: #3d3d3d;
 	}
 
-	.split-container.horizontal .split-divider {
+	/* Use direct child combinator (>) to prevent styles from leaking into nested splits */
+	.split-container.horizontal > .split-divider {
 		height: 2px;
 		width: 100%;
 	}
 
-	.split-container.vertical .split-divider {
+	.split-container.vertical > .split-divider {
 		width: 2px;
 		height: 100%;
 	}

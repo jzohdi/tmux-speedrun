@@ -40,7 +40,7 @@ export const SESSION_SALT_SIZE = 16;
  *
  * @returns 16-byte random salt
  */
-export function generateSessionSalt(): Uint8Array {
+export function generateSessionSalt(): Uint8Array<ArrayBuffer> {
 	return randomBytes(SESSION_SALT_SIZE);
 }
 
@@ -52,8 +52,8 @@ export function generateSessionSalt(): Uint8Array {
  * @returns K0 as ArrayBuffer (32 bytes)
  */
 export async function deriveK0(
-	sharedSecret: ArrayBuffer | Uint8Array,
-	sessionSalt: Uint8Array
+	sharedSecret: ArrayBuffer | Uint8Array<ArrayBuffer>,
+	sessionSalt: Uint8Array<ArrayBuffer>
 ): Promise<ArrayBuffer> {
 	return hkdf(sharedSecret, sessionSalt, 'k0', 32);
 }
@@ -69,7 +69,7 @@ export async function deriveK0(
  * @returns Next key (Kn+1) as ArrayBuffer
  */
 export async function deriveNextKey(
-	currentKey: ArrayBuffer | Uint8Array,
+	currentKey: ArrayBuffer | Uint8Array<ArrayBuffer>,
 	answer: string,
 	stepIndex: number
 ): Promise<ArrayBuffer> {
@@ -89,12 +89,12 @@ export async function deriveNextKey(
  * @returns Array of derived keys (length = answers.length + 1)
  */
 export async function deriveKeyChain(
-	k0: ArrayBuffer | Uint8Array,
+	k0: ArrayBuffer | Uint8Array<ArrayBuffer>,
 	answers: string[]
 ): Promise<ArrayBuffer[]> {
 	const keys: ArrayBuffer[] = [k0 instanceof Uint8Array ? k0.buffer : k0];
 
-	let currentKey = k0;
+	let currentKey: ArrayBuffer | Uint8Array<ArrayBuffer> = k0;
 
 	for (let i = 0; i < answers.length; i++) {
 		const nextKey = await deriveNextKey(currentKey, answers[i], i);
@@ -113,13 +113,18 @@ export async function deriveKeyChain(
  * @returns Kfinal as ArrayBuffer
  */
 export async function deriveKfinal(
-	k0: ArrayBuffer | Uint8Array,
+	k0: ArrayBuffer | Uint8Array<ArrayBuffer>,
 	answers: string[]
 ): Promise<ArrayBuffer> {
-	let currentKey = k0;
+	let currentKey: ArrayBuffer | Uint8Array<ArrayBuffer> = k0;
 
 	for (let i = 0; i < answers.length; i++) {
 		currentKey = await deriveNextKey(currentKey, answers[i], i);
+	}
+
+	// Ensure we return an ArrayBuffer
+	if (currentKey instanceof Uint8Array) {
+		return currentKey.buffer;
 	}
 
 	return currentKey;
@@ -133,7 +138,7 @@ export async function deriveKfinal(
  * @returns Encrypted step with nonce and ciphertext
  */
 export async function encryptStep(
-	key: ArrayBuffer | Uint8Array,
+	key: ArrayBuffer | Uint8Array<ArrayBuffer>,
 	payload: StepPayload
 ): Promise<EncryptedStep> {
 	const nonce = generateNonce();
@@ -156,7 +161,7 @@ export async function encryptStep(
  * @throws Error if decryption fails (wrong key)
  */
 export async function decryptStep(
-	key: ArrayBuffer | Uint8Array,
+	key: ArrayBuffer | Uint8Array<ArrayBuffer>,
 	encryptedStep: EncryptedStep
 ): Promise<StepPayload> {
 	const nonce = base64ToBytes(encryptedStep.nonceB64);
@@ -180,9 +185,7 @@ export async function encryptAllSteps(
 	instructions: Instruction[]
 ): Promise<EncryptedStep[]> {
 	if (keys.length < instructions.length) {
-		throw new Error(
-			`Not enough keys: have ${keys.length}, need ${instructions.length}`
-		);
+		throw new Error(`Not enough keys: have ${keys.length}, need ${instructions.length}`);
 	}
 
 	const encryptedSteps: EncryptedStep[] = [];
@@ -221,7 +224,7 @@ export async function encryptAllSteps(
  * @returns Base64-encoded encrypted proof
  */
 export async function encryptProof(
-	serverSecret: Uint8Array,
+	serverSecret: Uint8Array<ArrayBuffer>,
 	kfinal: ArrayBuffer,
 	sessionId: string
 ): Promise<string> {
@@ -248,10 +251,10 @@ export async function encryptProof(
  * @returns The expected Kfinal
  */
 export async function decryptProof(
-	serverSecret: Uint8Array,
+	serverSecret: Uint8Array<ArrayBuffer>,
 	encryptedProof: string,
 	sessionId: string
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
 	// Derive the same encryption key
 	const encryptionKey = await hkdf(serverSecret, stringToBytes(sessionId), 'proof-encryption', 32);
 
@@ -272,8 +275,8 @@ export async function decryptProof(
  * @returns true if proofs match, false otherwise
  */
 export function verifyProof(
-	submittedProof: Uint8Array,
-	expectedProof: Uint8Array
+	submittedProof: Uint8Array<ArrayBuffer>,
+	expectedProof: Uint8Array<ArrayBuffer>
 ): boolean {
 	return constantTimeEqual(submittedProof, expectedProof);
 }
@@ -305,9 +308,9 @@ export function generateSessionId(): string {
 export async function prepareChallenge(
 	sharedSecret: ArrayBuffer,
 	instructions: Instruction[],
-	serverSecret: Uint8Array
+	serverSecret: Uint8Array<ArrayBuffer>
 ): Promise<{
-	sessionSalt: Uint8Array;
+	sessionSalt: Uint8Array<ArrayBuffer>;
 	sessionId: string;
 	encryptedSteps: EncryptedStep[];
 	encryptedProof: string;
@@ -352,7 +355,7 @@ export async function prepareChallenge(
  * @returns true if the challenge was completed correctly
  */
 export async function validateChallenge(
-	serverSecret: Uint8Array,
+	serverSecret: Uint8Array<ArrayBuffer>,
 	sessionId: string,
 	encryptedProof: string,
 	submittedProofB64: string
@@ -371,4 +374,3 @@ export async function validateChallenge(
 		return false;
 	}
 }
-

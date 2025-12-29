@@ -81,12 +81,36 @@ export type TmuxWindow = {
 };
 
 /**
- * The complete tmux state.
+ * A tmux session - the top-level container.
+ * Sessions persist independently and can be attached/detached.
  */
-export type TmuxState = {
+export type TmuxSession = {
+	id: string;
+	/** User-visible name (defaults to numeric index like "0", "1", etc.) */
+	name: string;
 	windows: TmuxWindow[];
 	activeWindowIndex: number;
 	focusedPaneId: string;
+	/** Timestamp when the session was created (for display in `tmux ls`) */
+	createdAt: number;
+};
+
+/**
+ * The complete tmux state.
+ * Supports multiple sessions with attach/detach capability.
+ */
+export type TmuxState = {
+	sessions: TmuxSession[];
+	/**
+	 * Index of the currently attached session, or null if detached.
+	 * When null, the user is in the default shell mode.
+	 */
+	attachedSessionIndex: number | null;
+	/**
+	 * The shell pane used when not attached to any session.
+	 * This represents the default shell outside of tmux.
+	 */
+	shellPane: Pane;
 };
 
 /**
@@ -95,6 +119,11 @@ export type TmuxState = {
 export type TmuxSignalType =
 	| 'command' // User executed an unrecognized command
 	| 'command-executed' // User executed a recognized command (for challenge tracking)
+	| 'session-created' // New session created
+	| 'session-attached' // Attached to a session
+	| 'session-detached' // Detached from a session
+	| 'session-killed' // Session destroyed
+	| 'session-renamed' // Session renamed
 	| 'window-created' // New window created
 	| 'window-closed' // Window closed
 	| 'window-switched' // Active window changed
@@ -121,6 +150,8 @@ export type TmuxSignal = {
 	command?: string;
 	/** The canonical command name (type-safe, from CommandId) */
 	commandName?: CommandIdType;
+	sessionId?: string;
+	sessionName?: string;
 	windowId?: string;
 	paneId?: string;
 	direction?: SplitDirection;
@@ -135,6 +166,7 @@ export type TmuxSignal = {
 let paneIdCounter = 0;
 let windowIdCounter = 0;
 let splitIdCounter = 0;
+let sessionIdCounter = 0;
 
 /**
  * Generate a unique pane ID.
@@ -158,12 +190,20 @@ export function generateSplitId(): string {
 }
 
 /**
+ * Generate a unique session ID.
+ */
+export function generateSessionId(): string {
+	return `session-${sessionIdCounter++}`;
+}
+
+/**
  * Reset ID counters (useful for testing).
  */
 export function resetIdCounters(): void {
 	paneIdCounter = 0;
 	windowIdCounter = 0;
 	splitIdCounter = 0;
+	sessionIdCounter = 0;
 }
 
 // ============================================================================
@@ -196,15 +236,37 @@ export function createWindow(name?: string): TmuxWindow {
 }
 
 /**
- * Create initial tmux state with a single window and pane.
+ * Create a new session with a single window and pane.
+ *
+ * @param name - Optional session name. Defaults to the session index (e.g., "0", "1").
+ */
+export function createSession(name?: string): TmuxSession {
+	const id = generateSessionId();
+	const sessionIndex = id.split('-')[1];
+	const window = createWindow('main');
+
+	return {
+		id,
+		name: name ?? sessionIndex,
+		windows: [window],
+		activeWindowIndex: 0,
+		focusedPaneId: (window.paneTree as Pane).id,
+		createdAt: Date.now()
+	};
+}
+
+/**
+ * Create initial tmux state with a single session containing one window and pane.
  */
 export function createInitialState(): TmuxState {
 	resetIdCounters();
-	const window = createWindow('main');
+	const session = createSession();
+	const shellPane = createPane('default'); // Shell pane is in default mode
+
 	return {
-		windows: [window],
-		activeWindowIndex: 0,
-		focusedPaneId: (window.paneTree as Pane).id
+		sessions: [session],
+		attachedSessionIndex: 0,
+		shellPane
 	};
 }
 

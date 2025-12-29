@@ -23,7 +23,10 @@ import { formatDuration } from './challenge';
 /**
  * Simulates server-side key derivation for testing.
  */
-async function deriveK0(sharedSecret: ArrayBuffer, sessionSalt: Uint8Array): Promise<ArrayBuffer> {
+async function deriveK0(
+	sharedSecret: ArrayBuffer,
+	sessionSalt: Uint8Array<ArrayBuffer>
+): Promise<ArrayBuffer> {
 	return hkdf(sharedSecret, sessionSalt, 'k0', 32);
 }
 
@@ -94,7 +97,7 @@ describe('Client Challenge Service', () => {
 
 	describe('Key Derivation', () => {
 		let sharedSecret: ArrayBuffer;
-		let sessionSalt: Uint8Array;
+		let sessionSalt: Uint8Array<ArrayBuffer>;
 		let k0: ArrayBuffer;
 
 		beforeAll(async () => {

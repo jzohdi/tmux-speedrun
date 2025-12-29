@@ -16,6 +16,7 @@ export { default as StatusBar } from './StatusBar.svelte';
 // Re-export types
 export type {
 	TmuxState,
+	TmuxSession,
 	TmuxWindow,
 	TmuxSignal,
 	TmuxSignalType,
