@@ -8,6 +8,8 @@
 		pane: Pane;
 		/** Whether this pane is currently focused */
 		isFocused: boolean;
+		/** Counter that increments when focus should be refreshed */
+		focusTrigger?: number;
 		/** Callback when input changes */
 		onInputChange?: (value: string) => void;
 		/** Callback when Enter is pressed in input */
@@ -26,6 +28,7 @@
 	let {
 		pane,
 		isFocused,
+		focusTrigger,
 		onInputChange,
 		onSubmit,
 		onFocus,
@@ -140,14 +143,20 @@
 		return entry.content;
 	}
 
-	// Focus input when pane becomes focused
+	// Focus input when pane becomes focused or when focusTrigger changes
+	// The focusTrigger is used to re-focus after commands that output info/errors
+	// Uses requestAnimationFrame to ensure DOM is fully ready (especially for new panes)
 	$effect(() => {
+		// Read focusTrigger to establish dependency (even if not used directly)
+		const _trigger = focusTrigger;
+		
 		if (isFocused && pane.mode !== 'man') {
-			tick().then(() => {
+			// Use requestAnimationFrame to ensure the input element is fully rendered
+			requestAnimationFrame(() => {
 				inputRef?.focus();
 			});
 		} else if (isFocused && pane.mode === 'man') {
-			tick().then(() => {
+			requestAnimationFrame(() => {
 				manpageRef?.focus();
 			});
 		}

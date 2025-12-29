@@ -117,6 +117,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	let state = $state<TmuxState>(initialState ?? createInitialState());
 	let prefixActive = $state(false);
 	let lastFocusedPaneId = $state<string | null>(null);
+	/**
+	 * Counter that increments whenever input focus should be refreshed.
+	 * Used to trigger focus in PaneView even when focusedPaneId hasn't changed.
+	 */
+	let focusTrigger = $state(0);
 
 	// ========================================================================
 	// DERIVED STATE
@@ -175,6 +180,19 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			state = { ...state, focusedPaneId: paneId };
 			emitSignal('focus-changed', { paneId });
 		}
+		// Always trigger focus refresh when explicitly focusing a pane
+		triggerInputFocus();
+	}
+
+	/**
+	 * Trigger a focus refresh on the currently focused pane's input.
+	 * Call this after operations that should maintain focus (e.g., command output).
+	 * Uses requestAnimationFrame to defer until after Svelte renders and the browser paints.
+	 */
+	function triggerInputFocus(): void {
+		requestAnimationFrame(() => {
+			focusTrigger++;
+		});
 	}
 
 	// ========================================================================
@@ -198,6 +216,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		};
 
 		emitSignal('window-created', { windowId: newWindow.id });
+		// Focus the new window's pane input
+		triggerInputFocus();
 	}
 
 	/**
@@ -265,6 +285,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		};
 
 		emitSignal('window-switched', { windowId: targetWindow.id });
+		// Focus the switched window's pane input
+		triggerInputFocus();
 	}
 
 	/**
@@ -706,6 +728,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				content: `command not found: ${trimmedCommand.split(' ')[0]}`,
 				timestamp: Date.now()
 			});
+			// Ensure focus stays on input after error
+			triggerInputFocus();
 			return;
 		}
 
@@ -794,6 +818,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 					paneId: focusedPane.id
 				});
 
+				// Ensure focus stays on input after command execution
+				triggerInputFocus();
 				return;
 			}
 
@@ -806,6 +832,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 			// Emit unrecognized command signal (not type-safe, just raw command)
 			emitSignal('command', { command: trimmedCommand, paneId: focusedPane.id });
+
+			// Ensure focus stays on input after command processing
+			triggerInputFocus();
 		}
 	}
 
@@ -877,6 +906,13 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		},
 		get prefixActive() {
 			return prefixActive;
+		},
+		/**
+		 * Counter that increments when input focus should be refreshed.
+		 * Pass this to PaneView to trigger focus updates.
+		 */
+		get focusTrigger() {
+			return focusTrigger;
 		},
 
 		// Window operations

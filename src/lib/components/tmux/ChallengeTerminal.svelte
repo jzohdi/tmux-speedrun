@@ -49,7 +49,7 @@
 	let feedbackMessage = $state<string | null>(null);
 	let feedbackTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
 
-	// Input mode state (for commands that require text input)
+	// Input mode state (for commands that require text input like rename-window)
 	let inputModeCommand = $state<TmuxCommand | null>(null);
 	let inputModeValue = $state('');
 
@@ -58,6 +58,17 @@
 	const isInManMode = $derived(tmux.focusedPane?.mode === 'man');
 	const isInDefaultMode = $derived(tmux.focusedPane?.mode === 'default');
 	const isInInputMode = $derived(inputModeCommand !== null);
+
+	// Status bar input mode state (for tmux-style inline input)
+	const statusBarInputMode = $derived(
+		inputModeCommand
+			? {
+					active: true,
+					actionLabel: inputModeCommand.name,
+					value: inputModeValue
+				}
+			: { active: false, actionLabel: '', value: '' }
+	);
 
 	// ========================================================================
 	// FEEDBACK
@@ -81,46 +92,79 @@
 	// ========================================================================
 
 	/**
-	 * Handle keydown in input mode (for commands like rename-window).
+	 * Handle status bar input value change.
 	 */
-	function handleInputModeKeyDown(event: KeyboardEvent): void {
-		if (event.key === 'Escape') {
-			event.preventDefault();
-			// Cancel input mode
+	function handleStatusBarInputChange(value: string): void {
+		inputModeValue = value;
+	}
+
+	/**
+	 * Handle status bar input submission.
+	 */
+	function handleStatusBarInputSubmit(value: string): void {
+		const trimmedValue = value.trim();
+
+		if (!trimmedValue) {
+			showFeedback('Enter a value');
+			return;
+		}
+
+		if (!inputModeCommand) {
 			inputModeCommand = null;
 			inputModeValue = '';
 			return;
 		}
 
-		if (event.key === 'Enter') {
-			event.preventDefault();
-			const value = inputModeValue.trim();
-
-			if (!value) {
-				showFeedback('Enter a value');
-				return;
-			}
-
-			if (!inputModeCommand) {
-				inputModeCommand = null;
-				inputModeValue = '';
-				return;
-			}
-
-			// Validate the command name is a valid CommandIdType
-			if (!isValidCommandId(inputModeCommand.name)) {
-				console.error(`Invalid command name: ${inputModeCommand.name}`);
-				inputModeCommand = null;
-				inputModeValue = '';
-				return;
-			}
-
-			// Execute the command with the input value
-			tmux.executeTmuxCommand(inputModeCommand.name, value);
-
-			// Reset input mode
+		// Validate the command name is a valid CommandIdType
+		if (!isValidCommandId(inputModeCommand.name)) {
+			console.error(`Invalid command name: ${inputModeCommand.name}`);
 			inputModeCommand = null;
 			inputModeValue = '';
+			return;
+		}
+
+		const commandName = inputModeCommand.name;
+
+		// Execute the actual command based on command type
+		switch (commandName) {
+			case CommandId.RENAME_WINDOW:
+				tmux.renameWindow(trimmedValue);
+				break;
+			// Add other input commands here as needed
+			default:
+				console.warn(`No handler for input command: ${commandName}`);
+		}
+
+		// Emit the command signal for challenge tracking
+		tmux.executeTmuxCommand(commandName, trimmedValue);
+
+		// Reset input mode
+		inputModeCommand = null;
+		inputModeValue = '';
+	}
+
+	/**
+	 * Handle status bar input cancellation.
+	 */
+	function handleStatusBarInputCancel(): void {
+		inputModeCommand = null;
+		inputModeValue = '';
+	}
+
+	/**
+	 * Handle keydown in input mode (for commands like rename-window).
+	 * @deprecated Use StatusBar inline input instead - this is kept for legacy overlay support
+	 */
+	function handleInputModeKeyDown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			handleStatusBarInputCancel();
+			return;
+		}
+
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			handleStatusBarInputSubmit(inputModeValue);
 		}
 	}
 
@@ -183,11 +227,12 @@
 			return;
 		}
 
+		// Emit the command signal for challenge verification BEFORE executing
+		// (Important: must emit before mode changes like 'detach' which exits tmux mode)
+		tmux.executeTmuxCommand(commandName);
+
 		// Execute commands that affect local state
 		executeLocalCommand(commandName);
-
-		// Also emit the command signal for challenge verification
-		tmux.executeTmuxCommand(commandName);
 	}
 
 	/**
@@ -462,38 +507,6 @@
 
 	<!-- Terminal Body -->
 	<div class="terminal-body">
-		<!-- Input Mode Overlay -->
-		{#if isInInputMode && inputModeCommand}
-			<div class="input-mode-overlay">
-				<div class="input-mode-container">
-					<div class="input-mode-label">
-						{inputModeCommand.description}
-					</div>
-					{#if expectedInput}
-						<div class="expected-value">
-							Expected: <code>{expectedInput}</code>
-						</div>
-					{/if}
-					<div class="input-mode-line">
-						<span class="input-mode-prompt">&gt;</span>
-						<input
-							type="text"
-							class="input-mode-input"
-							bind:value={inputModeValue}
-							autocomplete="off"
-							autocorrect="off"
-							autocapitalize="off"
-							spellcheck="false"
-							placeholder="Type the value and press Enter"
-						/>
-					</div>
-					<div class="input-mode-hint">
-						Press <kbd>Enter</kbd> to confirm, <kbd>Esc</kbd> to cancel
-					</div>
-				</div>
-			</div>
-		{/if}
-
 		<!-- Feedback Message -->
 		{#if feedbackMessage}
 			<div class="feedback-message">
@@ -506,6 +519,7 @@
 			<PaneGrid
 				node={tmux.activeWindow.paneTree}
 				focusedPaneId={tmux.focusedPaneId}
+				focusTrigger={tmux.focusTrigger}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
 				onFocusPane={handlePaneFocus}
@@ -522,6 +536,10 @@
 			activeWindowIndex={tmux.activeWindowIndex}
 			focusedPane={tmux.focusedPane}
 			prefixActive={tmux.prefixActive}
+			inputMode={statusBarInputMode}
+			onInputChange={handleStatusBarInputChange}
+			onInputSubmit={handleStatusBarInputSubmit}
+			onInputCancel={handleStatusBarInputCancel}
 		/>
 	{/if}
 </div>
@@ -619,86 +637,6 @@
 	.terminal-body > :global(*:last-child) {
 		flex: 1;
 		min-height: 0;
-	}
-
-	/* Input Mode Overlay */
-	.input-mode-overlay {
-		position: absolute;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.8);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 10;
-	}
-
-	.input-mode-container {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		padding: 24px;
-		background: #2d2d2d;
-		border-radius: 8px;
-		max-width: 400px;
-		width: 90%;
-	}
-
-	.input-mode-label {
-		font-size: 14px;
-		color: #e0e0e0;
-	}
-
-	.expected-value {
-		font-size: 13px;
-		color: #a0a0a0;
-	}
-
-	.expected-value code {
-		color: #50fa7b;
-		background: rgba(80, 250, 123, 0.1);
-		padding: 2px 6px;
-		border-radius: 3px;
-	}
-
-	.input-mode-line {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 12px;
-		background: #1c1c1c;
-		border-radius: 4px;
-	}
-
-	.input-mode-prompt {
-		color: #50fa7b;
-		font-weight: bold;
-	}
-
-	.input-mode-input {
-		flex: 1;
-		background: transparent;
-		border: none;
-		outline: none;
-		color: #e0e0e0;
-		font-family: inherit;
-		font-size: inherit;
-		caret-color: #50fa7b;
-	}
-
-	.input-mode-input::placeholder {
-		color: #4d4d4d;
-	}
-
-	.input-mode-hint {
-		font-size: 12px;
-		color: #666;
-	}
-
-	.input-mode-hint kbd {
-		background: #3d3d3d;
-		padding: 2px 6px;
-		border-radius: 3px;
-		font-size: 11px;
 	}
 
 	/* Feedback Message */

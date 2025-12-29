@@ -8,6 +8,8 @@
 		node: PaneNode;
 		/** ID of the currently focused pane */
 		focusedPaneId: string;
+		/** Counter that increments when focus should be refreshed */
+		focusTrigger?: number;
 		/** Callback when input changes in a pane */
 		onInputChange?: (paneId: string, value: string) => void;
 		/** Callback when Enter is pressed in a pane */
@@ -23,6 +25,7 @@
 	let {
 		node,
 		focusedPaneId,
+		focusTrigger,
 		onInputChange,
 		onSubmit,
 		onFocusPane,
@@ -81,6 +84,7 @@
 		<PaneView
 			pane={node}
 			isFocused={node.id === focusedPaneId}
+			{focusTrigger}
 			onInputChange={handleInputChange(node.id)}
 			onSubmit={handleSubmit(node.id)}
 			onFocus={handleFocus(node.id)}
@@ -99,6 +103,7 @@
 			<PaneGrid
 				node={node.first}
 				{focusedPaneId}
+				{focusTrigger}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}
@@ -111,6 +116,7 @@
 			<PaneGrid
 				node={node.second}
 				{focusedPaneId}
+				{focusTrigger}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}

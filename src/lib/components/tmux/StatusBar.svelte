@@ -1,6 +1,15 @@
 <script lang="ts">
 	import type { TmuxWindow, Pane } from '$lib/utils/pane-tree';
 
+	type InputModeState = {
+		/** Whether input mode is active */
+		active: boolean;
+		/** The action label to display (e.g., "rename-window") */
+		actionLabel: string;
+		/** Current input value */
+		value: string;
+	};
+
 	type StatusBarProps = {
 		/** List of windows */
 		windows: TmuxWindow[];
@@ -10,9 +19,38 @@
 		focusedPane: Pane | null;
 		/** Whether prefix mode is active */
 		prefixActive: boolean;
+		/** Input mode state for rename-style commands */
+		inputMode?: InputModeState;
+		/** Callback when input value changes */
+		onInputChange?: (value: string) => void;
+		/** Callback when input is submitted (Enter pressed) */
+		onInputSubmit?: (value: string) => void;
+		/** Callback when input is cancelled (Escape pressed) */
+		onInputCancel?: () => void;
 	};
 
-	let { windows, activeWindowIndex, focusedPane, prefixActive }: StatusBarProps = $props();
+	let { 
+		windows, 
+		activeWindowIndex, 
+		focusedPane, 
+		prefixActive,
+		inputMode,
+		onInputChange,
+		onInputSubmit,
+		onInputCancel
+	}: StatusBarProps = $props();
+
+	// Ref to the input element for auto-focus
+	let inputRef = $state<HTMLInputElement | null>(null);
+
+	// Auto-focus the input when input mode becomes active
+	$effect(() => {
+		if (inputMode?.active && inputRef) {
+			requestAnimationFrame(() => {
+				inputRef?.focus();
+			});
+		}
+	});
 
 	// Current time (updated every second)
 	let currentTime = $state(new Date());
@@ -79,26 +117,75 @@
 				return 'bash';
 		}
 	}
+
+	/**
+	 * Handle input keydown events.
+	 */
+	function handleInputKeyDown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			onInputCancel?.();
+			return;
+		}
+
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			event.stopPropagation();
+			onInputSubmit?.(inputMode?.value ?? '');
+			return;
+		}
+	}
+
+	/**
+	 * Handle input change.
+	 */
+	function handleInputChange(event: Event): void {
+		const target = event.target as HTMLInputElement;
+		onInputChange?.(target.value);
+	}
 </script>
 
-<div class="status-bar">
-	<div class="status-left">
-		<span class="status-session">[tmux-speedrun]</span>
-		<span class="status-windows">{getWindowList()}</span>
+{#if inputMode?.active}
+	<!-- Input mode: orange bar with inline input -->
+	<div class="status-bar input-mode">
+		<div class="input-mode-content">
+			<span class="input-mode-label">({inputMode.actionLabel})</span>
+			<input
+				type="text"
+				class="status-input"
+				bind:this={inputRef}
+				value={inputMode.value}
+				oninput={handleInputChange}
+				onkeydown={handleInputKeyDown}
+				autocomplete="off"
+				autocorrect="off"
+				autocapitalize="off"
+				spellcheck="false"
+			/>
+		</div>
 	</div>
+{:else}
+	<!-- Normal status bar -->
+	<div class="status-bar">
+		<div class="status-left">
+			<span class="status-session">[tmux-speedrun]</span>
+			<span class="status-windows">{getWindowList()}</span>
+		</div>
 
-	<div class="status-center">
-		{#if prefixActive}
-			<span class="status-prefix">-- PREFIX --</span>
-		{/if}
-	</div>
+		<div class="status-center">
+			{#if prefixActive}
+				<span class="status-prefix">-- PREFIX --</span>
+			{/if}
+		</div>
 
-	<div class="status-right">
-		<span class="status-mode">{getModeText()}</span>
-		<span class="status-time">{formatTime(currentTime)}</span>
-		<span class="status-date">{formatDate(currentTime)}</span>
+		<div class="status-right">
+			<span class="status-mode">{getModeText()}</span>
+			<span class="status-time">{formatTime(currentTime)}</span>
+			<span class="status-date">{formatDate(currentTime)}</span>
+		</div>
 	</div>
-</div>
+{/if}
 
 <style>
 	.status-bar {
@@ -113,6 +200,42 @@
 		padding: 2px 8px;
 		height: 24px;
 		flex-shrink: 0;
+	}
+
+	/* Input mode: orange background like real tmux */
+	.status-bar.input-mode {
+		background: #d19a66;
+		justify-content: flex-start;
+	}
+
+	.input-mode-content {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		width: 100%;
+	}
+
+	.input-mode-label {
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.status-input {
+		flex: 1;
+		background: transparent;
+		border: none;
+		outline: none;
+		color: #1c1c1c;
+		font-family: inherit;
+		font-size: inherit;
+		font-weight: 500;
+		caret-color: #1c1c1c;
+		padding: 0;
+		margin: 0;
+	}
+
+	.status-input::placeholder {
+		color: rgba(0, 0, 0, 0.4);
 	}
 
 	.status-left {
