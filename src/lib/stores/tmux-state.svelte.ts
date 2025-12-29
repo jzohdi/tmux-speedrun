@@ -301,12 +301,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	/**
 	 * Trigger a focus refresh on the currently focused pane's input.
 	 * Call this after operations that should maintain focus (e.g., command output).
-	 * Uses requestAnimationFrame to defer until after Svelte renders and the browser paints.
+	 * Increments synchronously - the PaneView effect handles the DOM timing via tick().
 	 */
 	function triggerInputFocus(): void {
-		requestAnimationFrame(() => {
-			focusTrigger++;
-		});
+		focusTrigger++;
 	}
 
 	// ========================================================================
@@ -425,6 +423,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			sessionName: detachedSessionName
 		});
 
+		// Focus the shell pane input after detaching
+		triggerInputFocus();
+
 		return detachedSessionName;
 	}
 
@@ -533,6 +534,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			sessionName: name,
 			metadata: { oldName }
 		});
+
+		// Restore focus to the pane input after renaming
+		triggerInputFocus();
 
 		return true;
 	}
@@ -707,6 +711,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		});
 
 		emitSignal('window-closed', { windowId: closedWindow.id });
+
+		// Focus the new active window's pane input
+		triggerInputFocus();
+
 		return true;
 	}
 
@@ -792,6 +800,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			windowId: attachedSession.windows[targetIndex].id,
 			metadata: { name }
 		});
+
+		// Restore focus to the pane input after renaming
+		triggerInputFocus();
 	}
 
 	/**
@@ -1124,6 +1135,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			if (modeToRestore === 'tmux') {
 				emitSignal('tmux-entered', { paneId: state.shellPane.id });
 			}
+
+			// Restore focus to the pane input after exiting man mode
+			triggerInputFocus();
 			return;
 		}
 
@@ -1158,6 +1172,9 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		if (modeToRestore === 'tmux') {
 			emitSignal('tmux-entered', { paneId: targetPaneId });
 		}
+
+		// Restore focus to the pane input after exiting man mode
+		triggerInputFocus();
 	}
 
 	/**

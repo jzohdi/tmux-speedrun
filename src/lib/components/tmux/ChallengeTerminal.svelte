@@ -156,13 +156,14 @@
 	}
 
 	/**
-	 * Restore focus to the terminal container after exiting input mode.
-	 * Uses requestAnimationFrame to ensure DOM updates are complete.
+	 * Restore focus to the pane input after exiting input mode (e.g., after renaming).
+	 * Triggers the store's focus mechanism to properly focus the active pane's input.
 	 */
 	function restoreFocusAfterInputMode(): void {
-		requestAnimationFrame(() => {
-			containerRef?.focus();
-		});
+		// Re-focus the currently focused pane to trigger input focus
+		if (tmux.focusedPaneId) {
+			tmux.focusPane(tmux.focusedPaneId);
+		}
 	}
 
 	/**
@@ -436,7 +437,7 @@
 		await tick();
 		// Use requestAnimationFrame to ensure browser has rendered
 		requestAnimationFrame(() => {
-			containerRef?.focus();
+			containerRef?.querySelector('input')?.focus();
 		});
 	}
 
@@ -473,7 +474,7 @@
 	// ========================================================================
 
 	onMount(() => {
-		containerRef?.focus();
+		containerRef?.querySelector('input')?.focus();
 	});
 </script>
 

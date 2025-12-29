@@ -145,18 +145,18 @@
 
 	// Focus input when pane becomes focused or when focusTrigger changes
 	// The focusTrigger is used to re-focus after commands that output info/errors
-	// Uses requestAnimationFrame to ensure DOM is fully ready (especially for new panes)
+	// Uses tick() to ensure DOM is updated, then focuses the appropriate element
 	$effect(() => {
 		// Read focusTrigger to establish dependency (even if not used directly)
 		const _trigger = focusTrigger;
-		
+
 		if (isFocused && pane.mode !== 'man') {
-			// Use requestAnimationFrame to ensure the input element is fully rendered
-			requestAnimationFrame(() => {
+			// Use tick() to wait for Svelte DOM updates, then focus
+			tick().then(() => {
 				inputRef?.focus();
 			});
 		} else if (isFocused && pane.mode === 'man') {
-			requestAnimationFrame(() => {
+			tick().then(() => {
 				manpageRef?.focus();
 			});
 		}
@@ -180,6 +180,7 @@
 			inputRef?.focus();
 		}
 	}
+
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
