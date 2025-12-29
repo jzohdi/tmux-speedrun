@@ -34,7 +34,32 @@ import {
 	type HistoryEntry
 } from '$lib/utils/pane-tree';
 
-import { executeCommand } from '$lib/utils/tmux-commands';
+import { executeCommand, type CommandResult } from '$lib/utils/tmux-commands';
+
+function formatPaneList(panes: Pane[], focusedId: string): string {
+	const currentPanes =
+		typeof window !== 'undefined'
+			? Array.from(document.querySelectorAll('.pane-container')).map((node) => {
+					const bounds = node.getBoundingClientRect();
+					return {
+						width: Math.round(bounds.width),
+						height: Math.round(bounds.height)
+					};
+				})
+			: panes.map(() => ({
+					width: 160,
+					height: 24
+				}));
+	return panes
+		.map((pane, index) => {
+			const isActive = pane.id === focusedId;
+			const activeMarker = isActive ? ' (active)' : '';
+			// Format: "0: [160x24] [history 0/2000, 0 bytes] %0 (active)"
+			const percentFull = Math.round((pane.history.length / 2000) * 100);
+			return `${index}: [${currentPanes[index].width}x${currentPanes[index].height}] [history ${pane.history.length}/2000, 0 bytes] %${percentFull}${activeMarker}`;
+		})
+		.join('\n');
+}
 
 // ============================================================================
 // STORE OPTIONS
@@ -118,6 +143,17 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	// ========================================================================
 	// STATE MUTATION HELPERS
 	// ========================================================================
+
+	function generateOutput(type: CommandResult['generateOutput']): string | null {
+		switch (type) {
+			case 'pane-list':
+				return formatPaneList(allPanesInActiveWindow, focusedPaneId);
+			//   case 'window-list':
+			// 	return formatWindowList(windows, activeWindowIndex);
+			default:
+				return null;
+		}
+	}
 
 	function updateActiveWindowTree(newTree: PaneNode): void {
 		state = {
@@ -659,6 +695,13 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 				if (result.signal) {
 					emitSignal(result.signal.type as TmuxSignalType, result.signal.data);
+				}
+
+				if (result.generateOutput) {
+					const output = generateOutput(result.generateOutput);
+					if (output) {
+						addHistory({ type: 'output', content: output, timestamp: Date.now() });
+					}
 				}
 
 				return;

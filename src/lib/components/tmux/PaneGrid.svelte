@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { isPane, isSplit, type PaneNode, type Pane } from '$lib/utils/pane-tree';
+	import { isPane, isSplit, type PaneNode } from '$lib/utils/pane-tree';
 	import PaneView from './PaneView.svelte';
 	import PaneGrid from './PaneGrid.svelte';
 

@@ -46,6 +46,7 @@ export type CommandResult = {
 		type: string;
 		data?: Record<string, unknown>;
 	};
+	generateOutput?: 'pane-list';
 };
 
 /**
@@ -100,25 +101,27 @@ export function getRegisteredCommands(): readonly CommandDefinition[] {
  * Parse a command string into args.
  */
 function parseCommand(command: string): string[] {
-	return command.trim().split(/\s+/).filter(Boolean);
+	return command.trim().toLowerCase().split(/\s+/).filter(Boolean);
 }
 
 /**
  * Find a matching command definition.
  */
-function findCommand(commandName: string): CommandDefinition | null {
+function findCommand(fullCommand: string): CommandDefinition | null {
 	for (const def of commandRegistry) {
 		const matchMode = def.matchMode ?? 'exact';
-
 		if (matchMode === 'exact') {
-			if (def.name === commandName) {
+			if (def.name === fullCommand) {
 				return def;
 			}
-			if (def.aliases?.includes(commandName)) {
+			if (
+				def.aliases?.some((alias) => alias === fullCommand) ||
+				def.aliases?.some((alias) => fullCommand.startsWith(alias + ' '))
+			) {
 				return def;
 			}
 		} else if (matchMode === 'prefix') {
-			if (commandName.startsWith(def.name)) {
+			if (fullCommand.startsWith(def.name)) {
 				return def;
 			}
 		}
@@ -145,8 +148,8 @@ export function executeCommand(
 		return null;
 	}
 
-	const commandName = args[0];
-	const definition = findCommand(commandName);
+	const commandName = args;
+	const definition = findCommand(commandName.join(' '));
 
 	if (!definition) {
 		return null;
@@ -236,13 +239,14 @@ registerCommand({
  */
 registerCommand({
 	name: 'list-panes',
-	aliases: ['lsp'],
+	aliases: ['tmux lsp'],
 	description: 'List all panes in current window',
 	handler: () => ({
 		handled: true,
 		signal: {
 			type: 'list-panes'
-		}
+		},
+		generateOutput: 'pane-list'
 	})
 });
 
@@ -251,4 +255,3 @@ registerCommand({
 // ============================================================================
 
 export { commandRegistry };
-

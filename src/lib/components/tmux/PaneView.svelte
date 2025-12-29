@@ -204,6 +204,7 @@
 				<span class="pane-prompt">{prompt}</span>
 				<input
 					type="text"
+					name="pane-input"
 					class="pane-input"
 					bind:this={inputRef}
 					value={pane.inputValue}

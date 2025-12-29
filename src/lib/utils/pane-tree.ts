@@ -179,7 +179,7 @@ export function createWindow(name?: string): TmuxWindow {
 	return {
 		id,
 		name: name ?? `window-${id.split('-')[1]}`,
-		paneTree: createPane('default')
+		paneTree: createPane('tmux')
 	};
 }
 
@@ -678,4 +678,3 @@ export function getPreviousPane(root: PaneNode, currentPaneId: string): Pane {
 	const prevIndex = (currentIndex - 1 + panes.length) % panes.length;
 	return panes[prevIndex];
 }
-
