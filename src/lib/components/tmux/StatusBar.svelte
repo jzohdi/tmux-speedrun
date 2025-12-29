@@ -11,6 +11,8 @@
 	};
 
 	type StatusBarProps = {
+		/** Name of the current session */
+		sessionName?: string;
 		/** List of windows */
 		windows: TmuxWindow[];
 		/** Currently active window index */
@@ -30,6 +32,7 @@
 	};
 
 	let { 
+		sessionName = 'tmux-speedrun',
 		windows, 
 		activeWindowIndex, 
 		focusedPane, 
@@ -169,7 +172,7 @@
 	<!-- Normal status bar -->
 	<div class="status-bar">
 		<div class="status-left">
-			<span class="status-session">[tmux-speedrun]</span>
+			<span class="status-session">[{sessionName}]</span>
 			<span class="status-windows">{getWindowList()}</span>
 		</div>
 

@@ -121,6 +121,16 @@ export type CommandContext = {
 };
 
 /**
+ * Session operation types for command results.
+ */
+export type SessionOperation =
+	| { type: 'create'; name?: string; attach?: boolean }
+	| { type: 'attach'; target: string | number }
+	| { type: 'detach' }
+	| { type: 'kill'; target?: string | number }
+	| { type: 'rename'; name: string; target?: string | number };
+
+/**
  * Result returned from a command handler.
  */
 export type CommandResult = {
@@ -148,6 +158,10 @@ export type CommandResult = {
 	 * - 'close-pane-or-detach': If multiple panes, close current pane; otherwise detach from tmux
 	 */
 	exitBehavior?: 'close-pane-or-detach';
+	/**
+	 * Session operation to perform (handled by store).
+	 */
+	sessionOperation?: SessionOperation;
 };
 
 /**
@@ -430,6 +444,155 @@ registerCommand({
 		handled: true,
 		generateOutput: 'session-list'
 	})
+});
+
+/**
+ * New session command (tmux-style).
+ * Supports: tmux new-session, tmux new, tmux new-session -s <name>
+ */
+registerCommand({
+	name: CommandId.NEW_SESSION,
+	matchPatterns: ['tmux new-session', 'tmux new'],
+	matchMode: 'prefix',
+	description: 'Create a new tmux session',
+	handler: (ctx) => {
+		// Parse optional -s <name> argument
+		// Example: "tmux new-session -s mysession" or "tmux new -s mysession"
+		let sessionName: string | undefined;
+		const sIndex = ctx.args.indexOf('-s');
+		if (sIndex !== -1 && ctx.args[sIndex + 1]) {
+			sessionName = ctx.args[sIndex + 1];
+		}
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'create', name: sessionName, attach: true }
+		};
+	}
+});
+
+/**
+ * Attach session command (tmux-style).
+ * Supports: tmux attach, tmux attach-session, tmux attach -t <target>, tmux a
+ */
+registerCommand({
+	name: CommandId.ATTACH_SESSION,
+	matchPatterns: ['tmux attach-session', 'tmux attach', 'tmux a'],
+	matchMode: 'prefix',
+	description: 'Attach to an existing tmux session',
+	handler: (ctx) => {
+		// Parse -t <target> argument
+		// Example: "tmux attach -t 0" or "tmux attach -t mysession"
+		const tIndex = ctx.args.indexOf('-t');
+		if (tIndex === -1 || !ctx.args[tIndex + 1]) {
+			// No target specified - attach to most recent session (index 0)
+			return {
+				handled: true,
+				sessionOperation: { type: 'attach', target: 0 }
+			};
+		}
+
+		const target = ctx.args[tIndex + 1];
+		// Try to parse as number, otherwise use as string name
+		const numTarget = parseInt(target, 10);
+		const parsedTarget = isNaN(numTarget) ? target : numTarget;
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'attach', target: parsedTarget }
+		};
+	}
+});
+
+/**
+ * Detach command (tmux-style).
+ * Supports: tmux detach, tmux detach-client
+ * Also triggered by prefix + d keybinding.
+ */
+registerCommand({
+	name: CommandId.DETACH,
+	matchPatterns: ['tmux detach', 'tmux detach-client'],
+	description: 'Detach from the current tmux session',
+	handler: () => ({
+		handled: true,
+		sessionOperation: { type: 'detach' }
+	})
+});
+
+/**
+ * Kill session command (tmux-style).
+ * Supports: tmux kill-session, tmux kill-session -t <target>
+ */
+registerCommand({
+	name: CommandId.KILL_SESSION,
+	matchPatterns: ['tmux kill-session'],
+	matchMode: 'prefix',
+	description: 'Kill a tmux session',
+	handler: (ctx) => {
+		// Parse optional -t <target> argument
+		const tIndex = ctx.args.indexOf('-t');
+
+		if (tIndex === -1 || !ctx.args[tIndex + 1]) {
+			// No target - kill current session
+			return {
+				handled: true,
+				sessionOperation: { type: 'kill' }
+			};
+		}
+
+		const target = ctx.args[tIndex + 1];
+		const numTarget = parseInt(target, 10);
+		const parsedTarget = isNaN(numTarget) ? target : numTarget;
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'kill', target: parsedTarget }
+		};
+	}
+});
+
+/**
+ * Rename session command (tmux-style).
+ * Supports: tmux rename-session <name>, tmux rename-session -t <target> <name>
+ */
+registerCommand({
+	name: CommandId.RENAME_SESSION,
+	matchPatterns: ['tmux rename-session'],
+	matchMode: 'prefix',
+	description: 'Rename a tmux session',
+	handler: (ctx) => {
+		// Parse: tmux rename-session <name>
+		// Or: tmux rename-session -t <target> <name>
+		const tIndex = ctx.args.indexOf('-t');
+
+		if (tIndex !== -1 && ctx.args[tIndex + 1] && ctx.args[tIndex + 2]) {
+			// Has -t <target> <name>
+			const target = ctx.args[tIndex + 1];
+			const name = ctx.args[tIndex + 2];
+			const numTarget = parseInt(target, 10);
+			const parsedTarget = isNaN(numTarget) ? target : numTarget;
+
+			return {
+				handled: true,
+				sessionOperation: { type: 'rename', name, target: parsedTarget }
+			};
+		}
+
+		// Just <name> - rename current session
+		// Args: ['tmux', 'rename-session', '<name>']
+		const name = ctx.args[2];
+		if (!name) {
+			return {
+				handled: true,
+				error: 'usage: rename-session [-t target-session] new-name'
+			};
+		}
+
+		return {
+			handled: true,
+			sessionOperation: { type: 'rename', name }
+		};
+	}
 });
 
 // ============================================================================
