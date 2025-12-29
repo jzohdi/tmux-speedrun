@@ -1,23 +1,209 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import ChallengeTerminal from '$lib/components/ChallengeTerminal.svelte';
 	import PromptBox from '$lib/components/PromptBox.svelte';
+	import { createChallengeStore } from '$lib/client/challenge-store.svelte';
+	import { getCommandByName } from '$lib/data/tmux-commands';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
+	// Create challenge store
+	const challenge = createChallengeStore();
+
+	// Component refs
 	let terminalRef = $state<ReturnType<typeof ChallengeTerminal> | null>(null);
 
-	// TODO: This will be dynamic based on current step
-	const currentPrompt = $derived('Start a new tmux session');
+	// Derived state for UI
+	const statusMessage = $derived(getStatusMessage(challenge.status));
+	const showInput = $derived(challenge.status === 'active');
+	const progressPercent = $derived(
+		challenge.totalSteps > 0
+			? ((challenge.currentStepIndex + 1) / challenge.totalSteps) * 100
+			: 0
+	);
 
-	function handleCommand(command: string) {
-		// TODO: Implement command validation and challenge progression
-		console.log('Command received:', command);
+	function getStatusMessage(status: string): string {
+		switch (status) {
+			case 'loading':
+				return 'Starting challenge...';
+			case 'submitting':
+				return 'Submitting results...';
+			case 'error':
+				return challenge.error ?? 'An error occurred';
+			default:
+				return '';
+		}
 	}
 
-	// Focus the terminal on mount
-	$effect(() => {
+	/**
+	 * Handle command submission from the terminal.
+	 *
+	 * We need to determine the canonical action from the user's input.
+	 * For input commands (rename-window, etc), the answer includes the required input.
+	 */
+	async function handleCommand(command: string) {
+		if (challenge.status !== 'active') {
+			return;
+		}
+
+		// Determine the canonical action from the command
+		const answer = parseCommandToAction(command);
+
+		if (!answer) {
+			// Invalid command format - show feedback
+			return;
+		}
+
+		// Submit the answer
+		const wasCorrect = await challenge.submitAnswer(answer);
+
+		// Clear input regardless of result
+		terminalRef?.clearInput();
+
+		// Focus terminal for next input
+		if (challenge.status === 'active') {
+			terminalRef?.focus();
+		}
+	}
+
+	/**
+	 * Parse a user command into a canonical action.
+	 *
+	 * This maps user input to the expected action format.
+	 * For input commands, combines the command with the required input.
+	 *
+	 * @param command - Raw user input
+	 * @returns Canonical action string or null if invalid
+	 */
+	function parseCommandToAction(command: string): string | null {
+		const trimmed = command.trim().toLowerCase();
+
+		// If there's a required input, the answer is "command:input"
+		if (challenge.currentRequiredInput) {
+			// User should have typed the required input as part of their command
+			// For rename commands, we expect them to use the rename command
+			// and the input should match
+			if (trimmed === challenge.currentRequiredInput) {
+				// User typed just the input - need to determine which command
+				// Based on the prompt, we can infer the command type
+				const prompt = challenge.currentPrompt ?? '';
+
+				if (prompt.toLowerCase().includes('window')) {
+					return `rename-window:${challenge.currentRequiredInput}`;
+				}
+				if (prompt.toLowerCase().includes('session')) {
+					return `rename-session:${challenge.currentRequiredInput}`;
+				}
+			}
+
+			// Check if they typed a command like "rename-window swift-tiger-42"
+			// or just the input value
+			const parts = trimmed.split(/\s+/);
+			const firstPart = parts[0];
+
+			// Check if first part is a known command
+			const cmd = getCommandByName(firstPart);
+
+			if (cmd && cmd.requiresInput) {
+				// They typed the command, use the required input from the challenge
+				return `${cmd.name}:${challenge.currentRequiredInput}`;
+			}
+
+			// If they typed exactly the required input
+			if (trimmed === challenge.currentRequiredInput.toLowerCase()) {
+				// Infer command from prompt
+				const prompt = challenge.currentPrompt ?? '';
+
+				if (prompt.toLowerCase().includes('window')) {
+					return `rename-window:${challenge.currentRequiredInput}`;
+				}
+				if (prompt.toLowerCase().includes('session')) {
+					return `rename-session:${challenge.currentRequiredInput}`;
+				}
+			}
+
+			// Try matching the input as-is
+			return `${inferCommandFromPrompt(challenge.currentPrompt ?? '')}:${challenge.currentRequiredInput}`;
+		}
+
+		// For simple commands, just use the command name
+		// Try to match to a known command
+		const cmd = getCommandByName(trimmed);
+
+		if (cmd) {
+			return cmd.name;
+		}
+
+		// Try common aliases/shortcuts
+		const aliases: Record<string, string> = {
+			'split-h': 'split-horizontal',
+			'split-v': 'split-vertical',
+			'splitv': 'split-vertical',
+			'splith': 'split-horizontal',
+			'split vertical': 'split-vertical',
+			'split horizontal': 'split-horizontal',
+			'next': 'next-window',
+			'prev': 'previous-window',
+			'kill': 'kill-pane',
+			'zoom': 'toggle-zoom',
+			'detach': 'detach',
+			'new': 'new-window',
+			'neww': 'new-window',
+			'news': 'new-session'
+		};
+
+		if (aliases[trimmed]) {
+			return aliases[trimmed];
+		}
+
+		// Return as-is and let the crypto layer validate
+		return trimmed;
+	}
+
+	/**
+	 * Infer command type from the prompt text.
+	 */
+	function inferCommandFromPrompt(prompt: string): string {
+		const lower = prompt.toLowerCase();
+
+		if (lower.includes('rename') && lower.includes('window')) {
+			return 'rename-window';
+		}
+		if (lower.includes('rename') && lower.includes('session')) {
+			return 'rename-session';
+		}
+
+		return 'unknown';
+	}
+
+	/**
+	 * Handle returning to home page.
+	 */
+	function handleBackClick() {
+		challenge.reset();
+		goto('/');
+	}
+
+	/**
+	 * Handle retry after error or completion.
+	 */
+	async function handleRetry() {
+		challenge.reset();
+		await challenge.start(data.challengeIndex);
 		terminalRef?.focus();
+	}
+
+	// Start challenge on mount
+	onMount(async () => {
+		await challenge.start(data.challengeIndex);
+		terminalRef?.focus();
+
+		// Cleanup on unmount
+		return () => {
+			challenge.reset();
+		};
 	});
 </script>
 
@@ -37,26 +223,102 @@
 	<div class="challenge-layout">
 		<!-- Header -->
 		<header class="challenge-header">
-			<a href="/" class="back-link">← Back</a>
+			<button class="back-link" onclick={handleBackClick}>← Back</button>
 			<span class="challenge-label">Challenge {data.challengeIndex}</span>
+			<span class="help-hint">
+				<code>man tmux</code> for help
+			</span>
+			<span class="timer">{challenge.formattedTime}</span>
 		</header>
 
+		<!-- Progress Bar -->
+		<div class="progress-container">
+			<div class="progress-bar" style="width: {progressPercent}%"></div>
+		</div>
+
+		<!-- Status Messages -->
+		{#if statusMessage}
+			<div class="status-message" class:error={challenge.status === 'error'}>
+				{statusMessage}
+				{#if challenge.status === 'error'}
+					<button class="retry-button" onclick={handleRetry}>Retry</button>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- Feedback -->
+		{#if challenge.lastFeedback}
+			<div class="feedback" class:correct={challenge.lastFeedback.correct} class:incorrect={!challenge.lastFeedback.correct}>
+				{challenge.lastFeedback.message}
+			</div>
+		{/if}
+
 		<!-- Prompt Box -->
-		<section class="prompt-section">
-			<PromptBox
-				prompt={currentPrompt}
-				currentStep={1}
-				totalSteps={data.challenge.commandNames.length}
-			/>
-		</section>
+		{#if challenge.currentPrompt}
+			<section class="prompt-section">
+				<PromptBox
+					prompt={challenge.currentPrompt}
+					currentStep={challenge.currentStepIndex + 1}
+					totalSteps={challenge.totalSteps}
+				/>
+			</section>
+		{/if}
+
+		<!-- Required Input Hint (for rename commands) -->
+		{#if challenge.currentRequiredInput}
+			<div class="input-hint">
+				<span class="hint-label">Type:</span>
+				<code class="hint-value">{challenge.currentRequiredInput}</code>
+			</div>
+		{/if}
 
 		<!-- Terminal -->
 		<section class="terminal-section">
 			<ChallengeTerminal
 				bind:this={terminalRef}
 				onCommand={handleCommand}
+				disabled={!showInput}
+				placeholder={showInput ? 'Enter command...' : ''}
 			/>
 		</section>
+
+		<!-- Completion Screen -->
+		{#if challenge.status === 'complete' && challenge.result}
+			<div class="completion-overlay">
+				<div class="completion-card">
+					<div class="completion-icon">🎉</div>
+					<h2 class="completion-title">
+						{challenge.result.valid ? 'Challenge Complete!' : 'Challenge Failed'}
+					</h2>
+
+					{#if challenge.result.valid}
+						<div class="completion-stats">
+							<div class="stat">
+								<span class="stat-label">Time</span>
+								<span class="stat-value">{challenge.formattedTime}</span>
+							</div>
+							{#if challenge.result.leaderboardPosition}
+								<div class="stat">
+									<span class="stat-label">Rank</span>
+									<span class="stat-value">#{challenge.result.leaderboardPosition}</span>
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<p class="completion-message">{challenge.result.message}</p>
+					{/if}
+
+					<div class="completion-actions">
+						<button class="action-button secondary" onclick={handleBackClick}>
+							Back to Home
+						</button>
+						<button class="action-button primary" onclick={handleRetry}>
+							Try Again
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
 </main>
 
@@ -93,7 +355,7 @@
 		padding: 32px 24px;
 		display: flex;
 		flex-direction: column;
-		gap: 24px;
+		gap: 20px;
 	}
 
 	.challenge-header {
@@ -105,9 +367,12 @@
 	.back-link {
 		font-size: 14px;
 		color: #50fa7b;
-		text-decoration: none;
+		background: transparent;
+		border: none;
+		cursor: pointer;
 		font-family: 'JetBrains Mono', monospace;
 		transition: opacity 0.2s ease;
+		padding: 0;
 	}
 
 	.back-link:hover {
@@ -121,6 +386,125 @@
 		color: #666;
 	}
 
+	.help-hint {
+		margin-left: auto;
+		font-size: 12px;
+		color: #666;
+	}
+
+	.help-hint code {
+		color: #8be9fd;
+		background: rgba(139, 233, 253, 0.08);
+		padding: 2px 6px;
+		border-radius: 3px;
+		font-family: 'JetBrains Mono', monospace;
+	}
+
+	.timer {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 18px;
+		font-weight: 600;
+		color: #50fa7b;
+	}
+
+	.progress-container {
+		height: 4px;
+		background: #2d2d2d;
+		border-radius: 2px;
+		overflow: hidden;
+	}
+
+	.progress-bar {
+		height: 100%;
+		background: linear-gradient(90deg, #50fa7b, #27ca40);
+		transition: width 0.3s ease;
+	}
+
+	.status-message {
+		padding: 12px 16px;
+		background: rgba(139, 233, 253, 0.1);
+		border-left: 3px solid #8be9fd;
+		font-size: 14px;
+		display: flex;
+		align-items: center;
+		gap: 16px;
+	}
+
+	.status-message.error {
+		background: rgba(255, 85, 85, 0.1);
+		border-left-color: #ff5555;
+		color: #ff5555;
+	}
+
+	.retry-button {
+		background: #ff5555;
+		color: #fff;
+		border: none;
+		padding: 6px 12px;
+		border-radius: 4px;
+		font-size: 13px;
+		cursor: pointer;
+		font-family: inherit;
+	}
+
+	.retry-button:hover {
+		background: #ff6e6e;
+	}
+
+	.feedback {
+		padding: 12px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		text-align: center;
+		border-radius: 4px;
+		animation: fadeIn 0.2s ease;
+	}
+
+	.feedback.correct {
+		background: rgba(80, 250, 123, 0.15);
+		color: #50fa7b;
+	}
+
+	.feedback.incorrect {
+		background: rgba(255, 85, 85, 0.15);
+		color: #ff5555;
+	}
+
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	.input-hint {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 12px 16px;
+		background: rgba(255, 184, 108, 0.1);
+		border-left: 3px solid #ffb86c;
+	}
+
+	.hint-label {
+		font-size: 13px;
+		color: #a0a0a0;
+	}
+
+	.hint-value {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 15px;
+		font-weight: 600;
+		color: #ffb86c;
+		background: rgba(255, 184, 108, 0.1);
+		padding: 4px 8px;
+		border-radius: 4px;
+	}
+
 	.prompt-section {
 		/* Container for prompt */
 	}
@@ -129,10 +513,122 @@
 		/* Container for terminal */
 	}
 
+	/* Completion Overlay */
+	.completion-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.85);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+		animation: fadeIn 0.3s ease;
+	}
+
+	.completion-card {
+		background: #1c1c1c;
+		border: 1px solid #3d3d3d;
+		border-radius: 16px;
+		padding: 48px;
+		text-align: center;
+		max-width: 400px;
+		width: 90%;
+	}
+
+	.completion-icon {
+		font-size: 64px;
+		margin-bottom: 16px;
+	}
+
+	.completion-title {
+		font-family: 'Space Grotesk', sans-serif;
+		font-size: 28px;
+		font-weight: 600;
+		color: #ffffff;
+		margin: 0 0 24px;
+	}
+
+	.completion-stats {
+		display: flex;
+		justify-content: center;
+		gap: 48px;
+		margin-bottom: 32px;
+	}
+
+	.stat {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.stat-label {
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		color: #666;
+	}
+
+	.stat-value {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 24px;
+		font-weight: 600;
+		color: #50fa7b;
+	}
+
+	.completion-message {
+		color: #a0a0a0;
+		margin-bottom: 32px;
+	}
+
+	.completion-actions {
+		display: flex;
+		gap: 12px;
+		justify-content: center;
+	}
+
+	.action-button {
+		padding: 12px 24px;
+		border-radius: 8px;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+		font-family: inherit;
+		transition: all 0.2s ease;
+	}
+
+	.action-button.primary {
+		background: #50fa7b;
+		color: #0d0d0d;
+		border: none;
+	}
+
+	.action-button.primary:hover {
+		background: #69fb92;
+	}
+
+	.action-button.secondary {
+		background: transparent;
+		color: #a0a0a0;
+		border: 1px solid #3d3d3d;
+	}
+
+	.action-button.secondary:hover {
+		border-color: #50fa7b;
+		color: #50fa7b;
+	}
+
 	@media (max-width: 640px) {
 		.challenge-layout {
 			padding: 20px 16px;
-			gap: 20px;
+			gap: 16px;
+		}
+
+		.completion-card {
+			padding: 32px 24px;
+		}
+
+		.completion-stats {
+			gap: 32px;
 		}
 	}
 </style>

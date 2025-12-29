@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import Manpage from './Manpage.svelte';
+	import { getAllChallengeCommands, type TmuxCommand } from '$lib/data/tmux-commands';
+
+	type TerminalMode = 'input' | 'man';
 
 	type Props = {
 		/** Callback when the user submits a command */
@@ -8,31 +12,93 @@
 		disabled?: boolean;
 		/** Placeholder text for the input */
 		placeholder?: string;
+		/**
+		 * Optional list of commands to show in man page.
+		 * Defaults to all challenge commands.
+		 */
+		manpageCommands?: TmuxCommand[];
 	};
 
-	let { onCommand, disabled = false, placeholder = '' }: Props = $props();
+	let {
+		onCommand,
+		disabled = false,
+		placeholder = '',
+		manpageCommands
+	}: Props = $props();
 
 	let inputValue = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let containerRef = $state<HTMLButtonElement | null>(null);
+	let manpageRef = $state<HTMLDivElement | null>(null);
+	let mode = $state<TerminalMode>('input');
+
+	// Get commands for the manpage - defaults to all challenge commands
+	const commandsForManpage = $derived(manpageCommands ?? getAllChallengeCommands());
 
 	function handleKeyDown(event: KeyboardEvent) {
-		if (disabled) {
+		// In man mode, let the Manpage handle all keyboard events
+		if (mode === 'man') {
 			return;
 		}
 
 		if (event.key === 'Enter') {
 			event.preventDefault();
 			const command = inputValue.trim();
-			if (command && onCommand) {
-				onCommand(command);
+
+			if (command) {
+				// Always allow man command, even when disabled
+				if (isManCommand(command)) {
+					showManPage();
+					inputValue = '';
+
+					return;
+				}
+
+				// Block other commands when disabled
+				if (disabled) {
+					inputValue = '';
+
+					return;
+				}
+
+				// Otherwise, pass to parent handler
+				if (onCommand) {
+					onCommand(command);
+				}
 			}
 			inputValue = '';
 		}
 	}
 
+	/**
+	 * Check if the command is a man page request.
+	 */
+	function isManCommand(command: string): boolean {
+		const normalized = command.toLowerCase().trim();
+
+		return normalized === 'man tmux' || normalized === 'man';
+	}
+
+	/**
+	 * Show the man page.
+	 */
+	function showManPage() {
+		mode = 'man';
+	}
+
+	/**
+	 * Exit man mode and return to input.
+	 */
+	async function exitManPage() {
+		mode = 'input';
+		await tick();
+		inputRef?.focus();
+	}
+
 	function focusInput() {
-		if (!disabled) {
+		if (mode === 'man') {
+			manpageRef?.focus();
+		} else if (!disabled) {
 			inputRef?.focus();
 		}
 	}
@@ -40,23 +106,44 @@
 	/** Public method to focus the terminal */
 	export async function focus() {
 		await tick();
-		inputRef?.focus();
+
+		if (mode === 'man') {
+			manpageRef?.focus();
+		} else {
+			inputRef?.focus();
+		}
 	}
 
 	/** Public method to clear the input */
 	export function clearInput() {
 		inputValue = '';
 	}
+
+	/**
+	 * Public method to enter man page mode.
+	 * Can be called from parent component.
+	 */
+	export function showMan() {
+		showManPage();
+	}
+
+	/**
+	 * Public method to check if in man mode.
+	 */
+	export function isInManMode(): boolean {
+		return mode === 'man';
+	}
 </script>
 
 <button
 	class="challenge-terminal"
+	class:man-mode={mode === 'man'}
+	class:commands-disabled={disabled}
 	bind:this={containerRef}
 	onclick={focusInput}
 	onkeydown={handleKeyDown}
 	aria-label="Challenge terminal"
 	tabindex="0"
-	{disabled}
 >
 	<!-- Terminal Header -->
 	<div class="terminal-header">
@@ -65,7 +152,9 @@
 			<span class="terminal-button minimize"></span>
 			<span class="terminal-button maximize"></span>
 		</div>
-		<span class="terminal-title">challenge</span>
+		<span class="terminal-title">
+			{mode === 'man' ? 'man tmux' : 'challenge'}
+		</span>
 		<div class="terminal-buttons invisible">
 			<span class="terminal-button"></span>
 			<span class="terminal-button"></span>
@@ -75,21 +164,28 @@
 
 	<!-- Terminal Body -->
 	<div class="terminal-body">
-		<div class="input-line">
-			<span class="prompt">$</span>
-			<input
-				type="text"
-				class="terminal-input"
-				bind:value={inputValue}
-				bind:this={inputRef}
-				autocomplete="off"
-				autocorrect="off"
-				autocapitalize="off"
-				spellcheck="false"
-				{placeholder}
-				{disabled}
+		{#if mode === 'man'}
+			<Manpage
+				onQuit={exitManPage}
+				commands={commandsForManpage}
+				bind:containerRef={manpageRef}
 			/>
-		</div>
+		{:else}
+			<div class="input-line">
+				<span class="prompt">$</span>
+				<input
+					type="text"
+					class="terminal-input"
+					bind:value={inputValue}
+					bind:this={inputRef}
+					autocomplete="off"
+					autocorrect="off"
+					autocapitalize="off"
+					spellcheck="false"
+					{placeholder}
+				/>
+			</div>
+		{/if}
 	</div>
 </button>
 
@@ -111,9 +207,12 @@
 		cursor: text;
 	}
 
-	.challenge-terminal:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
+	.challenge-terminal.man-mode {
+		min-height: 400px;
+	}
+
+	.challenge-terminal.commands-disabled:not(.man-mode) {
+		opacity: 0.85;
 	}
 
 	.challenge-terminal:focus {
@@ -170,6 +269,12 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
+		position: relative;
+	}
+
+	.man-mode .terminal-body {
+		padding: 0;
+		min-height: 350px;
 	}
 
 	.input-line {
@@ -197,9 +302,4 @@
 	.terminal-input::placeholder {
 		color: #4d4d4d;
 	}
-
-	.terminal-input:disabled {
-		cursor: not-allowed;
-	}
 </style>
-

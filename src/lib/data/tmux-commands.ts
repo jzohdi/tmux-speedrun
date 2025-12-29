@@ -10,6 +10,12 @@ export type TmuxCommand = {
 	description: string;
 	difficulty: 'beginner' | 'intermediate' | 'advanced';
 	category: 'session' | 'window' | 'pane' | 'navigation' | 'misc';
+	/**
+	 * If true, this command requires text input (e.g., rename-window needs a name).
+	 * These commands generate compound answers like "rename-window:swift-tiger-42"
+	 * to expand the answer space and prevent brute-force attacks.
+	 */
+	requiresInput?: boolean;
 };
 
 export const TMUX_COMMANDS: TmuxCommand[] = [
@@ -49,6 +55,14 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		difficulty: 'beginner',
 		category: 'session'
 	},
+	{
+		name: 'rename-session',
+		shortcut: 'prefix + $',
+		description: 'Rename the current session',
+		difficulty: 'beginner',
+		category: 'session',
+		requiresInput: true
+	},
 
 	// Window Management - Beginner/Intermediate
 	{
@@ -83,8 +97,9 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		name: 'rename-window',
 		shortcut: 'prefix + ,',
 		description: 'Rename the current window',
-		difficulty: 'intermediate',
-		category: 'window'
+		difficulty: 'beginner',
+		category: 'window',
+		requiresInput: true
 	},
 	{
 		name: 'kill-window',
@@ -237,6 +252,21 @@ export function getCommandNames(): string[] {
 	return TMUX_COMMANDS.map((cmd) => cmd.name);
 }
 
+/**
+ * Get all commands that require text input.
+ * These are used to expand the answer space in challenges.
+ */
+export function getInputCommands(): TmuxCommand[] {
+	return TMUX_COMMANDS.filter((cmd) => cmd.requiresInput === true);
+}
+
+/**
+ * Get commands that do NOT require text input.
+ */
+export function getSimpleCommands(): TmuxCommand[] {
+	return TMUX_COMMANDS.filter((cmd) => cmd.requiresInput !== true);
+}
+
 // Categories for display
 export const COMMAND_CATEGORIES: { key: TmuxCommand['category']; label: string }[] = [
 	{ key: 'session', label: 'Session Management' },
@@ -246,3 +276,37 @@ export const COMMAND_CATEGORIES: { key: TmuxCommand['category']; label: string }
 	{ key: 'misc', label: 'Miscellaneous' }
 ];
 
+/**
+ * Get all commands that can appear in any challenge.
+ *
+ * This returns all defined tmux commands since challenge level 5
+ * includes all commands. Used by the manpage in challenge mode.
+ *
+ * @returns All TmuxCommand objects
+ */
+export function getAllChallengeCommands(): TmuxCommand[] {
+	return TMUX_COMMANDS;
+}
+
+/**
+ * Get commands by category, optionally filtered to a specific set of command names.
+ *
+ * @param category - The category to filter by
+ * @param allowedCommandNames - Optional set of command names to include
+ * @returns Filtered commands
+ */
+export function getCommandsByCategoryFiltered(
+	category: TmuxCommand['category'],
+	allowedCommandNames?: Set<string>
+): TmuxCommand[] {
+	return TMUX_COMMANDS.filter((cmd) => {
+		if (cmd.category !== category) {
+			return false;
+		}
+		if (allowedCommandNames && !allowedCommandNames.has(cmd.name)) {
+			return false;
+		}
+
+		return true;
+	});
+}

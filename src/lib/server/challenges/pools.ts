@@ -1,0 +1,216 @@
+/**
+ * Challenge pool configuration.
+ *
+ * Each challenge level has:
+ * - A pool of commands to draw from (defined by a filter function)
+ * - A target instruction count
+ * - A minimum number of input commands (rename-style with random strings)
+ *
+ * Pool composition is flexible and can be easily adjusted.
+ * Current design:
+ * - C0: Beginner commands only (13 commands)
+ * - C1-C2: Beginner + Intermediate
+ * - C3-C5: All commands (28 total)
+ *
+ * Instruction counts grow by 15 per challenge level:
+ * C0=25, C1=40, C2=55, C3=70, C4=85, C5=100
+ *
+ * Input commands (rename-window, rename-session) add security by
+ * expanding the answer space from 28 options to 28 + (N × 144,000).
+ */
+
+import type { TmuxCommand } from '$lib/data/tmux-commands';
+import { TMUX_COMMANDS } from '$lib/data/tmux-commands';
+
+/**
+ * Configuration for a single challenge's command pool.
+ */
+export type PoolConfig = {
+	challengeId: number;
+	instructionCount: number;
+	filter: (cmd: TmuxCommand) => boolean;
+	/**
+	 * Minimum number of input commands (rename-style) to include.
+	 * These commands require typing a random string, expanding the answer space.
+	 */
+	minInputCommands: number;
+};
+
+/**
+ * Base instruction count for challenge 0.
+ */
+const BASE_INSTRUCTION_COUNT = 25;
+
+/**
+ * Instruction count increment per challenge level.
+ */
+const INSTRUCTION_INCREMENT = 15;
+
+/**
+ * Pool configurations for each challenge level.
+ *
+ * To modify a challenge's pool, update the filter function.
+ * The filter receives a TmuxCommand and returns true if it should be included.
+ */
+export const CHALLENGE_POOLS: PoolConfig[] = [
+	{
+		challengeId: 0,
+		instructionCount: BASE_INSTRUCTION_COUNT,
+		filter: (cmd) => cmd.difficulty === 'beginner',
+		minInputCommands: 3
+	},
+	{
+		challengeId: 1,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT,
+		filter: (cmd) => cmd.difficulty === 'beginner' || cmd.difficulty === 'intermediate',
+		minInputCommands: 5
+	},
+	{
+		challengeId: 2,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 2,
+		filter: (cmd) => cmd.difficulty === 'beginner' || cmd.difficulty === 'intermediate',
+		minInputCommands: 7
+	},
+	{
+		challengeId: 3,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 3,
+		filter: () => true,
+		minInputCommands: 9
+	},
+	{
+		challengeId: 4,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 4,
+		filter: () => true,
+		minInputCommands: 11
+	},
+	{
+		challengeId: 5,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 5,
+		filter: () => true,
+		minInputCommands: 13
+	}
+];
+
+/**
+ * Get the pool configuration for a challenge level.
+ *
+ * @param challengeId - The challenge level (0-5)
+ * @returns The pool configuration
+ * @throws Error if challengeId is invalid
+ */
+export function getPoolConfig(challengeId: number): PoolConfig {
+	const config = CHALLENGE_POOLS.find((p) => p.challengeId === challengeId);
+
+	if (!config) {
+		throw new Error(`Invalid challenge ID: ${challengeId}. Valid range is 0-${CHALLENGE_POOLS.length - 1}`);
+	}
+
+	return config;
+}
+
+/**
+ * Get the command pool for a challenge level.
+ *
+ * @param challengeId - The challenge level (0-5)
+ * @returns Array of TmuxCommand objects in the pool
+ * @throws Error if challengeId is invalid
+ */
+export function getPoolForChallenge(challengeId: number): TmuxCommand[] {
+	const config = getPoolConfig(challengeId);
+
+	return TMUX_COMMANDS.filter(config.filter);
+}
+
+/**
+ * Get input commands (requiresInput=true) from a challenge's pool.
+ *
+ * @param challengeId - The challenge level (0-5)
+ * @returns Array of TmuxCommand objects that require input
+ */
+export function getInputCommandsForChallenge(challengeId: number): TmuxCommand[] {
+	const pool = getPoolForChallenge(challengeId);
+
+	return pool.filter((cmd) => cmd.requiresInput === true);
+}
+
+/**
+ * Get simple commands (no input required) from a challenge's pool.
+ *
+ * @param challengeId - The challenge level (0-5)
+ * @returns Array of TmuxCommand objects that don't require input
+ */
+export function getSimpleCommandsForChallenge(challengeId: number): TmuxCommand[] {
+	const pool = getPoolForChallenge(challengeId);
+
+	return pool.filter((cmd) => cmd.requiresInput !== true);
+}
+
+/**
+ * Get the target instruction count for a challenge level.
+ *
+ * @param challengeId - The challenge level (0-5)
+ * @returns Number of instructions in the challenge
+ * @throws Error if challengeId is invalid
+ */
+export function getInstructionCount(challengeId: number): number {
+	const config = getPoolConfig(challengeId);
+
+	return config.instructionCount;
+}
+
+/**
+ * Get the minimum number of input commands for a challenge level.
+ *
+ * @param challengeId - The challenge level (0-5)
+ * @returns Minimum number of input commands to include
+ * @throws Error if challengeId is invalid
+ */
+export function getMinInputCommands(challengeId: number): number {
+	const config = getPoolConfig(challengeId);
+
+	return config.minInputCommands;
+}
+
+/**
+ * Get the total number of available challenge levels.
+ */
+export function getChallengePoolCount(): number {
+	return CHALLENGE_POOLS.length;
+}
+
+/**
+ * Validate that a challenge ID is within the valid range.
+ *
+ * @param challengeId - The challenge level to validate
+ * @returns true if valid, false otherwise
+ */
+export function isValidChallengeId(challengeId: number): boolean {
+	return Number.isInteger(challengeId) && challengeId >= 0 && challengeId < CHALLENGE_POOLS.length;
+}
+
+/**
+ * Get all commands that appear in ANY challenge pool.
+ *
+ * This is the union of all challenge pools, used for displaying
+ * a comprehensive man page that shows all commands a user might encounter.
+ *
+ * @returns Array of unique TmuxCommand objects across all challenges
+ */
+export function getAllChallengeCommands(): TmuxCommand[] {
+	const commandSet = new Set<string>();
+	const commands: TmuxCommand[] = [];
+
+	// Iterate through all challenge pools and collect unique commands
+	for (const config of CHALLENGE_POOLS) {
+		const poolCommands = TMUX_COMMANDS.filter(config.filter);
+
+		for (const cmd of poolCommands) {
+			if (!commandSet.has(cmd.name)) {
+				commandSet.add(cmd.name);
+				commands.push(cmd);
+			}
+		}
+	}
+
+	return commands;
+}

@@ -1,13 +1,38 @@
 <script lang="ts">
-	import { COMMAND_CATEGORIES, getCommandsByCategory } from '$lib/data/tmux-commands';
+	import {
+		COMMAND_CATEGORIES,
+		getCommandsByCategory,
+		getCommandsByCategoryFiltered,
+		type TmuxCommand
+	} from '$lib/data/tmux-commands';
 
 	type ManpageProps = {
 		onQuit: () => void;
 		onToggleMaximize?: () => void;
 		containerRef?: HTMLDivElement | null;
+		/**
+		 * Optional list of commands to display.
+		 * If provided, only these commands will be shown.
+		 * If not provided, all commands are shown.
+		 */
+		commands?: TmuxCommand[];
 	};
 
-	let { onQuit, onToggleMaximize, containerRef = $bindable(null) }: ManpageProps = $props();
+	let { onQuit, onToggleMaximize, containerRef = $bindable(null), commands }: ManpageProps = $props();
+
+	// Create a set of allowed command names for filtering
+	const allowedCommandNames = $derived(
+		commands ? new Set(commands.map((c) => c.name)) : undefined
+	);
+
+	// Get commands for a category, respecting the filter
+	function getFilteredCommands(category: TmuxCommand['category']): TmuxCommand[] {
+		if (allowedCommandNames) {
+			return getCommandsByCategoryFiltered(category, allowedCommandNames);
+		}
+
+		return getCommandsByCategory(category);
+	}
 
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	let containerElement = $state<HTMLDivElement | null>(null);
@@ -205,11 +230,11 @@
 			</p>
 
 			{#each COMMAND_CATEGORIES as category}
-				{@const commands = getCommandsByCategory(category.key)}
-				{#if commands.length > 0}
+				{@const categoryCommands = getFilteredCommands(category.key)}
+				{#if categoryCommands.length > 0}
 					<div class="command-category">
 						<p class="category-label">{category.label}:</p>
-						{#each commands as cmd}
+						{#each categoryCommands as cmd}
 							<div class="command-entry">
 								<span class="command-shortcut">{cmd.shortcut}</span>
 								<span class="command-desc">{cmd.description}</span>
