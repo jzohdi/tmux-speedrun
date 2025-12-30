@@ -1,8 +1,8 @@
 /**
- * Utility functions for cryptographic operations.
+ * utility functions for cryptographic operations.
  *
  * Provides Base64 encoding/decoding and ArrayBuffer manipulation
- * for use with Web Crypto API.
+ * for use with web crypto api.
  */
 
 /**
@@ -80,8 +80,10 @@ export function randomBytes(length: number): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Constant-time comparison of two byte arrays.
- * Prevents timing attacks by always comparing all bytes.
+ * prevents timing attacks by always comparing all bytes.
+ * basically you couold reply some validation functioin many times
+ * and see if some validations exit earlier than others to deeduce that
+ * some data is more correct than others.
  *
  * @param a - First byte array
  * @param b - Second byte array
@@ -120,4 +122,3 @@ export function concatBytes(...arrays: Uint8Array<ArrayBuffer>[]): Uint8Array<Ar
 
 	return result;
 }
-
