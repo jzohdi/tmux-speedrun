@@ -36,7 +36,6 @@
 	let terminalRef = $state<HTMLDivElement | null>(null);
 	let containerRef = $state<HTMLButtonElement | null>(null);
 	let manpageRef = $state<HTMLDivElement | null>(null);
-	let ignoreNextEnter = $state(false);
 	let historyLengthBeforeMode = $state(0); // Track history length to clear on quit
 	let isMaximized = $state(false);
 
@@ -104,7 +103,6 @@
 		historyLengthBeforeMode = history.length; // Track before adding output
 		mode = 'list';
 		selectedIndex = 0;
-		ignoreNextEnter = true; // Prevent immediate Enter key from starting challenge
 		listData = challenges.map((c) => ({
 			id: String(c.index), // Use 0-based index for routing
 			display: `Challenge ${c.index}  [${c.difficultyLabel}]  ${c.instructionCount} commands`
@@ -275,11 +273,6 @@
 			}
 			if (event.key === 'Enter') {
 				event.preventDefault();
-				// Ignore the Enter that triggered the list command
-				if (ignoreNextEnter) {
-					ignoreNextEnter = false;
-					return;
-				}
 				const selected = listData[selectedIndex];
 				if (selected) {
 					clearAndResetMode();
