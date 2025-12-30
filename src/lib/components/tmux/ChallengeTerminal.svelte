@@ -386,7 +386,18 @@
 			| 'down'
 			| 'left'
 			| 'right';
+
+		console.debug(
+			'[ChallengeTerminal] Arrow navigation - direction:',
+			direction,
+			'currentFocusedPaneId:',
+			tmux.focusedPaneId
+		);
+
 		tmux.moveFocus(direction);
+
+		console.debug('[ChallengeTerminal] After moveFocus - newFocusedPaneId:', tmux.focusedPaneId);
+
 		tmux.deactivatePrefix();
 
 		// Also emit the select-pane command
@@ -526,7 +537,7 @@
 	// ========================================================================
 
 	/**
-	 * Focus the terminal.
+	 * Focus the terminal input of the currently focused pane.
 	 * Uses tick() to ensure Svelte DOM updates are complete,
 	 * then requestAnimationFrame to ensure browser has rendered.
 	 */
@@ -534,7 +545,16 @@
 		await tick();
 		// Use requestAnimationFrame to ensure browser has rendered
 		requestAnimationFrame(() => {
-			containerRef?.querySelector('input')?.focus();
+			// Focus the input in the currently focused pane (has .focused class)
+			const focusedPaneInput = containerRef?.querySelector(
+				'.pane-view.focused input'
+			) as HTMLInputElement | null;
+			if (focusedPaneInput) {
+				focusedPaneInput.focus();
+			} else {
+				// Fallback to first input if no focused pane found
+				containerRef?.querySelector('input')?.focus();
+			}
 		});
 	}
 

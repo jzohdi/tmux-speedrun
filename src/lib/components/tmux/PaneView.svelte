@@ -161,13 +161,40 @@
 	$effect(() => {
 		// Read focusTrigger to establish dependency (even if not used directly)
 		const _trigger = focusTrigger;
+		// Also track isFocused to ensure effect runs when focus changes between panes
+		const shouldFocus = isFocused;
+		// Track pane.id and pane.mode to ensure proper dependency tracking
+		const paneId = pane.id;
+		const paneMode = pane.mode;
 
-		if (isFocused && pane.mode !== 'man') {
+		console.debug(
+			'[PaneView] Effect running - paneId:',
+			paneId,
+			'isFocused:',
+			shouldFocus,
+			'focusTrigger:',
+			_trigger,
+			'mode:',
+			paneMode
+		);
+
+		if (shouldFocus && paneMode !== 'man') {
 			// Use tick() to wait for Svelte DOM updates, then focus
 			tick().then(() => {
-				inputRef?.focus();
+				console.debug(
+					'[PaneView] Focusing input for pane:',
+					paneId,
+					'inputRef exists:',
+					!!inputRef
+				);
+				if (inputRef) {
+					inputRef.focus();
+					console.debug('[PaneView] Focus called on input for pane:', paneId);
+				} else {
+					console.warn('[PaneView] inputRef is null for pane:', paneId);
+				}
 			});
-		} else if (isFocused && pane.mode === 'man') {
+		} else if (shouldFocus && paneMode === 'man') {
 			tick().then(() => {
 				manpageRef?.focus();
 			});

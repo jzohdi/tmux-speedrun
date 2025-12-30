@@ -677,11 +677,24 @@ export function findPaneInDirection(
 	direction: 'up' | 'down' | 'left' | 'right'
 ): Pane | null {
 	const positions = calculatePanePositions(root);
+
+	console.debug(
+		'[findPaneInDirection] positions:',
+		positions.map((p) => ({ id: p.pane.id, x: p.x, y: p.y }))
+	);
+
 	const currentPos = positions.find((p) => p.pane.id === currentPaneId);
 
 	if (!currentPos) {
+		console.debug('[findPaneInDirection] currentPos not found for paneId:', currentPaneId);
 		return null;
 	}
+
+	console.debug('[findPaneInDirection] currentPos:', {
+		id: currentPos.pane.id,
+		x: currentPos.x,
+		y: currentPos.y
+	});
 
 	// Filter panes in the given direction
 	let candidates: PanePosition[];
@@ -701,7 +714,15 @@ export function findPaneInDirection(
 			break;
 	}
 
+	console.debug(
+		'[findPaneInDirection] candidates in direction',
+		direction,
+		':',
+		candidates.map((p) => ({ id: p.pane.id, x: p.x, y: p.y }))
+	);
+
 	if (candidates.length === 0) {
+		console.debug('[findPaneInDirection] no candidates found');
 		return null;
 	}
 
@@ -720,6 +741,7 @@ export function findPaneInDirection(
 		}
 	}
 
+	console.debug('[findPaneInDirection] closest pane:', closest.pane.id);
 	return closest.pane;
 }
 

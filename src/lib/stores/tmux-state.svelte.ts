@@ -334,15 +334,27 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 	function setFocusedPane(paneId: string): void {
 		if (!attachedSession) {
+			console.debug('[TmuxStore] setFocusedPane - no attachedSession');
 			return;
 		}
+
+		console.debug(
+			'[TmuxStore] setFocusedPane - paneId:',
+			paneId,
+			'currentFocusedPaneId:',
+			attachedSession.focusedPaneId
+		);
 
 		if (attachedSession.focusedPaneId !== paneId) {
 			lastFocusedPaneId = attachedSession.focusedPaneId;
 			updateAttachedSession({ focusedPaneId: paneId });
+			console.debug('[TmuxStore] setFocusedPane - updated focusedPaneId to:', paneId);
 			emitSignal('focus-changed', { paneId });
+		} else {
+			console.debug('[TmuxStore] setFocusedPane - paneId unchanged, skipping update');
 		}
 		// Always trigger focus refresh when explicitly focusing a pane
+		console.debug('[TmuxStore] setFocusedPane - triggering input focus');
 		triggerInputFocus();
 	}
 
@@ -911,19 +923,36 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 */
 	function splitFocusedPane(direction: SplitDirection): void {
 		if (!activeWindow) {
+			console.debug('[TmuxStore] splitFocusedPane - no activeWindow');
 			return;
 		}
+
+		console.debug(
+			'[TmuxStore] splitFocusedPane - direction:',
+			direction,
+			'currentFocusedPaneId:',
+			focusedPaneId
+		);
 
 		const result = splitPane(activeWindow.paneTree, focusedPaneId, direction);
 
 		if (!result) {
+			console.debug('[TmuxStore] splitFocusedPane - splitPane returned null');
 			return;
 		}
+
+		console.debug('[TmuxStore] splitFocusedPane - newPaneId:', result.newPane.id);
 
 		updateActiveWindowTree(result.tree);
 
 		// Focus the new pane
+		console.debug('[TmuxStore] splitFocusedPane - calling setFocusedPane with:', result.newPane.id);
 		setFocusedPane(result.newPane.id);
+
+		console.debug(
+			'[TmuxStore] splitFocusedPane - after setFocusedPane, focusedPaneId is:',
+			focusedPaneId
+		);
 
 		emitSignal('pane-split', {
 			paneId: result.newPane.id,
@@ -992,13 +1021,24 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 */
 	function moveFocus(direction: 'up' | 'down' | 'left' | 'right'): void {
 		if (!activeWindow) {
+			console.debug('[TmuxStore] moveFocus - no activeWindow');
 			return;
 		}
 
+		console.debug('[TmuxStore] moveFocus - direction:', direction, 'currentPaneId:', focusedPaneId);
+		console.debug(
+			'[TmuxStore] moveFocus - paneTree:',
+			JSON.stringify(activeWindow.paneTree, null, 2)
+		);
+
 		const targetPane = findPaneInDirection(activeWindow.paneTree, focusedPaneId, direction);
+
+		console.debug('[TmuxStore] moveFocus - targetPane:', targetPane?.id ?? 'null');
 
 		if (targetPane) {
 			setFocusedPane(targetPane.id);
+		} else {
+			console.debug('[TmuxStore] moveFocus - no pane found in direction:', direction);
 		}
 	}
 
