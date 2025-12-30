@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 
 	// Terminal typing animation state
 	let typedLines = $state<string[]>([]);
 	let cursorVisible = $state(true);
 	let showContent = $state(false);
 	let glitchActive = $state(false);
+	let cursorInterval: NodeJS.Timeout | null = null;
 
 	const errorCode = $derived($page.status);
 	const errorMessage = $derived($page.error?.message ?? 'An error occurred');
@@ -50,9 +51,6 @@
 		return [
 			`$ cd ${path}`,
 			`bash: cd: ${path}: No such file or directory`,
-			'',
-			`$ cat ${path}`,
-			`cat: ${path}: No such file or directory`,
 			'',
 			`$ echo "Error ${code}: ${msg}"`,
 			`Error ${code}: ${msg}`
@@ -107,17 +105,17 @@
 
 	// Cursor blink effect
 	onMount(() => {
-		const cursorInterval = setInterval(() => {
+		cursorInterval = setInterval(() => {
 			cursorVisible = !cursorVisible;
 		}, 530);
 
 		// Start typing animation
 		runTerminalAnimation();
-
-		return () => {
-			clearInterval(cursorInterval);
-		};
 	});
+
+	onDestroy(() => {
+		clearInterval(cursorInterval ?? undefined);
+	})
 
 	function handleGoHome(): void {
 		goto('/');
@@ -193,7 +191,6 @@
 		<!-- Action Section -->
 		<div class="actions-section" class:visible={showContent}>
 			<p class="help-text">
-				<span class="hint-icon">💡</span>
 				The page you're looking for doesn't exist or has been moved.
 			</p>
 
@@ -499,9 +496,6 @@
 		justify-content: center;
 	}
 
-	.hint-icon {
-		font-size: 16px;
-	}
 
 	.command-suggestions {
 		display: flex;
