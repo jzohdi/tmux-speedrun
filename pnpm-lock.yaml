@@ -11,6 +11,9 @@ importers:
       '@neondatabase/serverless':
         specifier: ^1.0.2
         version: 1.0.2
+      '@tanstack/svelte-query':
+        specifier: ^6.0.14
+        version: 6.0.14(svelte@5.46.1)
       postgres:
         specifier: ^3.4.5
         version: 3.4.7
@@ -883,6 +886,14 @@ packages:
     resolution: {integrity: sha512-jVA+/UpKL1vRLg6Hkao5jldawNmRo7mQYrZtNHMIVpLfLhDml5nMRUo/8MwoX2vNXvnaXNNMedrMfMugAVX1nA==}
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7
+
+  '@tanstack/query-core@5.90.16':
+    resolution: {integrity: sha512-MvtWckSVufs/ja463/K4PyJeqT+HMlJWtw6PrCpywznd2NSgO3m4KwO9RqbFqGg6iDE8vVMFWMeQI4Io3eEYww==}
+
+  '@tanstack/svelte-query@6.0.14':
+    resolution: {integrity: sha512-gKuHxbyGP2pCQgE/Px9FtlyFmHTt0OV5xTrKrk7PMKGkv3LPWTTwDb7xlMDe1V7U2K5ci+jq1j3HsuTPqIZxjA==}
+    peerDependencies:
+      svelte: ^5.25.0
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -2538,6 +2549,13 @@ snapshots:
       '@tailwindcss/oxide': 4.1.18
       tailwindcss: 4.1.18
       vite: 7.3.0(@types/node@22.19.3)(jiti@2.6.1)(lightningcss@1.30.2)
+
+  '@tanstack/query-core@5.90.16': {}
+
+  '@tanstack/svelte-query@6.0.14(svelte@5.46.1)':
+    dependencies:
+      '@tanstack/query-core': 5.90.16
+      svelte: 5.46.1
 
   '@types/chai@5.2.3':
     dependencies:

@@ -6,6 +6,11 @@
 		getChallengePoolCount,
 		isValidChallengeId
 	} from '$lib/data/challenges';
+	import {
+		createLeaderboardQuery,
+		getEntriesForChallenge,
+		type LeaderboardEntry
+	} from '$lib/queries/leaderboard';
 	import Manpage from './Manpage.svelte';
 
 	type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man';
@@ -15,11 +20,8 @@
 		content: string;
 	};
 
-	type LeaderboardEntry = {
-		rank: number;
-		username: string;
-		time: string;
-	};
+	// Initialize the leaderboard query - fetches data in background
+	const leaderboardQuery = createLeaderboardQuery();
 
 	let inputValue = $state('');
 	let history = $state<HistoryEntry[]>([
@@ -38,20 +40,6 @@
 	let manpageRef = $state<HTMLDivElement | null>(null);
 	let historyLengthBeforeMode = $state(0); // Track history length to clear on quit
 	let isMaximized = $state(false);
-
-	// Leaderboard mock data (will be fetched from API later)
-	// Keys are 0-based challenge indices
-	const mockLeaderboard: Record<number, LeaderboardEntry[]> = {
-		0: [
-			{ rank: 1, username: 'speedster', time: '12.3s' },
-			{ rank: 2, username: 'tmux_pro', time: '14.7s' },
-			{ rank: 3, username: 'terminal_king', time: '18.2s' }
-		],
-		1: [
-			{ rank: 1, username: 'pane_wizard', time: '25.1s' },
-			{ rank: 2, username: 'split_master', time: '28.4s' }
-		]
-	};
 
 	function scrollToBottom() {
 		if (terminalRef) {
@@ -114,9 +102,8 @@
 	}
 
 	function showLeaderboard(challengeIndex: string | number) {
-		const numericIndex = typeof challengeIndex === 'string' 
-			? parseInt(challengeIndex, 10) 
-			: challengeIndex;
+		const numericIndex =
+			typeof challengeIndex === 'string' ? parseInt(challengeIndex, 10) : challengeIndex;
 
 		const maxIndex = getChallengePoolCount() - 1;
 		if (Number.isNaN(numericIndex) || !isValidChallengeId(numericIndex)) {
@@ -125,28 +112,40 @@
 			return;
 		}
 
-		// Use index as key for mock data lookup
-		const entries = mockLeaderboard[numericIndex] || [];
 		historyLengthBeforeMode = history.length; // Track before adding output
 		mode = 'leaderboard';
-		leaderboardData = { challengeId: String(numericIndex), entries };
 
 		addOutput('');
 		addOutput(`LEADERBOARD: CHALLENGE ${numericIndex}`, 'header');
 		addOutput('─'.repeat(40), 'header');
 		addOutput('');
 
-		if (entries.length === 0) {
-			addOutput('  No entries yet. Be the first to complete this challenge!');
+		// Handle query states
+		// Note: In TanStack Query v6 for Svelte 5, the query result is reactive but not a store
+		if (leaderboardQuery.isPending) {
+			addOutput('  Loading leaderboard...');
+			leaderboardData = { challengeId: String(numericIndex), entries: [] };
+		} else if (leaderboardQuery.isError) {
+			addOutput('  Unable to load leaderboard. Try again later.', 'error');
+			leaderboardData = { challengeId: String(numericIndex), entries: [] };
 		} else {
-			addOutput('  RANK    USERNAME              TIME');
-			addOutput('  ────    ────────              ────');
-			for (const entry of entries) {
-				const rankStr = `#${entry.rank}`.padEnd(6);
-				const nameStr = entry.username.padEnd(20);
-				addOutput(`  ${rankStr}  ${nameStr}  ${entry.time}`);
+			// Get entries from query data
+			const entries = getEntriesForChallenge(leaderboardQuery.data, numericIndex);
+			leaderboardData = { challengeId: String(numericIndex), entries };
+
+			if (entries.length === 0) {
+				addOutput('  No entries yet. Be the first to complete this challenge!');
+			} else {
+				addOutput('  RANK    USERNAME              TIME');
+				addOutput('  ────    ────────              ────');
+				for (const entry of entries) {
+					const rankStr = `#${entry.rank}`.padEnd(6);
+					const nameStr = entry.username.padEnd(20);
+					addOutput(`  ${rankStr}  ${nameStr}  ${entry.time}`);
+				}
 			}
 		}
+
 		addOutput('');
 		addOutput('  Press q to return');
 		addOutput('');
@@ -158,9 +157,8 @@
 	}
 
 	function startChallenge(challengeIndex: string | number) {
-		const numericIndex = typeof challengeIndex === 'string' 
-			? parseInt(challengeIndex, 10) 
-			: challengeIndex;
+		const numericIndex =
+			typeof challengeIndex === 'string' ? parseInt(challengeIndex, 10) : challengeIndex;
 
 		const maxIndex = getChallengePoolCount() - 1;
 		if (Number.isNaN(numericIndex) || !isValidChallengeId(numericIndex)) {
@@ -373,7 +371,10 @@
 				role="button"
 				tabindex="-1"
 				title={isMaximized ? 'Restore (Ctrl+Enter)' : 'Maximize (Ctrl+Enter)'}
-				onclick={(e) => { e.stopPropagation(); toggleMaximize(); }}
+				onclick={(e) => {
+					e.stopPropagation();
+					toggleMaximize();
+				}}
 			></span>
 		</div>
 		<span class="terminal-title">tmux-speedrun</span>
@@ -387,43 +388,47 @@
 	<!-- Terminal Body -->
 	<div class="terminal-body" class:man-mode={mode === 'man'} bind:this={terminalRef}>
 		{#if mode === 'man'}
-			<Manpage onQuit={clearAndResetMode} onToggleMaximize={toggleMaximize} bind:containerRef={manpageRef} />
+			<Manpage
+				onQuit={clearAndResetMode}
+				onToggleMaximize={toggleMaximize}
+				bind:containerRef={manpageRef}
+			/>
 		{:else}
-		<!-- History -->
-		{#each history as entry}
-			<div class="terminal-line {entry.type}">
-				{entry.content}
-			</div>
-		{/each}
+			<!-- History -->
+			{#each history as entry}
+				<div class="terminal-line {entry.type}">
+					{entry.content}
+				</div>
+			{/each}
 
-		<!-- Interactive List (for tsr ls) -->
-		{#if mode === 'list'}
-			<div class="challenge-list">
-				{#each listData as item, i}
-					<div class="challenge-item" class:selected={i === selectedIndex}>
-						<span class="selector">{i === selectedIndex ? '▸' : ' '}</span>
-						<span class="challenge-text">{item.display}</span>
-					</div>
-				{/each}
-			</div>
-		{/if}
+			<!-- Interactive List (for tsr ls) -->
+			{#if mode === 'list'}
+				<div class="challenge-list">
+					{#each listData as item, i}
+						<div class="challenge-item" class:selected={i === selectedIndex}>
+							<span class="selector">{i === selectedIndex ? '▸' : ' '}</span>
+							<span class="challenge-text">{item.display}</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
 
-		<!-- Input Line (only in default mode) -->
-		{#if mode === 'default'}
-			<div class="input-line">
-				<span class="prompt">$</span>
-				<input
-					type="text"
-					class="terminal-input"
-					bind:value={inputValue}
-					bind:this={inputRef}
-					autocomplete="off"
-					autocorrect="off"
-					autocapitalize="off"
-					spellcheck="false"
-				/>
-			</div>
-		{/if}
+			<!-- Input Line (only in default mode) -->
+			{#if mode === 'default'}
+				<div class="input-line">
+					<span class="prompt">$</span>
+					<input
+						type="text"
+						class="terminal-input"
+						bind:value={inputValue}
+						bind:this={inputRef}
+						autocomplete="off"
+						autocorrect="off"
+						autocapitalize="off"
+						spellcheck="false"
+					/>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </button>
@@ -628,4 +633,3 @@
 		}
 	}
 </style>
-
