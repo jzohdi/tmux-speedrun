@@ -18,9 +18,7 @@
 	const statusMessage = $derived(getStatusMessage(challenge.status));
 	const showInput = $derived(challenge.status === 'active');
 	const progressPercent = $derived(
-		challenge.totalSteps > 0
-			? ((challenge.currentStepIndex + 1) / challenge.totalSteps) * 100
-			: 0
+		challenge.totalSteps > 0 ? ((challenge.currentStepIndex + 1) / challenge.totalSteps) * 100 : 0
 	);
 
 	function getStatusMessage(status: string): string {
@@ -49,19 +47,30 @@
 	 * - { type: 'tmux-entered' } when user types 'tmux'
 	 */
 	async function handleSignal(signal: TmuxSignal): Promise<void> {
+		console.debug('[Signal] Received:', signal.type, signal);
+
 		// Process recognized command signals for challenge verification
 		if (signal.type === 'command-executed') {
 			// Use signal.command which contains the full answer including input value
 			// For simple commands: "split-vertical"
 			// For input commands: "rename-window:swift-tiger-42"
 			const answer = signal.command;
+			console.debug(
+				'[Signal] command-executed - answer:',
+				answer,
+				'commandName:',
+				signal.commandName
+			);
+
 			if (!answer || challenge.status !== 'active') {
+				console.debug('[Signal] Skipping - answer:', answer, 'status:', challenge.status);
 				return;
 			}
 
 			// Submit the full command string for challenge verification
 			// This includes the input value for commands that require it
 			const wasCorrect = await challenge.submitAnswer(answer);
+			console.debug('[Signal] Answer submitted, wasCorrect:', wasCorrect);
 
 			// Clear input regardless of result
 			terminalRef?.clearInput();
@@ -111,19 +120,17 @@
 	// Start challenge on mount
 	onMount(async () => {
 		await challenge.start(data.challengeIndex);
-		
+
 		// Focus the terminal after a short delay to ensure DOM is ready
 		// Use requestAnimationFrame to ensure the browser has rendered
 		requestAnimationFrame(() => {
 			terminalRef?.focus();
 		});
-
 	});
 
 	onDestroy(() => {
 		challenge.reset();
 	});
-
 </script>
 
 <svelte:head>
@@ -132,22 +139,28 @@
 		name="description"
 		content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings."
 	/>
-	
+
 	<!-- Open Graph -->
 	<meta property="og:type" content="website" />
 	<meta property="og:site_name" content="tmux-speedrun" />
 	<meta property="og:title" content="Challenge {data.challengeIndex} | tmux-speedrun" />
-	<meta property="og:description" content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings." />
+	<meta
+		property="og:description"
+		content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings."
+	/>
 	<meta property="og:image" content="/og-image.png" />
 	<meta property="og:image:width" content="1200" />
 	<meta property="og:image:height" content="630" />
-	
+
 	<!-- Twitter Card -->
 	<meta name="twitter:card" content="summary_large_image" />
 	<meta name="twitter:title" content="Challenge {data.challengeIndex} | tmux-speedrun" />
-	<meta name="twitter:description" content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings." />
+	<meta
+		name="twitter:description"
+		content="Complete tmux Challenge {data.challengeIndex}. Race against the clock and master tmux keybindings."
+	/>
 	<meta name="twitter:image" content="/og-image.png" />
-	
+
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
@@ -187,7 +200,11 @@
 
 		<!-- Feedback -->
 		{#if challenge.lastFeedback}
-			<div class="feedback" class:correct={challenge.lastFeedback.correct} class:incorrect={!challenge.lastFeedback.correct}>
+			<div
+				class="feedback"
+				class:correct={challenge.lastFeedback.correct}
+				class:incorrect={!challenge.lastFeedback.correct}
+			>
 				{challenge.lastFeedback.message}
 			</div>
 		{/if}
@@ -243,9 +260,7 @@
 						<button class="action-button secondary" onclick={handleBackClick}>
 							Back to Home
 						</button>
-						<button class="action-button primary" onclick={handleRetry}>
-							Try Again
-						</button>
+						<button class="action-button primary" onclick={handleRetry}> Try Again </button>
 					</div>
 				</div>
 			</div>
@@ -259,7 +274,12 @@
 		padding: 0;
 		background: #0d0d0d;
 		color: #e0e0e0;
-		font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		font-family:
+			'Space Grotesk',
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
 	}
 
 	.challenge-page {

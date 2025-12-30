@@ -28,7 +28,7 @@ export type Keybinding = {
 
 /**
  * Parse a shortcut string like "prefix + %" into a key binding.
- * Handles shortcuts with multiple parts separated by commas (e.g., "prefix + w, tmux lsw").
+ * Handles shortcuts with multiple parts separated by ", " (e.g., "prefix + w, tmux lsw").
  *
  * @param shortcut - The shortcut string from TmuxCommand
  * @param commandName - The command name (must be a valid CommandIdType)
@@ -36,8 +36,8 @@ export type Keybinding = {
  */
 function parseShortcut(shortcut: string, commandName: string): Keybinding | Keybinding[] | null {
 	// Handle shortcuts with multiple parts (e.g., "prefix + w, tmux lsw, tmux list-windows")
-	// Extract only the prefix-based part
-	const parts = shortcut.split(',').map((p) => p.trim());
+	// Split on ", " (comma followed by space) to preserve "prefix + ," as a valid key
+	const parts = shortcut.split(', ');
 	const prefixPart = parts.find((p) => p.startsWith('prefix + '));
 
 	// Skip non-prefix shortcuts (CLI commands like "tmux new -s <name>")
