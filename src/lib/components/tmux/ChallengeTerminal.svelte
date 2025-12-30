@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick, onMount } from 'svelte';
+	import { tick, onMount, onDestroy } from 'svelte';
 	import { createTmuxStore, type TmuxStore } from '$lib/stores/tmux-state.svelte';
 	import type { TmuxSignal, PaneMode } from '$lib/utils/pane-tree';
 	import { isPrefixKey, lookupKeybinding } from '$lib/data/keybindings';
@@ -48,6 +48,17 @@
 	let containerRef = $state<HTMLDivElement | null>(null);
 	let feedbackMessage = $state<string | null>(null);
 	let feedbackTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
+	let timeState = $state<{
+		interval: NodeJS.Timeout | null;
+		timeString: string;
+		paneId: string; // Which pane should display the clock overlay
+		canCloseYet: boolean; // The keydown binding fires too early, need to store if it can close yet
+	} | null>(null);
+
+	// Derived clock state to pass down to PaneGrid/PaneView
+	const clockState = $derived(
+		timeState ? { paneId: timeState.paneId, timeString: timeState.timeString } : null
+	);
 
 	// Input mode state (for commands that require text input like rename-window)
 	let inputModeCommand = $state<TmuxCommand | null>(null);
@@ -206,7 +217,12 @@
 
 			const binding = lookupKeybinding(event);
 			if (binding) {
-				handleKeybinding(binding.commandName);
+				// Handle select-window specially since we need the actual digit pressed
+				if (binding.commandName === CommandId.SELECT_WINDOW) {
+					handleSelectWindowByNumber(event.key);
+				} else {
+					handleKeybinding(binding.commandName);
+				}
 			} else {
 				// Unknown key - show feedback but stay in prefix mode
 				showFeedback(`Unknown: ${event.key}`, 1000);
@@ -216,6 +232,37 @@
 
 		// Not in prefix mode and not a special key
 		// Let normal typing pass through to the input field
+	}
+
+	/**
+	 * Handle select-window command by number (prefix + 0-9).
+	 * @param key - The key pressed (should be '0'-'9')
+	 */
+	function handleSelectWindowByNumber(key: string): void {
+		tmux.deactivatePrefix();
+
+		if (disabled) {
+			showFeedback('Challenge not active');
+			return;
+		}
+
+		const windowIndex = parseInt(key, 10);
+
+		if (isNaN(windowIndex) || windowIndex < 0 || windowIndex > 9) {
+			return;
+		}
+
+		// Check if the window exists
+		if (windowIndex >= tmux.windowCount) {
+			showFeedback(`Window ${windowIndex} does not exist`, 1000);
+			return;
+		}
+
+		// Switch to the window
+		tmux.switchWindow(windowIndex);
+
+		// Emit the command signal for challenge tracking
+		tmux.executeTmuxCommand(CommandId.SELECT_WINDOW);
 	}
 
 	/**
@@ -270,8 +317,8 @@
 				tmux.closeWindow();
 				break;
 			case CommandId.LIST_WINDOWS:
-				// Show window list - could be a feedback message or special UI
-				showFeedback(`Windows: ${tmux.windows.map((w, i) => `${i}:${w.name}`).join(', ')}`);
+				// Output window list to history (same format as 'tmux lsw')
+				tmux.outputWindowList();
 				break;
 
 			// Pane commands
@@ -302,10 +349,13 @@
 				break;
 
 			// Select window by number (0-9)
+			// Note: This is handled by handleSelectWindowByNumber() before this function is called
 			case CommandId.SELECT_WINDOW:
-				// Handled specially - need to know which number was pressed
 				break;
-
+			case CommandId.SHOW_TIME:
+				clearTimestate();
+				showCurrentTime();
+				break;
 			// Session commands
 			case CommandId.DETACH: {
 				// Detach from the current session (session is preserved in background)
@@ -336,11 +386,60 @@
 			| 'down'
 			| 'left'
 			| 'right';
+
+		console.debug(
+			'[ChallengeTerminal] Arrow navigation - direction:',
+			direction,
+			'currentFocusedPaneId:',
+			tmux.focusedPaneId
+		);
+
 		tmux.moveFocus(direction);
+
+		console.debug('[ChallengeTerminal] After moveFocus - newFocusedPaneId:', tmux.focusedPaneId);
+
 		tmux.deactivatePrefix();
 
 		// Also emit the select-pane command
 		tmux.executeTmuxCommand(CommandId.SELECT_PANE);
+	}
+
+	function clearTimestate(): void {
+		clearInterval(timeState?.interval ?? undefined);
+		timeState = null;
+	}
+
+	function getCurrentTime(): string {
+		const now = new Date();
+		const hours = String(now.getHours()).padStart(2, '0');
+		const minutes = String(now.getMinutes()).padStart(2, '0');
+		return `${hours}:${minutes}`;
+	}
+
+	function showCurrentTime(): void {
+		if (timeState?.interval) {
+			clearInterval(timeState.interval);
+		}
+
+		// which pane triggered the clock command
+		const targetPaneId = tmux.focusedPaneId;
+
+		const interval = setInterval(() => {
+			if (!timeState) {
+				return;
+			}
+			timeState = {
+				...timeState,
+				timeString: getCurrentTime()
+			};
+		}, 1000 * 60);
+
+		timeState = {
+			interval,
+			timeString: getCurrentTime(),
+			paneId: targetPaneId,
+			canCloseYet: false
+		};
 	}
 
 	/**
@@ -349,6 +448,15 @@
 	function handleKeyDown(event: KeyboardEvent): void {
 		// In man mode, let the pane handle keyboard events
 		if (isInManMode) {
+			return;
+		}
+
+		if (timeState && tmux.focusedPaneId === timeState.paneId) {
+			if (timeState.canCloseYet) {
+				clearTimestate();
+			} else {
+				timeState.canCloseYet = true;
+			}
 			return;
 		}
 
@@ -429,7 +537,7 @@
 	// ========================================================================
 
 	/**
-	 * Focus the terminal.
+	 * Focus the terminal input of the currently focused pane.
 	 * Uses tick() to ensure Svelte DOM updates are complete,
 	 * then requestAnimationFrame to ensure browser has rendered.
 	 */
@@ -437,7 +545,16 @@
 		await tick();
 		// Use requestAnimationFrame to ensure browser has rendered
 		requestAnimationFrame(() => {
-			containerRef?.querySelector('input')?.focus();
+			// Focus the input in the currently focused pane (has .focused class)
+			const focusedPaneInput = containerRef?.querySelector(
+				'.pane-view.focused input'
+			) as HTMLInputElement | null;
+			if (focusedPaneInput) {
+				focusedPaneInput.focus();
+			} else {
+				// Fallback to first input if no focused pane found
+				containerRef?.querySelector('input')?.focus();
+			}
 		});
 	}
 
@@ -475,6 +592,10 @@
 
 	onMount(() => {
 		containerRef?.querySelector('input')?.focus();
+	});
+
+	onDestroy(() => {
+		clearTimestate();
 	});
 </script>
 
@@ -539,6 +660,7 @@
 				node={tmux.activeWindow.paneTree}
 				focusedPaneId={tmux.focusedPaneId}
 				focusTrigger={tmux.focusTrigger}
+				{clockState}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
 				onFocusPane={handlePaneFocus}
@@ -551,6 +673,7 @@
 				node={tmux.focusedPane}
 				focusedPaneId={tmux.focusedPaneId}
 				focusTrigger={tmux.focusTrigger}
+				{clockState}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
 				onFocusPane={handlePaneFocus}
@@ -713,4 +836,3 @@
 		}
 	}
 </style>
-

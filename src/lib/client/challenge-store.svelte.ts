@@ -5,18 +5,17 @@
  * Components can import and use this to display prompts, progress, and results.
  */
 
-import { ChallengeSession, type DecryptedStep, type ChallengeResult, formatDuration } from './challenge';
+import {
+	ChallengeSession,
+	type DecryptedStep,
+	type ChallengeResult,
+	formatDuration
+} from './challenge';
 
 /**
  * Challenge status enum.
  */
-export type ChallengeStatus =
-	| 'idle'
-	| 'loading'
-	| 'active'
-	| 'submitting'
-	| 'complete'
-	| 'error';
+export type ChallengeStatus = 'idle' | 'loading' | 'active' | 'submitting' | 'complete' | 'error';
 
 /**
  * Feedback for the last answer attempt.
@@ -138,23 +137,41 @@ export function createChallengeStore() {
 	 */
 	async function submitAnswer(answer: string): Promise<boolean> {
 		if (!session || status !== 'active') {
+			console.debug('[Challenge] submitAnswer skipped - session:', !!session, 'status:', status);
 			return false;
 		}
 
+		console.debug(
+			'[Challenge] Submitting answer:',
+			answer,
+			'for step:',
+			currentStepIndex + 1,
+			'/',
+			totalSteps
+		);
+		console.debug('[Challenge] Current prompt:', currentPrompt);
+
 		const wasCorrect = await session.submitAnswer(answer);
+
+		console.debug('[Challenge] Answer result:', wasCorrect ? 'CORRECT' : 'INCORRECT');
 
 		if (wasCorrect) {
 			currentStepIndex = session.getCurrentStepIndex();
-			lastFeedback = { correct: true, message: 'Correct!' };
 
 			if (session.isComplete()) {
-				// Challenge complete - submit proof
+				// Challenge complete - submit proof to server for final validation
+				// Don't show "Correct!" yet - wait for server confirmation
+				console.debug('[Challenge] All steps complete, submitting proof to server...');
+				lastFeedback = { correct: true, message: 'Verifying...' };
 				await finishChallenge();
 			} else {
+				// Non-last step - we know it's correct because next step decrypted
+				lastFeedback = { correct: true, message: 'Correct!' };
 				// Decrypt next step
 				const step = await session.decryptCurrentStep();
 				currentPrompt = step.prompt;
 				currentRequiredInput = step.requiredInput ?? null;
+				console.debug('[Challenge] Next prompt:', currentPrompt);
 			}
 		} else {
 			lastFeedback = { correct: false, message: 'Incorrect. Try again!' };
@@ -267,4 +284,3 @@ export function createChallengeStore() {
  * Type for the challenge store.
  */
 export type ChallengeStore = ReturnType<typeof createChallengeStore>;
-

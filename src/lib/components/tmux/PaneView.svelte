@@ -3,6 +3,14 @@
 	import type { Pane, HistoryEntry } from '$lib/utils/pane-tree';
 	import Manpage from '../Manpage.svelte';
 
+	/**
+	 * Clock overlay state passed down from ChallengeTerminal.
+	 */
+	type ClockState = {
+		paneId: string;
+		timeString: string;
+	};
+
 	type PaneViewProps = {
 		/** The pane data to render */
 		pane: Pane;
@@ -10,6 +18,8 @@
 		isFocused: boolean;
 		/** Counter that increments when focus should be refreshed */
 		focusTrigger?: number;
+		/** Clock overlay state - if paneId matches this pane, show the clock */
+		clockState?: ClockState | null;
 		/** Callback when input changes */
 		onInputChange?: (value: string) => void;
 		/** Callback when Enter is pressed in input */
@@ -29,6 +39,7 @@
 		pane,
 		isFocused,
 		focusTrigger,
+		clockState,
 		onInputChange,
 		onSubmit,
 		onFocus,
@@ -45,6 +56,7 @@
 	const prompt = $derived(pane.mode === 'tmux' ? '%' : '$');
 	const showInput = $derived(pane.mode !== 'man');
 	const showHistory = $derived(pane.mode !== 'man');
+	const showClock = $derived(clockState?.paneId === pane.id);
 
 	/**
 	 * Scroll history to bottom.
@@ -149,13 +161,40 @@
 	$effect(() => {
 		// Read focusTrigger to establish dependency (even if not used directly)
 		const _trigger = focusTrigger;
+		// Also track isFocused to ensure effect runs when focus changes between panes
+		const shouldFocus = isFocused;
+		// Track pane.id and pane.mode to ensure proper dependency tracking
+		const paneId = pane.id;
+		const paneMode = pane.mode;
 
-		if (isFocused && pane.mode !== 'man') {
+		console.debug(
+			'[PaneView] Effect running - paneId:',
+			paneId,
+			'isFocused:',
+			shouldFocus,
+			'focusTrigger:',
+			_trigger,
+			'mode:',
+			paneMode
+		);
+
+		if (shouldFocus && paneMode !== 'man') {
 			// Use tick() to wait for Svelte DOM updates, then focus
 			tick().then(() => {
-				inputRef?.focus();
+				console.debug(
+					'[PaneView] Focusing input for pane:',
+					paneId,
+					'inputRef exists:',
+					!!inputRef
+				);
+				if (inputRef) {
+					inputRef.focus();
+					console.debug('[PaneView] Focus called on input for pane:', paneId);
+				} else {
+					console.warn('[PaneView] inputRef is null for pane:', paneId);
+				}
 			});
-		} else if (isFocused && pane.mode === 'man') {
+		} else if (shouldFocus && paneMode === 'man') {
 			tick().then(() => {
 				manpageRef?.focus();
 			});
@@ -180,7 +219,6 @@
 			inputRef?.focus();
 		}
 	}
-
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -191,11 +229,15 @@
 	class:man-mode={pane.mode === 'man'}
 	onclick={handleClick}
 >
+	<!-- Clock Overlay (show-time command) -->
+	{#if showClock && clockState}
+		<div class="clock-overlay">
+			{clockState.timeString}
+		</div>
+	{/if}
+
 	{#if pane.mode === 'man'}
-		<Manpage
-			onQuit={handleManQuit}
-			bind:containerRef={manpageRef}
-		/>
+		<Manpage onQuit={handleManQuit} bind:containerRef={manpageRef} />
 	{:else}
 		<!-- History -->
 		{#if showHistory}
@@ -242,6 +284,20 @@
 		border: 1px solid #2d2d2d;
 	}
 
+	/* Clock Overlay (prefix + t / show-time command) */
+	.clock-overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		background: #1c1c1c;
+		z-index: 10;
+		font-size: 1.7rem;
+		font-weight: 500;
+		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
+		color: #50fa7b;
+	}
 
 	/* .pane-view.man-mode {
 		border-color: #8be9fd;
@@ -332,4 +388,3 @@
 		height: 100%;
 	}
 </style>
-

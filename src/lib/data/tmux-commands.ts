@@ -110,8 +110,9 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 	},
 	{
 		name: 'list-windows',
-		shortcut: 'prefix + w',
-		description: 'List all windows (interactive selection)',
+		shortcut: 'prefix + w, tmux lsw, tmux list-windows',
+		description:
+			'List all windows (interactive selection with prefix + w, or text output with tmux command)',
 		difficulty: 'beginner',
 		category: 'window'
 	},

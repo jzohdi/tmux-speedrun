@@ -103,6 +103,54 @@ function formatSessionList(sessions: TmuxSession[], attachedSessionIndex: number
 		.join('\n');
 }
 
+/**
+ * Format window list output (simulates 'tmux lsw' / 'tmux list-windows').
+ * Format: "0: bash* (1 panes) [160x48] [layout abcd] @0 (active)"
+ *
+ * Window flags:
+ * - `*` - current window (active)
+ * - `-` - last window
+ */
+function formatWindowList(windows: TmuxWindow[], activeWindowIndex: number): string {
+	if (windows.length === 0) {
+		return '';
+	}
+
+	// Get window dimensions from DOM if available, otherwise use defaults
+	const isBrowser = typeof globalThis.window !== 'undefined' && typeof document !== 'undefined';
+	const getDimensions = (): { width: number; height: number } => {
+		if (isBrowser) {
+			const container = document.querySelector('.pane-grid-container');
+			if (container) {
+				const bounds = container.getBoundingClientRect();
+				return { width: Math.round(bounds.width), height: Math.round(bounds.height) };
+			}
+		}
+		return { width: 160, height: 48 };
+	};
+
+	const dimensions = getDimensions();
+
+	return windows
+		.map((tmuxWindow, index) => {
+			const paneCount = countPanes(tmuxWindow.paneTree);
+			const paneWord = paneCount === 1 ? 'pane' : 'panes';
+			const isActive = index === activeWindowIndex;
+
+			// Window flag: * for active, - for last (we don't track last window, so just use * for now)
+			const flag = isActive ? '*' : '';
+
+			// Layout ID (simplified - just use a hash of the window ID)
+			const layoutId = tmuxWindow.id.slice(0, 4);
+
+			// Active marker
+			const activeMarker = isActive ? ' (active)' : '';
+
+			return `${index}: ${tmuxWindow.name}${flag} (${paneCount} ${paneWord}) [${dimensions.width}x${dimensions.height}] [layout ${layoutId}] @${index}${activeMarker}`;
+		})
+		.join('\n');
+}
+
 // ============================================================================
 // STORE OPTIONS
 // ============================================================================
@@ -226,8 +274,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				return formatPaneList(allPanesInActiveWindow, focusedPaneId);
 			case 'session-list':
 				return formatSessionList(sessions, attachedSessionIndex);
-			//   case 'window-list':
-			// 	return formatWindowList(windows, activeWindowIndex);
+			case 'window-list':
+				return formatWindowList(windows, activeWindowIndex);
 			default:
 				return null;
 		}
@@ -286,15 +334,27 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 	function setFocusedPane(paneId: string): void {
 		if (!attachedSession) {
+			console.debug('[TmuxStore] setFocusedPane - no attachedSession');
 			return;
 		}
+
+		console.debug(
+			'[TmuxStore] setFocusedPane - paneId:',
+			paneId,
+			'currentFocusedPaneId:',
+			attachedSession.focusedPaneId
+		);
 
 		if (attachedSession.focusedPaneId !== paneId) {
 			lastFocusedPaneId = attachedSession.focusedPaneId;
 			updateAttachedSession({ focusedPaneId: paneId });
+			console.debug('[TmuxStore] setFocusedPane - updated focusedPaneId to:', paneId);
 			emitSignal('focus-changed', { paneId });
+		} else {
+			console.debug('[TmuxStore] setFocusedPane - paneId unchanged, skipping update');
 		}
 		// Always trigger focus refresh when explicitly focusing a pane
+		console.debug('[TmuxStore] setFocusedPane - triggering input focus');
 		triggerInputFocus();
 	}
 
@@ -863,19 +923,36 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 */
 	function splitFocusedPane(direction: SplitDirection): void {
 		if (!activeWindow) {
+			console.debug('[TmuxStore] splitFocusedPane - no activeWindow');
 			return;
 		}
+
+		console.debug(
+			'[TmuxStore] splitFocusedPane - direction:',
+			direction,
+			'currentFocusedPaneId:',
+			focusedPaneId
+		);
 
 		const result = splitPane(activeWindow.paneTree, focusedPaneId, direction);
 
 		if (!result) {
+			console.debug('[TmuxStore] splitFocusedPane - splitPane returned null');
 			return;
 		}
+
+		console.debug('[TmuxStore] splitFocusedPane - newPaneId:', result.newPane.id);
 
 		updateActiveWindowTree(result.tree);
 
 		// Focus the new pane
+		console.debug('[TmuxStore] splitFocusedPane - calling setFocusedPane with:', result.newPane.id);
 		setFocusedPane(result.newPane.id);
+
+		console.debug(
+			'[TmuxStore] splitFocusedPane - after setFocusedPane, focusedPaneId is:',
+			focusedPaneId
+		);
 
 		emitSignal('pane-split', {
 			paneId: result.newPane.id,
@@ -944,13 +1021,24 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 */
 	function moveFocus(direction: 'up' | 'down' | 'left' | 'right'): void {
 		if (!activeWindow) {
+			console.debug('[TmuxStore] moveFocus - no activeWindow');
 			return;
 		}
 
+		console.debug('[TmuxStore] moveFocus - direction:', direction, 'currentPaneId:', focusedPaneId);
+		console.debug(
+			'[TmuxStore] moveFocus - paneTree:',
+			JSON.stringify(activeWindow.paneTree, null, 2)
+		);
+
 		const targetPane = findPaneInDirection(activeWindow.paneTree, focusedPaneId, direction);
+
+		console.debug('[TmuxStore] moveFocus - targetPane:', targetPane?.id ?? 'null');
 
 		if (targetPane) {
 			setFocusedPane(targetPane.id);
+		} else {
+			console.debug('[TmuxStore] moveFocus - no pane found in direction:', direction);
 		}
 	}
 
@@ -1531,11 +1619,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	}
 
 	/**
-	 * Execute a tmux command (called from keybinding handler).
-	 * Emits a type-safe 'command-executed' signal for challenge integration.
+	 * (called from keybinding handler).
+	 * emits a type-safe 'command-executed' signal for telling outside
+	 * world that a command was executed.
 	 *
-	 * @param commandName - The command ID (type-safe from CommandIdType)
-	 * @param value - Optional value for commands that require input (e.g., rename)
+	 * @param value - value for commands that require input (e.g., rename)
+	 * @param commandName - command id (string union type)
 	 */
 	function executeTmuxCommand(commandName: CommandIdType, value?: string): void {
 		if (!focusedPane || focusedPane.mode !== 'tmux') {
@@ -1554,12 +1643,49 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	}
 
 	// ========================================================================
-	// RESET
+	// OUTPUT GENERATION (for prefix keybindings)
 	// ========================================================================
 
 	/**
-	 * Reset to initial state.
+	 * Output the window list to history.
+	 * Used by prefix + w keybinding to show the same output as 'tmux lsw'.
 	 */
+	function outputWindowList(): void {
+		const output = generateOutput('window-list');
+		if (output) {
+			addHistory({ type: 'output', content: output, timestamp: Date.now() });
+		}
+		triggerInputFocus();
+	}
+
+	/**
+	 * Output the pane list to history.
+	 * Used for consistency with outputWindowList.
+	 */
+	function outputPaneList(): void {
+		const output = generateOutput('pane-list');
+		if (output) {
+			addHistory({ type: 'output', content: output, timestamp: Date.now() });
+		}
+		triggerInputFocus();
+	}
+
+	/**
+	 * Output the session list to history.
+	 * Used for consistency with outputWindowList.
+	 */
+	function outputSessionList(): void {
+		const output = generateOutput('session-list');
+		if (output) {
+			addHistory({ type: 'output', content: output, timestamp: Date.now() });
+		}
+		triggerInputFocus();
+	}
+
+	// ========================================================================
+	// RESET
+	// ========================================================================
+
 	function reset(): void {
 		state = initialState ?? createInitialState();
 		prefixActive = false;
@@ -1667,6 +1793,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		// Command processing
 		processCommand,
 		executeTmuxCommand,
+
+		// Output generation (for prefix keybindings)
+		outputWindowList,
+		outputPaneList,
+		outputSessionList,
 
 		// Reset
 		reset
