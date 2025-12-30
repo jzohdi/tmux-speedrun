@@ -1531,11 +1531,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	}
 
 	/**
-	 * Execute a tmux command (called from keybinding handler).
-	 * Emits a type-safe 'command-executed' signal for challenge integration.
+	 * (called from keybinding handler).
+	 * emits a type-safe 'command-executed' signal for telling outside
+	 * world that a command was executed.
 	 *
-	 * @param commandName - The command ID (type-safe from CommandIdType)
-	 * @param value - Optional value for commands that require input (e.g., rename)
+	 * @param value - value for commands that require input (e.g., rename)
+	 * @param commandName - command id (string union type)
 	 */
 	function executeTmuxCommand(commandName: CommandIdType, value?: string): void {
 		if (!focusedPane || focusedPane.mode !== 'tmux') {
@@ -1557,9 +1558,6 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	// RESET
 	// ========================================================================
 
-	/**
-	 * Reset to initial state.
-	 */
 	function reset(): void {
 		state = initialState ?? createInitialState();
 		prefixActive = false;

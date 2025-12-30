@@ -3,6 +3,14 @@
 	import PaneView from './PaneView.svelte';
 	import PaneGrid from './PaneGrid.svelte';
 
+	/**
+	 * Clock overlay state passed down to panes.
+	 */
+	type ClockState = {
+		paneId: string;
+		timeString: string;
+	};
+
 	type PaneGridProps = {
 		/** The pane tree node to render */
 		node: PaneNode;
@@ -10,6 +18,8 @@
 		focusedPaneId: string;
 		/** Counter that increments when focus should be refreshed */
 		focusTrigger?: number;
+		/** Clock overlay state - shows time on specific pane */
+		clockState?: ClockState | null;
 		/** Callback when input changes in a pane */
 		onInputChange?: (paneId: string, value: string) => void;
 		/** Callback when Enter is pressed in a pane */
@@ -26,6 +36,7 @@
 		node,
 		focusedPaneId,
 		focusTrigger,
+		clockState,
 		onInputChange,
 		onSubmit,
 		onFocusPane,
@@ -85,6 +96,7 @@
 			pane={node}
 			isFocused={node.id === focusedPaneId}
 			{focusTrigger}
+			{clockState}
 			onInputChange={handleInputChange(node.id)}
 			onSubmit={handleSubmit(node.id)}
 			onFocus={handleFocus(node.id)}
@@ -104,6 +116,7 @@
 				node={node.first}
 				{focusedPaneId}
 				{focusTrigger}
+				{clockState}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}
@@ -117,6 +130,7 @@
 				node={node.second}
 				{focusedPaneId}
 				{focusTrigger}
+				{clockState}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}

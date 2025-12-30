@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick, onMount } from 'svelte';
+	import { tick, onMount, onDestroy } from 'svelte';
 	import { createTmuxStore, type TmuxStore } from '$lib/stores/tmux-state.svelte';
 	import type { TmuxSignal, PaneMode } from '$lib/utils/pane-tree';
 	import { isPrefixKey, lookupKeybinding } from '$lib/data/keybindings';
@@ -48,6 +48,17 @@
 	let containerRef = $state<HTMLDivElement | null>(null);
 	let feedbackMessage = $state<string | null>(null);
 	let feedbackTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
+	let timeState = $state<{
+		interval: NodeJS.Timeout | null;
+		timeString: string;
+		paneId: string; // Which pane should display the clock overlay
+		canCloseYet: boolean; // The keydown binding fires too early, need to store if it can close yet
+	} | null>(null);
+
+	// Derived clock state to pass down to PaneGrid/PaneView
+	const clockState = $derived(
+		timeState ? { paneId: timeState.paneId, timeString: timeState.timeString } : null
+	);
 
 	// Input mode state (for commands that require text input like rename-window)
 	let inputModeCommand = $state<TmuxCommand | null>(null);
@@ -305,7 +316,10 @@
 			case CommandId.SELECT_WINDOW:
 				// Handled specially - need to know which number was pressed
 				break;
-
+			case CommandId.SHOW_TIME:
+				clearTimestate();
+				showCurrentTime();
+				break;
 			// Session commands
 			case CommandId.DETACH: {
 				// Detach from the current session (session is preserved in background)
@@ -343,12 +357,60 @@
 		tmux.executeTmuxCommand(CommandId.SELECT_PANE);
 	}
 
+	function clearTimestate(): void {
+		clearInterval(timeState?.interval ?? undefined);
+		timeState = null;
+	}
+
+	function getCurrentTime(): string {
+		const now = new Date();
+		const hours = String(now.getHours()).padStart(2, '0');
+		const minutes = String(now.getMinutes()).padStart(2, '0');
+		return `${hours}:${minutes}`;
+	}
+
+	function showCurrentTime(): void {
+		// Clear any existing interval first
+		if (timeState?.interval) {
+			clearInterval(timeState.interval);
+		}
+
+		// Capture which pane triggered the clock command
+		const targetPaneId = tmux.focusedPaneId;
+
+		const interval = setInterval(() => {
+			if (!timeState) {
+				return;
+			}
+			timeState = {
+				...timeState,
+				timeString: getCurrentTime()
+			};
+		}, 1000 * 60);
+
+		timeState = {
+			interval,
+			timeString: getCurrentTime(),
+			paneId: targetPaneId,
+			canCloseYet: false
+		};
+	}
+
 	/**
 	 * Main keydown handler.
 	 */
 	function handleKeyDown(event: KeyboardEvent): void {
 		// In man mode, let the pane handle keyboard events
 		if (isInManMode) {
+			return;
+		}
+
+		if (timeState && tmux.focusedPaneId === timeState.paneId) {
+			if (timeState.canCloseYet) {
+				clearTimestate();
+			} else {
+				timeState.canCloseYet = true;
+			}
 			return;
 		}
 
@@ -476,6 +538,10 @@
 	onMount(() => {
 		containerRef?.querySelector('input')?.focus();
 	});
+
+	onDestroy(() => {
+		clearTimestate();
+	});
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -539,6 +605,7 @@
 				node={tmux.activeWindow.paneTree}
 				focusedPaneId={tmux.focusedPaneId}
 				focusTrigger={tmux.focusTrigger}
+				{clockState}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
 				onFocusPane={handlePaneFocus}
@@ -551,6 +618,7 @@
 				node={tmux.focusedPane}
 				focusedPaneId={tmux.focusedPaneId}
 				focusTrigger={tmux.focusTrigger}
+				{clockState}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
 				onFocusPane={handlePaneFocus}
@@ -713,4 +781,3 @@
 		}
 	}
 </style>
-
