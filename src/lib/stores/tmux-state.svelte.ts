@@ -103,6 +103,54 @@ function formatSessionList(sessions: TmuxSession[], attachedSessionIndex: number
 		.join('\n');
 }
 
+/**
+ * Format window list output (simulates 'tmux lsw' / 'tmux list-windows').
+ * Format: "0: bash* (1 panes) [160x48] [layout abcd] @0 (active)"
+ *
+ * Window flags:
+ * - `*` - current window (active)
+ * - `-` - last window
+ */
+function formatWindowList(windows: TmuxWindow[], activeWindowIndex: number): string {
+	if (windows.length === 0) {
+		return '';
+	}
+
+	// Get window dimensions from DOM if available, otherwise use defaults
+	const isBrowser = typeof globalThis.window !== 'undefined' && typeof document !== 'undefined';
+	const getDimensions = (): { width: number; height: number } => {
+		if (isBrowser) {
+			const container = document.querySelector('.pane-grid-container');
+			if (container) {
+				const bounds = container.getBoundingClientRect();
+				return { width: Math.round(bounds.width), height: Math.round(bounds.height) };
+			}
+		}
+		return { width: 160, height: 48 };
+	};
+
+	const dimensions = getDimensions();
+
+	return windows
+		.map((tmuxWindow, index) => {
+			const paneCount = countPanes(tmuxWindow.paneTree);
+			const paneWord = paneCount === 1 ? 'pane' : 'panes';
+			const isActive = index === activeWindowIndex;
+
+			// Window flag: * for active, - for last (we don't track last window, so just use * for now)
+			const flag = isActive ? '*' : '';
+
+			// Layout ID (simplified - just use a hash of the window ID)
+			const layoutId = tmuxWindow.id.slice(0, 4);
+
+			// Active marker
+			const activeMarker = isActive ? ' (active)' : '';
+
+			return `${index}: ${tmuxWindow.name}${flag} (${paneCount} ${paneWord}) [${dimensions.width}x${dimensions.height}] [layout ${layoutId}] @${index}${activeMarker}`;
+		})
+		.join('\n');
+}
+
 // ============================================================================
 // STORE OPTIONS
 // ============================================================================
@@ -226,8 +274,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				return formatPaneList(allPanesInActiveWindow, focusedPaneId);
 			case 'session-list':
 				return formatSessionList(sessions, attachedSessionIndex);
-			//   case 'window-list':
-			// 	return formatWindowList(windows, activeWindowIndex);
+			case 'window-list':
+				return formatWindowList(windows, activeWindowIndex);
 			default:
 				return null;
 		}
@@ -1555,6 +1603,46 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	}
 
 	// ========================================================================
+	// OUTPUT GENERATION (for prefix keybindings)
+	// ========================================================================
+
+	/**
+	 * Output the window list to history.
+	 * Used by prefix + w keybinding to show the same output as 'tmux lsw'.
+	 */
+	function outputWindowList(): void {
+		const output = generateOutput('window-list');
+		if (output) {
+			addHistory({ type: 'output', content: output, timestamp: Date.now() });
+		}
+		triggerInputFocus();
+	}
+
+	/**
+	 * Output the pane list to history.
+	 * Used for consistency with outputWindowList.
+	 */
+	function outputPaneList(): void {
+		const output = generateOutput('pane-list');
+		if (output) {
+			addHistory({ type: 'output', content: output, timestamp: Date.now() });
+		}
+		triggerInputFocus();
+	}
+
+	/**
+	 * Output the session list to history.
+	 * Used for consistency with outputWindowList.
+	 */
+	function outputSessionList(): void {
+		const output = generateOutput('session-list');
+		if (output) {
+			addHistory({ type: 'output', content: output, timestamp: Date.now() });
+		}
+		triggerInputFocus();
+	}
+
+	// ========================================================================
 	// RESET
 	// ========================================================================
 
@@ -1665,6 +1753,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		// Command processing
 		processCommand,
 		executeTmuxCommand,
+
+		// Output generation (for prefix keybindings)
+		outputWindowList,
+		outputPaneList,
+		outputSessionList,
 
 		// Reset
 		reset

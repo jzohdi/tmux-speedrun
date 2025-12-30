@@ -317,8 +317,8 @@
 				tmux.closeWindow();
 				break;
 			case CommandId.LIST_WINDOWS:
-				// Show window list - could be a feedback message or special UI
-				showFeedback(`Windows: ${tmux.windows.map((w, i) => `${i}:${w.name}`).join(', ')}`);
+				// Output window list to history (same format as 'tmux lsw')
+				tmux.outputWindowList();
 				break;
 
 			// Pane commands
