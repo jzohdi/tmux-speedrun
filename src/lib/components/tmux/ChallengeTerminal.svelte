@@ -217,7 +217,12 @@
 
 			const binding = lookupKeybinding(event);
 			if (binding) {
-				handleKeybinding(binding.commandName);
+				// Handle select-window specially since we need the actual digit pressed
+				if (binding.commandName === CommandId.SELECT_WINDOW) {
+					handleSelectWindowByNumber(event.key);
+				} else {
+					handleKeybinding(binding.commandName);
+				}
 			} else {
 				// Unknown key - show feedback but stay in prefix mode
 				showFeedback(`Unknown: ${event.key}`, 1000);
@@ -227,6 +232,37 @@
 
 		// Not in prefix mode and not a special key
 		// Let normal typing pass through to the input field
+	}
+
+	/**
+	 * Handle select-window command by number (prefix + 0-9).
+	 * @param key - The key pressed (should be '0'-'9')
+	 */
+	function handleSelectWindowByNumber(key: string): void {
+		tmux.deactivatePrefix();
+
+		if (disabled) {
+			showFeedback('Challenge not active');
+			return;
+		}
+
+		const windowIndex = parseInt(key, 10);
+
+		if (isNaN(windowIndex) || windowIndex < 0 || windowIndex > 9) {
+			return;
+		}
+
+		// Check if the window exists
+		if (windowIndex >= tmux.windowCount) {
+			showFeedback(`Window ${windowIndex} does not exist`, 1000);
+			return;
+		}
+
+		// Switch to the window
+		tmux.switchWindow(windowIndex);
+
+		// Emit the command signal for challenge tracking
+		tmux.executeTmuxCommand(CommandId.SELECT_WINDOW);
 	}
 
 	/**
@@ -313,8 +349,8 @@
 				break;
 
 			// Select window by number (0-9)
+			// Note: This is handled by handleSelectWindowByNumber() before this function is called
 			case CommandId.SELECT_WINDOW:
-				// Handled specially - need to know which number was pressed
 				break;
 			case CommandId.SHOW_TIME:
 				clearTimestate();
@@ -370,12 +406,11 @@
 	}
 
 	function showCurrentTime(): void {
-		// Clear any existing interval first
 		if (timeState?.interval) {
 			clearInterval(timeState.interval);
 		}
 
-		// Capture which pane triggered the clock command
+		// which pane triggered the clock command
 		const targetPaneId = tmux.focusedPaneId;
 
 		const interval = setInterval(() => {
