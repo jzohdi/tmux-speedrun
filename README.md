@@ -1,14 +1,17 @@
 # tmux-speedrun
 
-Practice tmux keybindings through timed challenges. Race against the clock, learn commands, and see how fast you can go.
+Practice tmux keybindings through timed challenges. 
+
+## Resources
+
+https://paul.af/tmux-101
+https://github.com/tmux/tmux/wiki/Getting-Started
 
 ![tmux-speedrun screenshot](static/og-image.png)
 
 ## What is this?
 
-A browser-based game for drilling tmux muscle memory. You get a prompt ("split the pane horizontally"), you hit the right keys, and the clock is ticking. It's like typing tests, but for tmux.
-
-The terminal you see isn't real—it's a DOM-based simulation that handles pane splits, window management, and tmux's prefix-mode behavior. The goal is to get you practicing without needing to SSH anywhere or worry about messing up your actual sessions.
+I built this to help myself learn tmux. This is a browser-based game for practicing tmux muscle memory. Get a prompt ("split the pane horizontally"), and hit the right keys. It's like typing tests, but for tmux. The goal is to practice freely.
 
 ## Quick Start
 
@@ -29,7 +32,7 @@ Open http://localhost:5173 and type `help` in the terminal to see available comm
 
 ## How Challenges Work
 
-Each challenge consists of a series of prompts. You need to execute the correct tmux command for each one. The twist: steps are encrypted and unlocked sequentially, so you can't skip ahead.
+Each challenge consists of a series of prompts. You need to execute the correct tmux command for each one. Steps are encrypted and unlocked sequentially, so you can't skip ahead.
 
 **The flow:**
 1. Client and server do an ECDH key exchange
@@ -38,7 +41,7 @@ Each challenge consists of a series of prompts. You need to execute the correct 
 4. No server roundtrips during gameplay—pure client-side decryption
 5. At the end, you submit a cryptographic proof that you solved everything
 
-This isn't bulletproof anti-cheat (it's a casual game), but it prevents trivial scraping of answers.
+This isn't bulletproof anti-cheat, but it prevents trivial scraping of answers.
 
 ## Tech Stack
 
@@ -53,32 +56,31 @@ This isn't bulletproof anti-cheat (it's a casual game), but it prevents trivial 
 For local development:
 
 ```bash
-# Start PostgreSQL in Docker
+# start
 docker-compose up -d
 
-# The database is auto-initialized with:
 # - User: tmux
 # - Password: tmux  
 # - Database: tmux_speedrun
 # - Port: 5432
 
-# Stop
+# stop
 docker-compose down
 
-# Reset (removes data)
+# total fresh reset
 docker-compose down -v && docker-compose up -d
 ```
 
 ## Environment Variables
 
-Create a `.env` file:
+`.env`
 
 ```
 DATABASE_URL=postgresql://tmux:tmux@localhost:5432/tmux_speedrun
 SESSION_SECRET=your-32-char-secret-for-cookies
 ```
 
-For Neon: use your connection string from the dashboard. The app auto-detects Neon URLs and switches to the serverless driver.
+The app auto-detects Neon URLs and switches to the serverless driver.
 
 ## Project Structure
 
@@ -120,24 +122,16 @@ Some browser shortcuts can't be overridden (Ctrl+W, Ctrl+T, etc.). The default t
 ## Scripts
 
 ```bash
-pnpm dev          # Development server
-pnpm build        # Production build
-pnpm preview      # Preview production build
-pnpm test         # Run tests
-pnpm check        # TypeScript check
-pnpm lint         # ESLint + Prettier
-pnpm db:push      # Push schema to database
-pnpm db:generate  # Generate migrations
-pnpm db:studio    # Open Drizzle Studio
+pnpm dev          
+pnpm build      
+pnpm preview 
+pnpm test
+pnpm check        # ts check
+pnpm lint         # eslint/prettier
+pnpm db:push      # see drizzle docs for more 
+pnpm db:generate  # 
+pnpm db:studio
 ```
-
-## Contributing
-
-PRs welcome. The main areas that could use work:
-- More challenge variety
-- Leaderboard UI
-- GitHub OAuth for profiles
-- Additional tmux commands
 
 ## License
 
