@@ -39,11 +39,9 @@ export const CommandId = {
 	CLEAR: 'clear',
 	HELP: 'help',
 	TMUX_LIST_PANES: 'tmux list-panes',
-	TMUX_LIST_WINDOWS: 'tmux list-windows',
 
 	// Text command aliases
 	LSP: 'tmux lsp',
-	LSW: 'tmux lsw',
 
 	// ========================================================================
 	// PREFIX COMMANDS (triggered via Ctrl+B + key)
@@ -407,10 +405,12 @@ registerCommand({
 
 /**
  * List windows command (tmux-style).
+ * Supports: tmux list-windows, tmux lsw
+ * Uses LIST_WINDOWS as canonical name to match challenge expectations.
  */
 registerCommand({
-	name: CommandId.TMUX_LIST_WINDOWS,
-	aliases: [CommandId.LSW],
+	name: CommandId.LIST_WINDOWS,
+	matchPatterns: ['tmux list-windows', 'tmux lsw'],
 	description: 'List all windows',
 	handler: () => ({
 		handled: true,
