@@ -328,56 +328,36 @@
 			</div>
 		{/if}
 
-		<!-- Feedback -->
-		{#if feedbackState}
-			<div
-				class="feedback"
-				class:correct={feedbackState.type === 'correct'}
-				class:incorrect={feedbackState.type === 'incorrect'}
-				class:skipped={feedbackState.type === 'skipped'}
-			>
-				{feedbackState.message}
-			</div>
-		{/if}
-
 		<!-- Command Card -->
 		{#if currentCommand && !isComplete}
 			<section class="command-card">
-				<div class="command-header">
-					<span class="command-category">{currentCommand.category}</span>
-					<button class="skip-btn" onclick={skipCommand}>
-						Skip
-						<kbd class="skip-shortcut">Esc</kbd>
-					</button>
-				</div>
-
-				<h2 class="command-name">{currentCommand.name}</h2>
-
-				<p class="command-description">{currentCommand.description}</p>
-
-				<div class="keybinding-section">
-					<span class="keybinding-label">Keys to press:</span>
-					<div class="keybinding-display">
-						<div class="prefix-key-wrapper">
-							<kbd class="key prefix-key">{prefixKey}</kbd>
-							<span class="prefix-hint">prefix</span>
+				<div class="command-row">
+					<div class="command-info">
+						<span class="command-category">{currentCommand.category}</span>
+						<h2 class="command-name">{currentCommand.name}</h2>
+						<p class="command-description">
+							{currentCommand.description}{#if currentCommand.requiresInput}<span
+									class="input-badge">+ input</span
+								>{/if}
+						</p>
+					</div>
+					<div class="keybinding-area">
+						<div class="keys-row">
+							<div class="key-group">
+								<kbd class="key prefix-key">{prefixKey}</kbd>
+								<span class="key-label">prefix</span>
+							</div>
+							<span class="key-arrow">→</span>
+							{#each getKeybindingsDisplay(currentKeybindings) as keyDisplay, i}
+								{#if i > 0}<span class="key-divider">/</span>{/if}
+								<kbd class="key command-key">{keyDisplay}</kbd>
+							{/each}
 						</div>
-						<span class="key-separator">then</span>
-						{#each getKeybindingsDisplay(currentKeybindings) as keyDisplay, i}
-							{#if i > 0}
-								<span class="key-or">or</span>
-							{/if}
-							<kbd class="key command-key">{keyDisplay}</kbd>
-						{/each}
+						<button class="skip-btn" onclick={skipCommand}>
+							skip <kbd class="skip-shortcut">esc</kbd>
+						</button>
 					</div>
 				</div>
-
-				{#if currentCommand.requiresInput}
-					<div class="input-hint">
-						<span class="input-hint-icon">✏️</span>
-						<span>This command requires text input after the keybinding</span>
-					</div>
-				{/if}
 			</section>
 		{:else if isComplete}
 			<section class="completion-card">
@@ -403,6 +383,18 @@
 		</section>
 	</div>
 </main>
+
+<!-- Toast Notification -->
+{#if feedbackState}
+	<div
+		class="toast"
+		class:correct={feedbackState.type === 'correct'}
+		class:incorrect={feedbackState.type === 'incorrect'}
+		class:skipped={feedbackState.type === 'skipped'}
+	>
+		{feedbackState.message}
+	</div>
+{/if}
 
 <style>
 	:global(body) {
@@ -573,170 +565,182 @@
 		opacity: 0.9;
 	}
 
-	/* Feedback */
-	.feedback {
-		padding: 12px 16px;
-		font-size: 14px;
-		font-weight: 500;
+	/* Toast Notification */
+	.toast {
+		position: fixed;
+		top: 24px;
+		left: 50%;
+		transform: translateX(-50%);
+		padding: 10px 20px;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 13px;
+		font-weight: 600;
 		text-align: center;
-		border-radius: 4px;
-		animation: fadeIn 0.2s ease;
+		border-radius: 6px;
+		z-index: 1000;
+		animation: toastIn 0.25s ease-out;
+		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 	}
 
-	.feedback.correct {
-		background: rgba(80, 250, 123, 0.15);
+	.toast.correct {
+		background: rgba(13, 13, 13, 0.95);
+		border: 1px solid #50fa7b;
 		color: #50fa7b;
 	}
 
-	.feedback.incorrect {
-		background: rgba(255, 85, 85, 0.15);
+	.toast.incorrect {
+		background: rgba(13, 13, 13, 0.95);
+		border: 1px solid #ff5555;
 		color: #ff5555;
 	}
 
-	.feedback.skipped {
-		background: rgba(255, 184, 108, 0.15);
+	.toast.skipped {
+		background: rgba(13, 13, 13, 0.95);
+		border: 1px solid #ffb86c;
 		color: #ffb86c;
 	}
 
-	@keyframes fadeIn {
+	@keyframes toastIn {
 		from {
 			opacity: 0;
-			transform: translateY(-4px);
+			transform: translateX(-50%) translateY(-10px);
 		}
 		to {
 			opacity: 1;
-			transform: translateY(0);
+			transform: translateX(-50%) translateY(0);
 		}
 	}
 
 	/* Command Card */
 	.command-card {
-		background: #1a1a1a;
-		border: 1px solid #2d2d2d;
+		background: linear-gradient(135deg, #161616 0%, #1a1a1a 100%);
+		border: 1px solid #252525;
 		border-radius: 10px;
-		padding: 16px 20px;
+		padding: 18px 22px;
+		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 	}
 
-	.command-header {
+	.command-row {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 8px;
+		gap: 24px;
+	}
+
+	.command-info {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.command-category {
 		font-size: 10px;
-		font-weight: 500;
+		font-weight: 600;
 		text-transform: uppercase;
-		letter-spacing: 0.8px;
+		letter-spacing: 1.2px;
 		color: #8be9fd;
+		opacity: 0.8;
 	}
 
 	.command-name {
 		font-family: 'JetBrains Mono', monospace;
-		font-size: 20px;
+		font-size: 22px;
 		font-weight: 700;
 		color: #ffffff;
-		margin: 0 0 4px;
+		margin: 4px 0 6px;
+		letter-spacing: -0.3px;
 	}
 
 	.command-description {
 		font-size: 13px;
-		color: #a0a0a0;
+		color: #888;
 		line-height: 1.4;
-		margin: 0 0 12px;
+		margin: 0;
 	}
 
-	.keybinding-section {
-		background: #0d0d0d;
-		border-radius: 6px;
-		padding: 12px;
-	}
-
-	.keybinding-label {
-		display: block;
+	.input-badge {
+		display: inline-block;
+		margin-left: 8px;
+		padding: 2px 6px;
+		background: rgba(255, 184, 108, 0.15);
+		border-radius: 4px;
 		font-size: 10px;
-		font-weight: 500;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		color: #666;
-		margin-bottom: 8px;
+		font-weight: 600;
+		color: #ffb86c;
+		vertical-align: middle;
 	}
 
-	.keybinding-display {
+	.keybinding-area {
 		display: flex;
-		align-items: flex-start;
-		flex-wrap: wrap;
-		gap: 6px;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 10px;
+	}
+
+	.keys-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.key-group {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 	}
 
 	.key {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-width: 36px;
-		height: 28px;
+		min-width: 38px;
+		height: 32px;
 		padding: 0 10px;
-		background: #2d2d2d;
-		border: 1px solid #3d3d3d;
+		background: #222;
+		border: 1px solid #333;
 		border-radius: 5px;
 		font-family: 'JetBrains Mono', monospace;
-		font-size: 12px;
+		font-size: 13px;
 		font-weight: 600;
-		color: #ffffff;
-		box-shadow: 0 2px 0 #1a1a1a;
-	}
-
-	.prefix-key-wrapper {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 2px;
+		color: #fff;
+		box-shadow: 0 2px 0 #111;
 	}
 
 	.key.prefix-key {
-		background: linear-gradient(135deg, #50fa7b20, #50fa7b10);
-		border-color: #50fa7b;
+		background: linear-gradient(180deg, #1a3d2a 0%, #142a1f 100%);
+		border-color: #50fa7b44;
 		color: #50fa7b;
 	}
 
-	.prefix-hint {
+	.key-label {
+		position: absolute;
+		top: 100%;
+		left: 50%;
+		transform: translateX(-50%);
+		margin-top: 3px;
 		font-size: 9px;
 		color: #50fa7b;
 		opacity: 0.7;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
+		white-space: nowrap;
 	}
 
 	.key.command-key {
-		background: linear-gradient(135deg, #8be9fd20, #8be9fd10);
-		border-color: #8be9fd;
+		background: linear-gradient(180deg, #1a2d3d 0%, #141f2a 100%);
+		border-color: #8be9fd44;
 		color: #8be9fd;
 	}
 
-	.key-separator,
-	.key-or {
-		font-size: 11px;
-		color: #666;
-		font-style: italic;
-		padding-top: 5px;
-	}
-
-	.input-hint {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		margin-top: 10px;
-		padding: 8px 10px;
-		background: rgba(255, 184, 108, 0.1);
-		border: 1px solid rgba(255, 184, 108, 0.2);
-		border-radius: 5px;
-		font-size: 11px;
-		color: #ffb86c;
-	}
-
-	.input-hint-icon {
+	.key-arrow {
 		font-size: 14px;
+		color: #555;
+	}
+
+	.key-divider {
+		font-size: 12px;
+		color: #555;
+		font-weight: 300;
 	}
 
 	/* Skip Button */
@@ -744,37 +748,37 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		padding: 4px 10px;
+		padding: 5px 10px;
 		background: transparent;
-		border: 1px solid #3d3d3d;
+		border: 1px solid #333;
 		border-radius: 5px;
 		font-family: 'JetBrains Mono', monospace;
 		font-size: 10px;
-		color: #666;
+		color: #555;
 		cursor: pointer;
-		transition: all 0.2s ease;
+		transition: all 0.15s ease;
 	}
 
 	.skip-btn:hover {
-		background: rgba(255, 184, 108, 0.1);
-		border-color: #ffb86c;
+		background: rgba(255, 184, 108, 0.08);
+		border-color: #ffb86c55;
 		color: #ffb86c;
 	}
 
 	.skip-btn:hover .skip-shortcut {
-		border-color: #ffb86c;
+		border-color: #ffb86c55;
 		color: #ffb86c;
 	}
 
 	.skip-shortcut {
-		padding: 1px 4px;
+		padding: 2px 4px;
 		background: #1a1a1a;
-		border: 1px solid #3d3d3d;
+		border: 1px solid #333;
 		border-radius: 3px;
 		font-size: 8px;
 		font-weight: 600;
-		color: #555;
-		transition: all 0.2s ease;
+		color: #444;
+		transition: all 0.15s ease;
 	}
 
 	/* Completion Card */
@@ -881,11 +885,16 @@
 		}
 
 		.command-name {
-			font-size: 22px;
+			font-size: 18px;
 		}
 
-		.keybinding-display {
+		.command-row {
 			flex-direction: column;
+			align-items: stretch;
+			gap: 14px;
+		}
+
+		.keybinding-area {
 			align-items: flex-start;
 		}
 
