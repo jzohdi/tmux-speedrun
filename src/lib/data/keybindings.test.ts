@@ -88,14 +88,7 @@ describe('Keybindings', () => {
 			}
 		});
 
-		it('should have resize-pane for Ctrl+Arrow', () => {
-			for (const arrow of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) {
-				const binding = KEYBINDING_MAP.get(`Ctrl+${arrow}`);
-				expect(binding).toBeDefined();
-				expect(binding?.commandName).toBe('resize-pane');
-				expect(binding?.withCtrl).toBe(true);
-			}
-		});
+		// NOTE: resize-pane test removed - Ctrl+Arrow conflicts with macOS Mission Control
 
 		it('should have swap-pane for { and }', () => {
 			const bindingLeft = KEYBINDING_MAP.get('{');
