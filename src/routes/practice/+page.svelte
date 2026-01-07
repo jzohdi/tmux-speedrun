@@ -781,7 +781,6 @@
 		transition: all 0.15s ease;
 	}
 
-
 	/* Completion Card */
 	.completion-card {
 		text-align: center;

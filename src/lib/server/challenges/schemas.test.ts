@@ -324,4 +324,3 @@ describe('Schema Type Inference', () => {
 		expect(shape.startTime).toBeDefined();
 	});
 });
-

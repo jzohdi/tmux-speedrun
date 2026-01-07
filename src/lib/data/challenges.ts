@@ -29,7 +29,14 @@ export const CHALLENGES: Challenge[] = [
 	},
 	{
 		difficulty: 15,
-		commandNames: ['new-window', 'select-window', 'rename-window', 'kill-window', 'list-windows', 'last-window']
+		commandNames: [
+			'new-window',
+			'select-window',
+			'rename-window',
+			'kill-window',
+			'list-windows',
+			'last-window'
+		]
 	},
 	{
 		difficulty: 18,
@@ -54,7 +61,7 @@ export const CHALLENGES: Challenge[] = [
 /**
  * Challenge metadata for the UI.
  * This mirrors the server-side pool configuration but is safe to use on the client.
- * 
+ *
  * IMPORTANT: These values must match the server-side pools.ts configuration!
  * If you update the server pools, update this array as well.
  */
@@ -80,11 +87,31 @@ const INSTRUCTION_INCREMENT = 15;
  */
 export const CHALLENGE_METADATA: ChallengeMetadata[] = [
 	{ index: 0, instructionCount: BASE_INSTRUCTION_COUNT, difficultyLabel: 'Beginner' },
-	{ index: 1, instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT, difficultyLabel: 'Intermediate' },
-	{ index: 2, instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 2, difficultyLabel: 'Intermediate' },
-	{ index: 3, instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 3, difficultyLabel: 'Advanced' },
-	{ index: 4, instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 4, difficultyLabel: 'Advanced' },
-	{ index: 5, instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 5, difficultyLabel: 'Advanced' }
+	{
+		index: 1,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT,
+		difficultyLabel: 'Intermediate'
+	},
+	{
+		index: 2,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 2,
+		difficultyLabel: 'Intermediate'
+	},
+	{
+		index: 3,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 3,
+		difficultyLabel: 'Advanced'
+	},
+	{
+		index: 4,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 4,
+		difficultyLabel: 'Advanced'
+	},
+	{
+		index: 5,
+		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 5,
+		difficultyLabel: 'Advanced'
+	}
 ];
 
 /**
@@ -109,7 +136,9 @@ export function getChallengePoolCount(): number {
  * @returns true if valid, false otherwise
  */
 export function isValidChallengeId(challengeId: number): boolean {
-	return Number.isInteger(challengeId) && challengeId >= 0 && challengeId < CHALLENGE_METADATA.length;
+	return (
+		Number.isInteger(challengeId) && challengeId >= 0 && challengeId < CHALLENGE_METADATA.length
+	);
 }
 
 // Helper functions (legacy - kept for backwards compatibility)
@@ -160,7 +189,9 @@ export function getMaxChallengeIndex(): number {
 	return CHALLENGES.length - 1;
 }
 
-export function getAllChallengesWithMeta(): Array<Challenge & { commandCount: number; index: number }> {
+export function getAllChallengesWithMeta(): Array<
+	Challenge & { commandCount: number; index: number }
+> {
 	return CHALLENGES.map((challenge, index) => ({
 		...challenge,
 		index,
@@ -204,4 +235,3 @@ export function getAllUsedCommands(): string[] {
 
 	return Array.from(allCommands);
 }
-

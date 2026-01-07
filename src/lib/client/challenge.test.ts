@@ -174,7 +174,10 @@ describe('Client Challenge Service', () => {
 		});
 
 		it('encrypts and decrypts a step with required input', async () => {
-			const payload = { prompt: "Rename the window to 'swift-tiger-42'", requiredInput: 'swift-tiger-42' };
+			const payload = {
+				prompt: "Rename the window to 'swift-tiger-42'",
+				requiredInput: 'swift-tiger-42'
+			};
 			const encrypted = await encryptStep(k0, payload, 0);
 
 			const decrypted = await decryptStep(k0, encrypted);
@@ -253,9 +256,7 @@ describe('Client Challenge Service', () => {
 				current2 = await deriveNextKey(current2, answers[i], i);
 			}
 
-			expect(bytesToBase64(new Uint8Array(current1))).toBe(
-				bytesToBase64(new Uint8Array(current2))
-			);
+			expect(bytesToBase64(new Uint8Array(current1))).toBe(bytesToBase64(new Uint8Array(current2)));
 		});
 
 		it('produces different Kfinal with different answers', async () => {
@@ -384,4 +385,3 @@ describe('Client Challenge Service', () => {
 		});
 	});
 });
-

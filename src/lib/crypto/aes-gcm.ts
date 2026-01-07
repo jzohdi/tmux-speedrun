@@ -150,4 +150,3 @@ export async function decryptString(
 export function generateNonce(): Uint8Array<ArrayBuffer> {
 	return randomBytes(AES_GCM_NONCE_SIZE);
 }
-

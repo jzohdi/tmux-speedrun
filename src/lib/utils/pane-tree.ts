@@ -78,6 +78,12 @@ export type TmuxWindow = {
 	id: string;
 	name: string;
 	paneTree: PaneNode;
+	/**
+	 * ID of the pane that is currently zoomed (fullscreen).
+	 * When set, only this pane is rendered in the window.
+	 * null means no pane is zoomed.
+	 */
+	zoomedPaneId: string | null;
 };
 
 /**
@@ -231,7 +237,8 @@ export function createWindow(name?: string): TmuxWindow {
 	return {
 		id,
 		name: name ?? `window-${id.split('-')[1]}`,
-		paneTree: createPane('tmux')
+		paneTree: createPane('tmux'),
+		zoomedPaneId: null
 	};
 }
 

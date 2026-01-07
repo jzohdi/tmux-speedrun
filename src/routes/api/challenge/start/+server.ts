@@ -14,17 +14,8 @@
 
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import {
-	generateEcdhKeyPair,
-	exportPublicKeyJwk,
-	ecdhExchange,
-	bytesToBase64
-} from '$lib/crypto';
-import {
-	generateInstructions,
-	isValidChallengeId,
-	prepareChallenge
-} from '$lib/server/challenges';
+import { generateEcdhKeyPair, exportPublicKeyJwk, ecdhExchange, bytesToBase64 } from '$lib/crypto';
+import { generateInstructions, isValidChallengeId, prepareChallenge } from '$lib/server/challenges';
 import { parseStartRequest, type ChallengeSessionCookie } from '$lib/server/challenges/schemas';
 import { getSessionSecret, CHALLENGE_COOKIE_NAME, COOKIE_OPTIONS } from '$lib/server/env';
 
@@ -91,4 +82,3 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		steps: encryptedSteps
 	});
 };
-

@@ -29,7 +29,7 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Reattach to a session',
 		'Resume a tmux session'
 	],
-	'detach': [
+	detach: [
 		'Detach from the current session',
 		'Disconnect from this session',
 		'Leave the current session running',
@@ -275,4 +275,3 @@ export function hasPromptVariations(commandName: string): boolean {
 export function getCommandsWithVariations(): string[] {
 	return Object.keys(PROMPT_VARIATIONS);
 }
-

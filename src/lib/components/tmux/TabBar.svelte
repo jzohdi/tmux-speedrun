@@ -179,4 +179,3 @@
 		max-width: 150px;
 	}
 </style>
-

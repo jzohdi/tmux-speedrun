@@ -158,4 +158,3 @@ export function isValidMeaningfulString(str: string): boolean {
 
 	return pattern.test(str);
 }
-

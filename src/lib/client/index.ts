@@ -22,4 +22,3 @@ export {
 	type ChallengeStatus,
 	type AnswerFeedback
 } from './challenge-store.svelte';
-

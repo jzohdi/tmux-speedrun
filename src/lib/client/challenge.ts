@@ -288,10 +288,7 @@ async function deriveNextKey(
 /**
  * Decrypt a step payload.
  */
-async function decryptStep(
-	key: ArrayBuffer,
-	encryptedStep: EncryptedStep
-): Promise<DecryptedStep> {
+async function decryptStep(key: ArrayBuffer, encryptedStep: EncryptedStep): Promise<DecryptedStep> {
 	const nonce = base64ToBytes(encryptedStep.nonceB64);
 	const ciphertext = base64ToBytes(encryptedStep.ciphertextB64);
 
@@ -318,4 +315,3 @@ export function formatDuration(ms: number): string {
 
 	return `${minutes}m ${remainingSeconds.toFixed(1)}s`;
 }
-

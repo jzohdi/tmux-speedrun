@@ -84,4 +84,3 @@ export function parseSessionCookie(data: unknown) {
 export type StartChallengeRequestBody = z.infer<typeof startChallengeRequestSchema>;
 export type FinishChallengeRequestBody = z.infer<typeof finishChallengeRequestSchema>;
 export type ChallengeSessionCookie = z.infer<typeof challengeSessionSchema>;
-

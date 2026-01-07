@@ -77,29 +77,29 @@
 		const lines = getTerminalLines();
 		for (const line of lines) {
 			typedLines = [...typedLines, ''];
-			
+
 			// Commands type slower, output appears instantly
 			if (line.startsWith('$')) {
 				await typeText(line, 25);
-				await new Promise(r => setTimeout(r, 300));
+				await new Promise((r) => setTimeout(r, 300));
 			} else if (line.startsWith('bash:') || line.startsWith('cat:') || line.startsWith('Error')) {
 				// Error messages appear with a slight delay
-				await new Promise(r => setTimeout(r, 100));
+				await new Promise((r) => setTimeout(r, 100));
 				typedLines = [...typedLines.slice(0, -1), line];
 				// Trigger glitch on error
 				if (line.startsWith('bash:') || line.startsWith('cat:')) {
 					glitchActive = true;
-					setTimeout(() => glitchActive = false, 150);
+					setTimeout(() => (glitchActive = false), 150);
 				}
 			} else {
 				typedLines = [...typedLines.slice(0, -1), line];
 			}
-			
-			await new Promise(r => setTimeout(r, 80));
+
+			await new Promise((r) => setTimeout(r, 80));
 		}
-		
+
 		// Show the main content after typing
-		await new Promise(r => setTimeout(r, 500));
+		await new Promise((r) => setTimeout(r, 500));
 		showContent = true;
 	}
 
@@ -115,7 +115,7 @@
 
 	onDestroy(() => {
 		clearInterval(cursorInterval ?? undefined);
-	})
+	});
 
 	function handleGoHome(): void {
 		goto('/');
@@ -130,7 +130,7 @@
 	<title>{errorCode} | tmux-speedrun</title>
 	<meta name="description" content="Error {errorCode}: {errorMessage}" />
 	<meta name="robots" content="noindex, nofollow" />
-	
+
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
@@ -149,7 +149,7 @@
 	<div class="error-container">
 		<!-- ASCII Art Header -->
 		<div class="ascii-section" class:visible={showContent}>
-			{#each (asciiArt[errorCode] ?? asciiArt[404]) as line}
+			{#each asciiArt[errorCode] ?? asciiArt[404] as line}
 				<pre class="ascii-line">{line}</pre>
 			{/each}
 		</div>
@@ -172,7 +172,13 @@
 
 			<div class="terminal-body">
 				{#each typedLines as line, i}
-					<div class="terminal-line" class:command={line.startsWith('$')} class:error={line.startsWith('bash:') || line.startsWith('cat:') || line.startsWith('Error')}>
+					<div
+						class="terminal-line"
+						class:command={line.startsWith('$')}
+						class:error={line.startsWith('bash:') ||
+							line.startsWith('cat:') ||
+							line.startsWith('Error')}
+					>
 						{line}
 						{#if i === typedLines.length - 1 && !showContent}
 							<span class="cursor" class:visible={cursorVisible}>▋</span>
@@ -190,9 +196,7 @@
 
 		<!-- Action Section -->
 		<div class="actions-section" class:visible={showContent}>
-			<p class="help-text">
-				The page you're looking for doesn't exist or has been moved.
-			</p>
+			<p class="help-text">The page you're looking for doesn't exist or has been moved.</p>
 
 			<div class="command-suggestions">
 				<span class="suggestion-label">Try one of these:</span>
@@ -234,7 +238,12 @@
 		padding: 0;
 		background: #0a0a0a;
 		color: #e0e0e0;
-		font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		font-family:
+			'Space Grotesk',
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
 		overflow-x: hidden;
 	}
 
@@ -253,12 +262,30 @@
 	}
 
 	@keyframes screenGlitch {
-		0% { transform: translate(0); filter: hue-rotate(0deg); }
-		20% { transform: translate(-2px, 1px); filter: hue-rotate(90deg); }
-		40% { transform: translate(2px, -1px); filter: hue-rotate(-90deg); }
-		60% { transform: translate(-1px, 2px); filter: hue-rotate(180deg); }
-		80% { transform: translate(1px, -2px); filter: hue-rotate(-180deg); }
-		100% { transform: translate(0); filter: hue-rotate(0deg); }
+		0% {
+			transform: translate(0);
+			filter: hue-rotate(0deg);
+		}
+		20% {
+			transform: translate(-2px, 1px);
+			filter: hue-rotate(90deg);
+		}
+		40% {
+			transform: translate(2px, -1px);
+			filter: hue-rotate(-90deg);
+		}
+		60% {
+			transform: translate(-1px, 2px);
+			filter: hue-rotate(180deg);
+		}
+		80% {
+			transform: translate(1px, -2px);
+			filter: hue-rotate(-180deg);
+		}
+		100% {
+			transform: translate(0);
+			filter: hue-rotate(0deg);
+		}
 	}
 
 	/* Background Effects */
@@ -418,9 +445,15 @@
 		background: #3d3d3d;
 	}
 
-	.btn.close { background: #ff5f56; }
-	.btn.minimize { background: #ffbd2e; }
-	.btn.maximize { background: #27ca40; }
+	.btn.close {
+		background: #ff5f56;
+	}
+	.btn.minimize {
+		background: #ffbd2e;
+	}
+	.btn.maximize {
+		background: #27ca40;
+	}
 
 	.terminal-title {
 		font-family: 'JetBrains Mono', monospace;
@@ -467,8 +500,14 @@
 	}
 
 	@keyframes cursorBlink {
-		0%, 50% { opacity: 1; }
-		51%, 100% { opacity: 0; }
+		0%,
+		50% {
+			opacity: 1;
+		}
+		51%,
+		100% {
+			opacity: 0;
+		}
 	}
 
 	/* Actions Section */
@@ -495,7 +534,6 @@
 		text-align: center;
 		justify-content: center;
 	}
-
 
 	.command-suggestions {
 		display: flex;
@@ -605,4 +643,3 @@
 		}
 	}
 </style>
-

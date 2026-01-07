@@ -35,14 +35,12 @@
 	}
 
 	// Auto-focus terminal on mount
-	$effect(() => {
+	$effect(() => {});
 
-	});
-
-	onMount(async() => {
+	onMount(async () => {
 		await tick();
 		terminalRef?.focus();
-	})
+	});
 </script>
 
 <svelte:head>
@@ -51,22 +49,28 @@
 		name="description"
 		content="Practice tmux keybindings in free play mode. No timer, no pressure - just explore and learn tmux commands at your own pace."
 	/>
-	
+
 	<!-- Open Graph -->
 	<meta property="og:type" content="website" />
 	<meta property="og:site_name" content="tmux-speedrun" />
 	<meta property="og:title" content="Free Play | tmux-speedrun" />
-	<meta property="og:description" content="Practice tmux keybindings in free play mode. No timer, no pressure - just explore and learn tmux commands at your own pace." />
+	<meta
+		property="og:description"
+		content="Practice tmux keybindings in free play mode. No timer, no pressure - just explore and learn tmux commands at your own pace."
+	/>
 	<meta property="og:image" content="/og-image.png" />
 	<meta property="og:image:width" content="1200" />
 	<meta property="og:image:height" content="630" />
-	
+
 	<!-- Twitter Card -->
 	<meta name="twitter:card" content="summary_large_image" />
 	<meta name="twitter:title" content="Free Play | tmux-speedrun" />
-	<meta name="twitter:description" content="Practice tmux keybindings in free play mode. No timer, no pressure - just explore and learn." />
+	<meta
+		name="twitter:description"
+		content="Practice tmux keybindings in free play mode. No timer, no pressure - just explore and learn."
+	/>
 	<meta name="twitter:image" content="/og-image.png" />
-	
+
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
@@ -88,11 +92,7 @@
 
 		<!-- Terminal Section -->
 		<section class="terminal-section">
-			<ChallengeTerminal
-				bind:this={terminalRef}
-				onSignal={handleSignal}
-				disabled={false}
-			/>
+			<ChallengeTerminal bind:this={terminalRef} onSignal={handleSignal} disabled={false} />
 		</section>
 
 		<!-- Debug Panel -->
@@ -159,7 +159,12 @@
 		padding: 0;
 		background: #0d0d0d;
 		color: #e0e0e0;
-		font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		font-family:
+			'Space Grotesk',
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
 	}
 
 	.free-play-page {

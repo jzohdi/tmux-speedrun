@@ -10,9 +10,7 @@
 
 	let { prompt, currentStep, totalSteps }: Props = $props();
 
-	const hasProgress = $derived(
-		typeof currentStep === 'number' && typeof totalSteps === 'number'
-	);
+	const hasProgress = $derived(typeof currentStep === 'number' && typeof totalSteps === 'number');
 </script>
 
 <div class="prompt-box">

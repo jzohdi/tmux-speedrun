@@ -443,9 +443,7 @@ describe('ECDH', () => {
 		const client2 = await generateEcdhKeyPair();
 		const server = await generateEcdhKeyPair();
 
-		const serverPublicKey = await importPublicKeyJwk(
-			await exportPublicKeyJwk(server.publicKey)
-		);
+		const serverPublicKey = await importPublicKeyJwk(await exportPublicKeyJwk(server.publicKey));
 
 		const secret1 = await deriveSharedSecret(client1.privateKey, serverPublicKey);
 		const secret2 = await deriveSharedSecret(client2.privateKey, serverPublicKey);
@@ -453,4 +451,3 @@ describe('ECDH', () => {
 		expect(new Uint8Array(secret1)).not.toEqual(new Uint8Array(secret2));
 	});
 });
-

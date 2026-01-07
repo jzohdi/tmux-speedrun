@@ -236,4 +236,3 @@ describe('Keybindings', () => {
 		});
 	});
 });
-
