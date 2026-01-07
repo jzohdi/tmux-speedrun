@@ -69,12 +69,12 @@
 					<span>begin a challenge</span>
 				</div>
 				<div class="hint">
-					<code>man tmux</code>
-					<span>command reference</span>
+					<code>tsr practice</code>
+					<span>learn step by step</span>
 				</div>
 				<div class="hint">
-					<code>help</code>
-					<span>show all available commands</span>
+					<code>man tmux</code>
+					<span>command reference</span>
 				</div>
 			</div>
 		</div>

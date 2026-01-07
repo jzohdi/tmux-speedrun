@@ -9,6 +9,7 @@
 
 import { TMUX_COMMANDS, type TmuxCommand } from './tmux-commands';
 import { type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';
+import { isPrefixKey as checkPrefixKey, getPrefixKeyDisplay } from './tmux-config';
 
 /**
  * Keybinding type for prefix-based commands.
@@ -202,14 +203,21 @@ export function getCommandForBinding(binding: Keybinding): TmuxCommand | undefin
 }
 
 /**
- * Check if the event is the prefix key (Ctrl+b).
+ * Check if the event is the prefix key (Ctrl+b by default).
+ * Uses the configuration from tmux-config.ts for the actual key.
  *
  * @param event - The keyboard event
  * @returns true if this is the prefix key
  */
 export function isPrefixKey(event: KeyboardEvent): boolean {
-	return event.ctrlKey && event.key.toLowerCase() === 'b';
+	return checkPrefixKey(event);
 }
+
+/**
+ * Re-export getPrefixKeyDisplay for convenience.
+ * Returns the human-readable prefix key (e.g., "Ctrl+b").
+ */
+export { getPrefixKeyDisplay };
 
 /**
  * Get all prefix-based keybindings.
@@ -250,4 +258,38 @@ export function getKeybindingsForCommand(commandName: CommandIdType): Keybinding
 	}
 
 	return bindings;
+}
+
+/**
+ * Get all commands that have prefix-based keybindings.
+ * Returns unique TmuxCommand objects for commands that can be triggered via prefix + key.
+ * This is useful for practice modes where users learn keyboard shortcuts.
+ *
+ * @returns Array of TmuxCommand objects with prefix keybindings
+ */
+export function getCommandsWithPrefixKeybindings(): TmuxCommand[] {
+	const commandNames = new Set<string>();
+
+	for (const binding of KEYBINDING_MAP.values()) {
+		commandNames.add(binding.commandName);
+	}
+
+	return TMUX_COMMANDS.filter((cmd) => commandNames.has(cmd.name));
+}
+
+/**
+ * Get a single representative keybinding for a command.
+ * Useful when you only need to show one way to execute a command.
+ *
+ * @param commandName - The command name
+ * @returns The first keybinding for this command, or undefined if none exists
+ */
+export function getFirstKeybindingForCommand(commandName: CommandIdType): Keybinding | undefined {
+	for (const binding of KEYBINDING_MAP.values()) {
+		if (binding.commandName === commandName) {
+			return binding;
+		}
+	}
+
+	return undefined;
 }
