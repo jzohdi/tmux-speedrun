@@ -146,13 +146,9 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		difficulty: 'intermediate',
 		category: 'pane'
 	},
-	{
-		name: 'resize-pane',
-		shortcut: 'prefix + Ctrl+Arrow',
-		description: 'Resize pane in arrow direction',
-		difficulty: 'intermediate',
-		category: 'pane'
-	},
+	// NOTE: resize-pane (prefix + Ctrl+Arrow) is intentionally not supported.
+	// On macOS, Ctrl+Arrow is a system shortcut for Mission Control/Spaces
+	// and cannot be intercepted by web applications.
 	{
 		name: 'swap-pane',
 		shortcut: 'prefix + { or }',

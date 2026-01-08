@@ -83,7 +83,9 @@ export function generateInstructions(challengeId: number): Instruction[] {
 	// (This handles edge cases where we had to add simple commands first)
 	// Only attempt if there are input commands available in the pool
 	if (inputCommands.length > 0) {
-		const currentInputCount = instructions.filter((inst) => inst.requiredInput !== undefined).length;
+		const currentInputCount = instructions.filter(
+			(inst) => inst.requiredInput !== undefined
+		).length;
 		const additionalInputNeeded = minInputCommands - currentInputCount;
 
 		for (let i = 0; i < additionalInputNeeded && instructions.length < targetCount; i++) {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick, onMount, onDestroy } from 'svelte';
 	import { createTmuxStore, type TmuxStore } from '$lib/stores/tmux-state.svelte';
-	import type { TmuxSignal, PaneMode } from '$lib/utils/pane-tree';
+	import type { TmuxSignal } from '$lib/utils/pane-tree';
 	import { isPrefixKey, lookupKeybinding } from '$lib/data/keybindings';
 	import { getCommandByName, type TmuxCommand } from '$lib/data/tmux-commands';
 	import { CommandId, type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';
@@ -29,7 +29,7 @@
 		expectedInput?: string;
 	};
 
-	let { onSignal, disabled = false, expectedInput }: ChallengeTerminalProps = $props();
+	let { onSignal, disabled = false /* expectedInput */ }: ChallengeTerminalProps = $props();
 
 	// ========================================================================
 	// STATE
@@ -67,7 +67,7 @@
 	// Derived state
 	const isInTmuxMode = $derived(tmux.focusedPane?.mode === 'tmux');
 	const isInManMode = $derived(tmux.focusedPane?.mode === 'man');
-	const isInDefaultMode = $derived(tmux.focusedPane?.mode === 'default');
+	// const isInDefaultMode = $derived(tmux.focusedPane?.mode === 'default');
 	const isInInputMode = $derived(inputModeCommand !== null);
 
 	// Status bar input mode state (for tmux-style inline input)
@@ -330,6 +330,13 @@
 				break;
 			case CommandId.KILL_PANE:
 				tmux.closePane();
+				break;
+			case CommandId.TOGGLE_ZOOM:
+				if (tmux.paneCount > 1) {
+					tmux.togglePaneZoom();
+				} else {
+					showFeedback('Cannot zoom with single pane', 1000);
+				}
 				break;
 
 			// Navigation
@@ -660,6 +667,7 @@
 				node={tmux.activeWindow.paneTree}
 				focusedPaneId={tmux.focusedPaneId}
 				focusTrigger={tmux.focusTrigger}
+				zoomedPaneId={tmux.zoomedPaneId}
 				{clockState}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
@@ -691,6 +699,7 @@
 			activeWindowIndex={tmux.activeWindowIndex}
 			focusedPane={tmux.focusedPane}
 			prefixActive={tmux.prefixActive}
+			isZoomed={tmux.isZoomed}
 			inputMode={statusBarInputMode}
 			onInputChange={handleStatusBarInputChange}
 			onInputSubmit={handleStatusBarInputSubmit}

@@ -29,7 +29,7 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Reattach to a session',
 		'Resume a tmux session'
 	],
-	'detach': [
+	detach: [
 		'Detach from the current session',
 		'Disconnect from this session',
 		'Leave the current session running',
@@ -138,13 +138,7 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Zoom in or out of the pane',
 		'Toggle pane to fullscreen'
 	],
-	'resize-pane': [
-		'Resize the current pane',
-		'Adjust the pane size',
-		'Change the pane dimensions',
-		'Modify pane boundaries',
-		'Resize this pane'
-	],
+	// NOTE: resize-pane removed - Ctrl+Arrow conflicts with macOS Mission Control
 	'swap-pane': [
 		'Swap this pane with another',
 		'Exchange pane positions',
@@ -281,4 +275,3 @@ export function hasPromptVariations(commandName: string): boolean {
 export function getCommandsWithVariations(): string[] {
 	return Object.keys(PROMPT_VARIATIONS);
 }
-

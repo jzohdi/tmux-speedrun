@@ -18,12 +18,15 @@
 		commands?: TmuxCommand[];
 	};
 
-	let { onQuit, onToggleMaximize, containerRef = $bindable(null), commands }: ManpageProps = $props();
+	let {
+		onQuit,
+		onToggleMaximize,
+		containerRef = $bindable(null),
+		commands
+	}: ManpageProps = $props();
 
 	// Create a set of allowed command names for filtering
-	const allowedCommandNames = $derived(
-		commands ? new Set(commands.map((c) => c.name)) : undefined
-	);
+	const allowedCommandNames = $derived(commands ? new Set(commands.map((c) => c.name)) : undefined);
 
 	// Get commands for a category, respecting the filter
 	function getFilteredCommands(category: TmuxCommand['category']): TmuxCommand[] {
@@ -59,14 +62,20 @@
 
 	function scrollPageUp() {
 		if (scrollContainer) {
-			scrollContainer.scrollTop = Math.max(0, scrollContainer.scrollTop - scrollContainer.clientHeight);
+			scrollContainer.scrollTop = Math.max(
+				0,
+				scrollContainer.scrollTop - scrollContainer.clientHeight
+			);
 		}
 	}
 
 	function scrollPageDown() {
 		if (scrollContainer) {
 			const maxScroll = scrollContainer.scrollHeight - scrollContainer.clientHeight;
-			scrollContainer.scrollTop = Math.min(maxScroll, scrollContainer.scrollTop + scrollContainer.clientHeight);
+			scrollContainer.scrollTop = Math.min(
+				maxScroll,
+				scrollContainer.scrollTop + scrollContainer.clientHeight
+			);
 		}
 	}
 
@@ -94,7 +103,7 @@
 
 		// Stop propagation to prevent parent Terminal from interfering
 		event.stopPropagation();
-		
+
 		switch (event.key) {
 			case 'ArrowUp':
 			case 'k':
@@ -189,10 +198,18 @@
 		<section class="manpage-section">
 			<h2 class="section-title">SYNOPSIS</h2>
 			<p class="section-body indented">
-				<span class="bold">tmux</span> [<span class="bold">-2CDhlNuVv</span>] [<span class="bold">-c</span> <span class="underline">shell-command</span>] [<span class="bold">-f</span> <span class="underline">file</span>] [<span class="bold">-L</span> <span class="underline">socket-name</span>] [<span class="bold">-S</span> <span class="underline">socket-path</span>]
+				<span class="bold">tmux</span> [<span class="bold">-2CDhlNuVv</span>] [<span class="bold"
+					>-c</span
+				> <span class="underline">shell-command</span>] [<span class="bold">-f</span>
+				<span class="underline">file</span>] [<span class="bold">-L</span>
+				<span class="underline">socket-name</span>] [<span class="bold">-S</span>
+				<span class="underline">socket-path</span>]
 			</p>
 			<p class="section-body indented continued">
-				[<span class="bold">-T</span> <span class="underline">features</span>] [<span class="underline">command</span> [<span class="underline">flags</span>]]
+				[<span class="bold">-T</span> <span class="underline">features</span>] [<span
+					class="underline">command</span
+				>
+				[<span class="underline">flags</span>]]
 			</p>
 		</section>
 
@@ -200,22 +217,38 @@
 		<section class="manpage-section">
 			<h2 class="section-title">DESCRIPTION</h2>
 			<p class="section-body indented">
-				<span class="bold">tmux</span> is a terminal multiplexer: it enables a number of terminals to be created, accessed, and controlled from a single screen. <span class="bold">tmux</span> may be detached from a screen and continue running in the background, then later reattached.
+				<span class="bold">tmux</span> is a terminal multiplexer: it enables a number of terminals
+				to be created, accessed, and controlled from a single screen. <span class="bold">tmux</span> may
+				be detached from a screen and continue running in the background, then later reattached.
 			</p>
 			<p class="section-body indented">
-				When <span class="bold">tmux</span> is started, it creates a new <span class="underline">session</span> with a single <span class="underline">window</span> and displays it on screen. A status line at the bottom of the screen shows information on the current session and is used to enter interactive commands.
+				When <span class="bold">tmux</span> is started, it creates a new
+				<span class="underline">session</span>
+				with a single <span class="underline">window</span> and displays it on screen. A status line at
+				the bottom of the screen shows information on the current session and is used to enter interactive
+				commands.
 			</p>
 			<p class="section-body indented">
-				A session is a single collection of <span class="underline">pseudo terminals</span> under the management of <span class="bold">tmux</span>. Each session has one or more windows linked to it. A window occupies the entire screen and may be split into rectangular panes, each of which is a separate pseudo terminal (the pty(4) manual page documents the technical details of pseudo terminals). Any number of <span class="bold">tmux</span> instances may connect to the same session, and any number of windows may be present in the same session. Once all sessions are killed, <span class="bold">tmux</span> exits.
+				A session is a single collection of <span class="underline">pseudo terminals</span> under
+				the management of <span class="bold">tmux</span>. Each session has one or more windows
+				linked to it. A window occupies the entire screen and may be split into rectangular panes,
+				each of which is a separate pseudo terminal (the pty(4) manual page documents the technical
+				details of pseudo terminals). Any number of <span class="bold">tmux</span> instances may
+				connect to the same session, and any number of windows may be present in the same session.
+				Once all sessions are killed, <span class="bold">tmux</span> exits.
 			</p>
 			<p class="section-body indented">
-				Each session is persistent and will survive accidental disconnection (such as ssh(1) connection timeout) or intentional detaching (with the 'C-b d' key strokes). <span class="bold">tmux</span> may be reattached using:
+				Each session is persistent and will survive accidental disconnection (such as ssh(1)
+				connection timeout) or intentional detaching (with the 'C-b d' key strokes). <span
+					class="bold">tmux</span
+				> may be reattached using:
 			</p>
-			<p class="section-body indented-more">
-				$ tmux attach
-			</p>
+			<p class="section-body indented-more">$ tmux attach</p>
 			<p class="section-body indented">
-				In <span class="bold">tmux</span>, a session is displayed on screen by a <span class="underline">client</span> and all sessions are managed by a single <span class="underline">server</span>. The server and each client are separate processes which communicate through a socket in /tmp.
+				In <span class="bold">tmux</span>, a session is displayed on screen by a
+				<span class="underline">client</span>
+				and all sessions are managed by a single <span class="underline">server</span>. The server
+				and each client are separate processes which communicate through a socket in /tmp.
 			</p>
 		</section>
 
@@ -223,11 +256,10 @@
 		<section class="manpage-section">
 			<h2 class="section-title">DEFAULT KEY BINDINGS</h2>
 			<p class="section-body indented">
-				<span class="bold">tmux</span> may be controlled from an attached client by using a key combination of a prefix key, 'C-b' (Ctrl-b) by default, followed by a command key.
+				<span class="bold">tmux</span> may be controlled from an attached client by using a key combination
+				of a prefix key, 'C-b' (Ctrl-b) by default, followed by a command key.
 			</p>
-			<p class="section-body indented">
-				The default command key bindings are:
-			</p>
+			<p class="section-body indented">The default command key bindings are:</p>
 
 			{#each COMMAND_CATEGORIES as category}
 				{@const categoryCommands = getFilteredCommands(category.key)}
@@ -249,16 +281,16 @@
 		<section class="manpage-section">
 			<h2 class="section-title">COPY MODE</h2>
 			<p class="section-body indented">
-				A pane may be entered into copy mode with 'C-b ['. This allows text to be copied from the pane history and is also used for scrolling. Copy mode uses vi-style key bindings by default.
+				A pane may be entered into copy mode with 'C-b ['. This allows text to be copied from the
+				pane history and is also used for scrolling. Copy mode uses vi-style key bindings by
+				default.
 			</p>
 		</section>
 
 		<!-- SEE ALSO Section -->
 		<section class="manpage-section">
 			<h2 class="section-title">SEE ALSO</h2>
-			<p class="section-body indented">
-				pty(4)
-			</p>
+			<p class="section-body indented">pty(4)</p>
 		</section>
 
 		<!-- AUTHORS Section -->
@@ -420,10 +452,12 @@
 	}
 
 	@keyframes blink {
-		0%, 50% {
+		0%,
+		50% {
 			opacity: 1;
 		}
-		50.01%, 100% {
+		50.01%,
+		100% {
 			opacity: 0;
 		}
 	}

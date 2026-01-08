@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { tick, onMount } from 'svelte';
 	import Manpage from './Manpage.svelte';
-	import { getAllChallengeCommands, getCommandByName, type TmuxCommand } from '$lib/data/tmux-commands';
 	import {
-		isPrefixKey,
-		lookupKeybinding,
-		type Keybinding
-	} from '$lib/data/keybindings';
+		getAllChallengeCommands,
+		getCommandByName,
+		type TmuxCommand
+	} from '$lib/data/tmux-commands';
+	import { isPrefixKey, lookupKeybinding, type Keybinding } from '$lib/data/keybindings';
 
 	type TerminalMode = 'keybind' | 'input' | 'man';
 
@@ -338,11 +338,7 @@
 	<!-- Terminal Body -->
 	<div class="terminal-body">
 		{#if mode === 'man'}
-			<Manpage
-				onQuit={exitManPage}
-				commands={commandsForManpage}
-				bind:containerRef={manpageRef}
-			/>
+			<Manpage onQuit={exitManPage} commands={commandsForManpage} bind:containerRef={manpageRef} />
 		{:else}
 			<!-- Status Line -->
 			<div class="status-line">
@@ -362,11 +358,11 @@
 						<span class="plus">+</span>
 						<span class="key">b</span>
 					</div>
-				{#if prefixActive}
-					<span class="waiting-text">press command key (Ctrl+b to cancel)</span>
-				{:else}
-					<span class="hint-text">press Ctrl+b to start</span>
-				{/if}
+					{#if prefixActive}
+						<span class="waiting-text">press command key (Ctrl+b to cancel)</span>
+					{:else}
+						<span class="hint-text">press Ctrl+b to start</span>
+					{/if}
 				</div>
 			{/if}
 
@@ -521,8 +517,12 @@
 	}
 
 	@keyframes fadeIn {
-		from { opacity: 0; }
-		to { opacity: 1; }
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
 	}
 
 	/* Keybind Display */

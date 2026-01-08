@@ -102,7 +102,9 @@ export function getPoolConfig(challengeId: number): PoolConfig {
 	const config = CHALLENGE_POOLS.find((p) => p.challengeId === challengeId);
 
 	if (!config) {
-		throw new Error(`Invalid challenge ID: ${challengeId}. Valid range is 0-${CHALLENGE_POOLS.length - 1}`);
+		throw new Error(
+			`Invalid challenge ID: ${challengeId}. Valid range is 0-${CHALLENGE_POOLS.length - 1}`
+		);
 	}
 
 	return config;

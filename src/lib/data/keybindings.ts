@@ -77,22 +77,15 @@ function parseShortcut(shortcut: string, commandName: string): Keybinding | Keyb
 		}));
 	}
 
-	if (keyPart === 'Ctrl+Arrow') {
-		// resize-pane: Ctrl + any arrow key
-		return ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].map((arrow) => ({
-			key: arrow,
-			withCtrl: true,
-			commandName: typedCommandName,
-			keyDisplay: `Ctrl+${arrow.replace('Arrow', '')}`
-		}));
-	}
+	// NOTE: Ctrl+Arrow (resize-pane) intentionally not supported.
+	// On macOS, Ctrl+Arrow is a system shortcut that cannot be intercepted.
 
 	if (keyPart === 'Ctrl+o') {
 		return {
 			key: 'o',
 			withCtrl: true,
 			commandName: typedCommandName,
-			keyDisplay: 'Ctrl+o'
+			keyDisplay: 'o'
 		};
 	}
 

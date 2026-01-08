@@ -69,7 +69,7 @@ export const CommandId = {
 	SPLIT_VERTICAL: 'split-vertical',
 	KILL_PANE: 'kill-pane',
 	TOGGLE_ZOOM: 'toggle-zoom',
-	RESIZE_PANE: 'resize-pane',
+	// NOTE: RESIZE_PANE removed - Ctrl+Arrow conflicts with macOS Mission Control
 	SWAP_PANE: 'swap-pane',
 	ROTATE_PANES: 'rotate-panes',
 

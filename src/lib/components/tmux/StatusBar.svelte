@@ -21,6 +21,8 @@
 		focusedPane: Pane | null;
 		/** Whether prefix mode is active */
 		prefixActive: boolean;
+		/** Whether the current pane is zoomed */
+		isZoomed?: boolean;
 		/** Input mode state for rename-style commands */
 		inputMode?: InputModeState;
 		/** Callback when input value changes */
@@ -31,12 +33,13 @@
 		onInputCancel?: () => void;
 	};
 
-	let { 
+	let {
 		sessionName = 'tmux-speedrun',
-		windows, 
-		activeWindowIndex, 
-		focusedPane, 
+		windows,
+		activeWindowIndex,
+		focusedPane,
 		prefixActive,
+		isZoomed = false,
 		inputMode,
 		onInputChange,
 		onInputSubmit,
@@ -91,12 +94,16 @@
 
 	/**
 	 * Get window list for status bar.
+	 * In real tmux, a zoomed pane shows a 'Z' flag after the window name.
 	 */
 	function getWindowList(): string {
 		return windows
 			.map((w, i) => {
-				const indicator = i === activeWindowIndex ? '*' : '-';
-				return `${i}:${w.name}${indicator}`;
+				const isActive = i === activeWindowIndex;
+				const indicator = isActive ? '*' : '-';
+				// Show 'Z' flag when the active window has a zoomed pane
+				const zoomFlag = isActive && isZoomed ? 'Z' : '';
+				return `${i}:${w.name}${zoomFlag}${indicator}`;
 			})
 			.join(' ');
 	}
@@ -179,6 +186,8 @@
 		<div class="status-center">
 			{#if prefixActive}
 				<span class="status-prefix">-- PREFIX --</span>
+			{:else if isZoomed}
+				<span class="status-zoomed">-- ZOOMED --</span>
 			{/if}
 		</div>
 
@@ -270,6 +279,14 @@
 		animation: pulse 1s ease-in-out infinite;
 	}
 
+	.status-zoomed {
+		background: #8be9fd;
+		color: #1c1c1c;
+		padding: 0 8px;
+		border-radius: 2px;
+		font-weight: 600;
+	}
+
 	@keyframes pulse {
 		0%,
 		100% {
@@ -300,4 +317,3 @@
 		opacity: 0.8;
 	}
 </style>
-

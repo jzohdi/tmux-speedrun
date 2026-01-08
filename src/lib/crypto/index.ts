@@ -46,4 +46,3 @@ export {
 	ecdhExchange,
 	generateKeyPairForExchange
 } from './ecdh';
-

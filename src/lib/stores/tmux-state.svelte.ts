@@ -9,7 +9,6 @@ import {
 	createInitialState,
 	createSession,
 	createWindow,
-	createPane,
 	findPaneById,
 	collectAllPanes,
 	countPanes,
@@ -38,7 +37,6 @@ import {
 
 import {
 	executeCommand,
-	type ExecuteResult,
 	type CommandIdType,
 	type CommandResult,
 	type SessionOperation
@@ -253,6 +251,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	});
 	const paneCount = $derived(isDetached ? 1 : activeWindow ? countPanes(activeWindow.paneTree) : 0);
 	const windowCount = $derived(attachedSession?.windows.length ?? 0);
+
+	// Zoom state
+	const zoomedPaneId = $derived(activeWindow?.zoomedPaneId ?? null);
+	const isZoomed = $derived(zoomedPaneId !== null);
 
 	// ========================================================================
 	// SIGNAL EMISSION
@@ -993,7 +995,34 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			newFocusedPane = getFirstPane(newTree);
 		}
 
-		updateActiveWindowTree(newTree);
+		// Clear zoom if the zoomed pane is being closed, or if only one pane remains
+		const shouldClearZoom = activeWindow.zoomedPaneId === closedPaneId || allPanes.length <= 1;
+
+		// Update the tree and zoom state together
+		if (state.attachedSessionIndex !== null) {
+			state = {
+				...state,
+				sessions: state.sessions.map((session, sessionIdx) => {
+					if (sessionIdx !== state.attachedSessionIndex) {
+						return session;
+					}
+
+					return {
+						...session,
+						windows: session.windows.map((w, windowIdx) =>
+							windowIdx === session.activeWindowIndex
+								? {
+										...w,
+										paneTree: newTree,
+										zoomedPaneId: shouldClearZoom ? null : w.zoomedPaneId
+									}
+								: w
+						)
+					};
+				})
+			};
+		}
+
 		setFocusedPane(newFocusedPane.id);
 
 		emitSignal('pane-closed', { paneId: closedPaneId });
@@ -1078,6 +1107,60 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		if (pane) {
 			setFocusedPane(lastFocusedPaneId);
 		}
+	}
+
+	/**
+	 * Toggle zoom on the focused pane.
+	 * When zoomed, the focused pane takes up the entire window.
+	 * Toggling again restores the original pane layout.
+	 *
+	 * Note: Zoom only works when there are multiple panes in the window.
+	 */
+	function togglePaneZoom(): boolean {
+		if (!attachedSession || !activeWindow) {
+			return false;
+		}
+
+		// Only allow zoom when there are multiple panes
+		if (paneCount <= 1) {
+			return false;
+		}
+
+		const currentZoomedPaneId = activeWindow.zoomedPaneId;
+		let newZoomedPaneId: string | null;
+
+		if (currentZoomedPaneId === null) {
+			// Not zoomed - zoom the focused pane
+			newZoomedPaneId = focusedPaneId;
+		} else {
+			// Already zoomed - unzoom (restore original layout)
+			newZoomedPaneId = null;
+		}
+
+		// Update the window's zoomedPaneId
+		state = {
+			...state,
+			sessions: state.sessions.map((session, sessionIdx) => {
+				if (sessionIdx !== state.attachedSessionIndex) {
+					return session;
+				}
+
+				return {
+					...session,
+					windows: session.windows.map((w, windowIdx) =>
+						windowIdx === session.activeWindowIndex ? { ...w, zoomedPaneId: newZoomedPaneId } : w
+					)
+				};
+			})
+		};
+
+		// Emit signal for challenge tracking
+		emitSignal('pane-split', {
+			paneId: focusedPaneId,
+			metadata: { action: 'toggle-zoom', zoomed: newZoomedPaneId !== null }
+		});
+
+		return true;
 	}
 
 	// ========================================================================
@@ -1740,6 +1823,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		get windowCount() {
 			return windowCount;
 		},
+		get zoomedPaneId() {
+			return zoomedPaneId;
+		},
+		get isZoomed() {
+			return isZoomed;
+		},
 		get prefixActive() {
 			return prefixActive;
 		},
@@ -1776,6 +1865,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		focusNextPane,
 		focusPreviousPane,
 		focusLastPane,
+		togglePaneZoom,
 
 		// Pane content
 		addHistory,

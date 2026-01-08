@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { isPane, isSplit, type PaneNode } from '$lib/utils/pane-tree';
+	import { isPane, isSplit, findPaneById, type PaneNode } from '$lib/utils/pane-tree';
 	import PaneView from './PaneView.svelte';
 	import PaneGrid from './PaneGrid.svelte';
 
@@ -20,6 +20,8 @@
 		focusTrigger?: number;
 		/** Clock overlay state - shows time on specific pane */
 		clockState?: ClockState | null;
+		/** ID of the zoomed pane (when zoomed, only this pane is rendered) */
+		zoomedPaneId?: string | null;
 		/** Callback when input changes in a pane */
 		onInputChange?: (paneId: string, value: string) => void;
 		/** Callback when Enter is pressed in a pane */
@@ -37,12 +39,16 @@
 		focusedPaneId,
 		focusTrigger,
 		clockState,
+		zoomedPaneId,
 		onInputChange,
 		onSubmit,
 		onFocusPane,
 		onExitMan,
 		onKeyDown
 	}: PaneGridProps = $props();
+
+	// When zoomed, find the zoomed pane and render only that
+	const zoomedPane = $derived(zoomedPaneId ? findPaneById(node, zoomedPaneId) : null);
 
 	/**
 	 * Handle input change for a specific pane.
@@ -89,7 +95,22 @@
 	}
 </script>
 
-{#if isPane(node)}
+{#if zoomedPane}
+	<!-- Zoomed mode: render only the zoomed pane at full size -->
+	<div class="pane-container zoomed">
+		<PaneView
+			pane={zoomedPane}
+			isFocused={zoomedPane.id === focusedPaneId}
+			{focusTrigger}
+			{clockState}
+			onInputChange={handleInputChange(zoomedPane.id)}
+			onSubmit={handleSubmit(zoomedPane.id)}
+			onFocus={handleFocus(zoomedPane.id)}
+			onExitMan={handleExitMan(zoomedPane.id)}
+			{onKeyDown}
+		/>
+	</div>
+{:else if isPane(node)}
 	<!-- Render a single pane -->
 	<div class="pane-container">
 		<PaneView
@@ -117,6 +138,7 @@
 				{focusedPaneId}
 				{focusTrigger}
 				{clockState}
+				{zoomedPaneId}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}
@@ -131,6 +153,7 @@
 				{focusedPaneId}
 				{focusTrigger}
 				{clockState}
+				{zoomedPaneId}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}
@@ -230,4 +253,3 @@
 		height: 100%;
 	}
 </style>
-

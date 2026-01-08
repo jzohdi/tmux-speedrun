@@ -1,6 +1,6 @@
 # tmux-speedrun
 
-Practice tmux keybindings through timed challenges. 
+Practice tmux keybindings through timed challenges.
 
 ## Resources
 
@@ -35,6 +35,7 @@ Open http://localhost:5173 and type `help` in the terminal to see available comm
 Each challenge consists of a series of prompts. You need to execute the correct tmux command for each one. Steps are encrypted and unlocked sequentially, so you can't skip ahead.
 
 **The flow:**
+
 1. Client and server do an ECDH key exchange
 2. Server generates all steps, encrypts them with chained keys (each step's key depends on the previous step's answer)
 3. You solve step N, derive the key for step N+1, decrypt it locally
@@ -60,7 +61,7 @@ For local development:
 docker-compose up -d
 
 # - User: tmux
-# - Password: tmux  
+# - Password: tmux
 # - Database: tmux_speedrun
 # - Port: 5432
 
@@ -92,7 +93,7 @@ src/
 │   │   └── tmux/        # Terminal emulator components
 │   ├── crypto/          # ECDH, HKDF, AES-GCM helpers
 │   ├── data/            # Challenge definitions, keybindings
-│   ├── server/          
+│   ├── server/
 │   │   ├── challenges/  # Step generation, encryption
 │   │   └── db/          # Drizzle schema
 │   ├── stores/          # Tmux state management
@@ -106,14 +107,14 @@ src/
 
 ## Challenge Levels
 
-| Level | Instructions | Difficulty |
-|-------|-------------|------------|
-| 0     | 25          | Beginner   |
-| 1     | 40          | Intermediate |
-| 2     | 55          | Intermediate |
-| 3     | 70          | Advanced   |
-| 4     | 85          | Advanced   |
-| 5     | 100         | Advanced   |
+| Level | Instructions | Difficulty   |
+| ----- | ------------ | ------------ |
+| 0     | 25           | Beginner     |
+| 1     | 40           | Intermediate |
+| 2     | 55           | Intermediate |
+| 3     | 70           | Advanced     |
+| 4     | 85           | Advanced     |
+| 5     | 100          | Advanced     |
 
 ## Keyboard Notes
 
@@ -122,14 +123,14 @@ Some browser shortcuts can't be overridden (Ctrl+W, Ctrl+T, etc.). The default t
 ## Scripts
 
 ```bash
-pnpm dev          
-pnpm build      
-pnpm preview 
+pnpm dev
+pnpm build
+pnpm preview
 pnpm test
 pnpm check        # ts check
 pnpm lint         # eslint/prettier
-pnpm db:push      # see drizzle docs for more 
-pnpm db:generate  # 
+pnpm db:push      # see drizzle docs for more
+pnpm db:generate  #
 pnpm db:studio
 ```
 
