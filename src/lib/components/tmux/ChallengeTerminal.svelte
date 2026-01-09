@@ -64,11 +64,16 @@
 	let inputModeCommand = $state<TmuxCommand | null>(null);
 	let inputModeValue = $state('');
 
+	// Confirmation mode state (for commands that require y/n confirmation like kill-pane)
+	let confirmModeAction = $state<'kill-pane' | null>(null);
+	let confirmModePaneIndex = $state<number | null>(null);
+
 	// Derived state
 	const isInTmuxMode = $derived(tmux.focusedPane?.mode === 'tmux');
 	const isInManMode = $derived(tmux.focusedPane?.mode === 'man');
 	// const isInDefaultMode = $derived(tmux.focusedPane?.mode === 'default');
 	const isInInputMode = $derived(inputModeCommand !== null);
+	const isInConfirmMode = $derived(confirmModeAction !== null);
 
 	// Status bar input mode state (for tmux-style inline input)
 	const statusBarInputMode = $derived(
@@ -79,6 +84,16 @@
 					value: inputModeValue
 				}
 			: { active: false, actionLabel: '', value: '' }
+	);
+
+	// Status bar confirmation mode state (for y/n prompts)
+	const statusBarConfirmMode = $derived(
+		confirmModeAction && confirmModePaneIndex !== null
+			? {
+					active: true,
+					prompt: `kill-pane ${confirmModePaneIndex}?`
+				}
+			: { active: false, prompt: '' }
 	);
 
 	// ========================================================================
@@ -167,6 +182,57 @@
 	}
 
 	/**
+	 * Handle confirmation accept (user pressed 'y').
+	 */
+	function handleConfirmAccept(): void {
+		if (confirmModeAction === 'kill-pane') {
+			// Emit the command signal for challenge tracking first
+			tmux.executeTmuxCommand(CommandId.KILL_PANE);
+
+			// Check if this is the last pane in the window
+			if (tmux.paneCount === 1) {
+				// Last pane in window - need to handle window/session closure
+				if (tmux.windowCount > 1) {
+					// There are other windows - close this window and switch to previous
+					tmux.closeWindow();
+					tmux.addHistory({
+						type: 'system',
+						content: '[window closed]',
+						timestamp: Date.now()
+					});
+				} else {
+					// This is the last window in the session - exit tmux mode
+					const detachedSessionName = tmux.detachSession();
+					tmux.setMode('default');
+					tmux.addHistory({
+						type: 'system',
+						content: `[exited (from session ${detachedSessionName ?? '0'})]`,
+						timestamp: Date.now()
+					});
+				}
+			} else {
+				// Multiple panes - just close this pane
+				tmux.closePane();
+			}
+		}
+
+		// Reset confirmation mode
+		confirmModeAction = null;
+		confirmModePaneIndex = null;
+		restoreFocusAfterInputMode();
+	}
+
+	/**
+	 * Handle confirmation reject (user pressed 'n' or Escape).
+	 */
+	function handleConfirmReject(): void {
+		// Reset confirmation mode without taking action
+		confirmModeAction = null;
+		confirmModePaneIndex = null;
+		restoreFocusAfterInputMode();
+	}
+
+	/**
 	 * Restore focus to the pane input after exiting input mode (e.g., after renaming).
 	 * Triggers the store's focus mechanism to properly focus the active pane's input.
 	 */
@@ -195,9 +261,34 @@
 	}
 
 	/**
+	 * Handle keydown in confirmation mode (for y/n prompts like kill-pane).
+	 */
+	function handleConfirmModeKeyDown(event: KeyboardEvent): void {
+		const key = event.key.toLowerCase();
+
+		if (key === 'y') {
+			event.preventDefault();
+			handleConfirmAccept();
+			return;
+		}
+
+		if (key === 'n' || event.key === 'Escape') {
+			event.preventDefault();
+			handleConfirmReject();
+			return;
+		}
+	}
+
+	/**
 	 * Handle keydown when in tmux mode (prefix key handling).
 	 */
 	function handleTmuxModeKeyDown(event: KeyboardEvent): void {
+		// In confirmation mode, handle y/n input
+		if (isInConfirmMode) {
+			handleConfirmModeKeyDown(event);
+			return;
+		}
+
 		// In input mode, handle separately
 		if (isInInputMode) {
 			handleInputModeKeyDown(event);
@@ -289,6 +380,13 @@
 			return;
 		}
 
+		// Check if command requires confirmation (kill-pane)
+		// Don't emit signal yet - will emit when user confirms
+		if (commandName === CommandId.KILL_PANE) {
+			executeLocalCommand(commandName);
+			return;
+		}
+
 		// Emit the command signal for challenge verification BEFORE executing
 		// (Important: must emit before mode changes like 'detach' which exits tmux mode)
 		tmux.executeTmuxCommand(commandName);
@@ -328,9 +426,17 @@
 			case CommandId.SPLIT_VERTICAL:
 				tmux.splitPane('vertical');
 				break;
-			case CommandId.KILL_PANE:
-				tmux.closePane();
-				break;
+			case CommandId.KILL_PANE: {
+				// Enter confirmation mode instead of directly killing
+				// Find the index of the focused pane
+				const paneIndex = tmux.allPanesInActiveWindow.findIndex(
+					(p) => p.id === tmux.focusedPaneId
+				);
+				confirmModeAction = 'kill-pane';
+				confirmModePaneIndex = paneIndex >= 0 ? paneIndex : 0;
+				// Note: Signal is emitted in handleConfirmAccept when user confirms
+				return; // Exit early - don't emit signal yet
+			}
 			case CommandId.TOGGLE_ZOOM:
 				if (tmux.paneCount > 1) {
 					tmux.togglePaneZoom();
@@ -590,6 +696,8 @@
 		tmux.reset();
 		inputModeCommand = null;
 		inputModeValue = '';
+		confirmModeAction = null;
+		confirmModePaneIndex = null;
 		feedbackMessage = null;
 	}
 
@@ -708,9 +816,12 @@
 			prefixActive={tmux.prefixActive}
 			isZoomed={tmux.isZoomed}
 			inputMode={statusBarInputMode}
+			confirmMode={statusBarConfirmMode}
 			onInputChange={handleStatusBarInputChange}
 			onInputSubmit={handleStatusBarInputSubmit}
 			onInputCancel={handleStatusBarInputCancel}
+			onConfirmAccept={handleConfirmAccept}
+			onConfirmReject={handleConfirmReject}
 		/>
 	{/if}
 </div>

@@ -10,6 +10,13 @@
 		value: string;
 	};
 
+	type ConfirmModeState = {
+		/** Whether confirmation mode is active */
+		active: boolean;
+		/** The prompt to display (e.g., "kill-pane 3?") */
+		prompt: string;
+	};
+
 	type StatusBarProps = {
 		/** Name of the current session */
 		sessionName?: string;
@@ -25,12 +32,18 @@
 		isZoomed?: boolean;
 		/** Input mode state for rename-style commands */
 		inputMode?: InputModeState;
+		/** Confirmation mode state for y/n prompts (e.g., kill-pane) */
+		confirmMode?: ConfirmModeState;
 		/** Callback when input value changes */
 		onInputChange?: (value: string) => void;
 		/** Callback when input is submitted (Enter pressed) */
 		onInputSubmit?: (value: string) => void;
 		/** Callback when input is cancelled (Escape pressed) */
 		onInputCancel?: () => void;
+		/** Callback when confirmation is accepted (y pressed) */
+		onConfirmAccept?: () => void;
+		/** Callback when confirmation is rejected (n pressed) */
+		onConfirmReject?: () => void;
 	};
 
 	let {
@@ -41,19 +54,33 @@
 		prefixActive,
 		isZoomed = false,
 		inputMode,
+		confirmMode,
 		onInputChange,
 		onInputSubmit,
-		onInputCancel
+		onInputCancel,
+		onConfirmAccept,
+		onConfirmReject
 	}: StatusBarProps = $props();
 
 	// Ref to the input element for auto-focus
 	let inputRef = $state<HTMLInputElement | null>(null);
+	// Ref to the confirm container for capturing keyboard events
+	let confirmRef = $state<HTMLDivElement | null>(null);
 
 	// Auto-focus the input when input mode becomes active
 	$effect(() => {
 		if (inputMode?.active && inputRef) {
 			requestAnimationFrame(() => {
 				inputRef?.focus();
+			});
+		}
+	});
+
+	// Auto-focus the confirm container when confirmation mode becomes active
+	$effect(() => {
+		if (confirmMode?.active && confirmRef) {
+			requestAnimationFrame(() => {
+				confirmRef?.focus();
 			});
 		}
 	});
@@ -154,9 +181,45 @@
 		const target = event.target as HTMLInputElement;
 		onInputChange?.(target.value);
 	}
+
+	/**
+	 * Handle confirmation mode keydown events.
+	 * Accepts 'y' or 'Y' to confirm, 'n', 'N', or Escape to reject.
+	 */
+	function handleConfirmKeyDown(event: KeyboardEvent): void {
+		event.preventDefault();
+		event.stopPropagation();
+
+		const key = event.key.toLowerCase();
+
+		if (key === 'y') {
+			onConfirmAccept?.();
+			return;
+		}
+
+		if (key === 'n' || event.key === 'Escape') {
+			onConfirmReject?.();
+			return;
+		}
+	}
 </script>
 
-{#if inputMode?.active}
+{#if confirmMode?.active}
+	<!-- Confirmation mode: orange bar with y/n prompt -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<div
+		class="status-bar confirm-mode"
+		bind:this={confirmRef}
+		onkeydown={handleConfirmKeyDown}
+		tabindex="0"
+		role="dialog"
+		aria-label="Confirmation required"
+	>
+		<div class="confirm-mode-content">
+			<span class="confirm-prompt">{confirmMode.prompt} (y/n)</span>
+		</div>
+	</div>
+{:else if inputMode?.active}
 	<!-- Input mode: orange bar with inline input -->
 	<div class="status-bar input-mode">
 		<div class="input-mode-content">
@@ -218,6 +281,24 @@
 	.status-bar.input-mode {
 		background: #d19a66;
 		justify-content: flex-start;
+	}
+
+	/* Confirmation mode: same orange background for y/n prompts */
+	.status-bar.confirm-mode {
+		background: #d19a66;
+		justify-content: flex-start;
+		outline: none;
+	}
+
+	.confirm-mode-content {
+		display: flex;
+		align-items: center;
+		width: 100%;
+	}
+
+	.confirm-prompt {
+		font-weight: 600;
+		white-space: nowrap;
 	}
 
 	.input-mode-content {
