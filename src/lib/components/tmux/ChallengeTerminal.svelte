@@ -338,6 +338,13 @@
 					showFeedback('Cannot zoom with single pane', 1000);
 				}
 				break;
+			case CommandId.ROTATE_PANES:
+				if (tmux.paneCount > 1) {
+					tmux.rotatePanes();
+				} else {
+					showFeedback('Cannot rotate with single pane', 1000);
+				}
+				break;
 
 			// Navigation
 			case CommandId.SELECT_PANE:

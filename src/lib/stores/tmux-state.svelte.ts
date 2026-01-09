@@ -23,6 +23,7 @@ import {
 	findPaneInDirection,
 	getNextPane,
 	getPreviousPane,
+	rotatePanes,
 	type TmuxState,
 	type TmuxSession,
 	type TmuxWindow,
@@ -1163,6 +1164,42 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		return true;
 	}
 
+	/**
+	 * Rotate panes in the current window.
+	 *
+	 * This rotates the content (history, mode, inputValue) of panes in the window
+	 * while keeping the structural layout unchanged. The rotation is based on
+	 * creation order - each pane's content moves to the next pane in creation sequence.
+	 *
+	 * Example with 3 panes created in order A, B, C:
+	 * - A's content → C
+	 * - B's content → A
+	 * - C's content → B
+	 *
+	 * @returns true if rotation was performed, false if not possible
+	 */
+	function rotateWindowPanes(): boolean {
+		if (!activeWindow) {
+			return false;
+		}
+
+		// Only rotate when there are multiple panes
+		if (paneCount <= 1) {
+			return false;
+		}
+
+		const newTree = rotatePanes(activeWindow.paneTree);
+		updateActiveWindowTree(newTree);
+
+		// Emit signal for challenge tracking
+		emitSignal('pane-split', {
+			paneId: focusedPaneId,
+			metadata: { action: 'rotate-panes' }
+		});
+
+		return true;
+	}
+
 	// ========================================================================
 	// PANE CONTENT OPERATIONS
 	// ========================================================================
@@ -1866,6 +1903,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		focusPreviousPane,
 		focusLastPane,
 		togglePaneZoom,
+		rotatePanes: rotateWindowPanes,
 
 		// Pane content
 		addHistory,

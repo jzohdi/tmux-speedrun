@@ -45,6 +45,12 @@ export type Pane = {
 	/** The mode before entering man mode (for restoring when exiting man) */
 	previousMode?: PaneMode;
 	inputValue: string;
+	/**
+	 * The order in which this pane was created within its window.
+	 * Used for rotate-panes command to determine rotation order.
+	 * Lower numbers were created earlier.
+	 */
+	creationIndex: number;
 };
 
 /**
@@ -173,12 +179,25 @@ let paneIdCounter = 0;
 let windowIdCounter = 0;
 let splitIdCounter = 0;
 let sessionIdCounter = 0;
+/**
+ * Counter for pane creation order within each window.
+ * Used by rotate-panes to determine rotation sequence.
+ */
+let paneCreationIndexCounter = 0;
 
 /**
  * Generate a unique pane ID.
  */
 export function generatePaneId(): string {
 	return `pane-${paneIdCounter++}`;
+}
+
+/**
+ * Generate the next creation index for a pane.
+ * This is used to track the order in which panes were created.
+ */
+export function getNextCreationIndex(): number {
+	return paneCreationIndexCounter++;
 }
 
 /**
@@ -210,6 +229,7 @@ export function resetIdCounters(): void {
 	windowIdCounter = 0;
 	splitIdCounter = 0;
 	sessionIdCounter = 0;
+	paneCreationIndexCounter = 0;
 }
 
 // ============================================================================
@@ -225,7 +245,8 @@ export function createPane(mode: PaneMode = 'default'): Pane {
 		id: generatePaneId(),
 		history: [],
 		mode,
-		inputValue: ''
+		inputValue: '',
+		creationIndex: getNextCreationIndex()
 	};
 }
 
@@ -780,4 +801,98 @@ export function getPreviousPane(root: PaneNode, currentPaneId: string): Pane {
 
 	const prevIndex = (currentIndex - 1 + panes.length) % panes.length;
 	return panes[prevIndex];
+}
+
+// ============================================================================
+// PANE ROTATION
+// ============================================================================
+
+/**
+ * The content properties of a pane that get rotated during rotate-panes.
+ * Structural properties (id, type, creationIndex) stay with the pane's position.
+ */
+export type PaneContent = {
+	history: HistoryEntry[];
+	mode: PaneMode;
+	previousMode?: PaneMode;
+	inputValue: string;
+};
+
+/**
+ * Extract the content (non-structural) properties from a pane.
+ */
+function extractPaneContent(pane: Pane): PaneContent {
+	return {
+		history: pane.history,
+		mode: pane.mode,
+		previousMode: pane.previousMode,
+		inputValue: pane.inputValue
+	};
+}
+
+/**
+ * Rotate panes in a window.
+ *
+ * This command rotates the content of panes in reverse order of creation.
+ * The structural layout (positions, sizes) remains unchanged.
+ * Only the content (history, mode, inputValue) moves between panes.
+ *
+ * Example with 4 panes (creationIndex 0,1,2,3):
+ * - Pane 0's content → Pane 3
+ * - Pane 3's content → Pane 2
+ * - Pane 2's content → Pane 1
+ * - Pane 1's content → Pane 0
+ *
+ * @param root - The root of the pane tree
+ * @returns New tree with rotated pane content
+ */
+export function rotatePanes(root: PaneNode): PaneNode {
+	const allPanes = collectAllPanes(root);
+
+	// If there's only one pane, nothing to rotate
+	if (allPanes.length <= 1) {
+		return root;
+	}
+
+	// Sort panes by creationIndex (oldest first)
+	const sortedPanes = [...allPanes].sort((a, b) => a.creationIndex - b.creationIndex);
+
+	// Extract content from each pane in creation order
+	const contents = sortedPanes.map(extractPaneContent);
+
+	// Create a mapping from pane ID to the new content it should have
+	// Rotation: each pane gets the content of the NEXT pane in creation order
+	// (which appears as reverse rotation to the user since older content moves to newer panes)
+	const contentMapping = new Map<string, PaneContent>();
+
+	for (let i = 0; i < sortedPanes.length; i++) {
+		// Pane at index i gets content from pane at index (i + 1) % length
+		const nextContentIndex = (i + 1) % sortedPanes.length;
+		contentMapping.set(sortedPanes[i].id, contents[nextContentIndex]);
+	}
+
+	// Apply the content mapping to the tree
+	function applyRotation(node: PaneNode): PaneNode {
+		if (isPane(node)) {
+			const newContent = contentMapping.get(node.id);
+			if (newContent) {
+				return {
+					...node,
+					history: newContent.history,
+					mode: newContent.mode,
+					previousMode: newContent.previousMode,
+					inputValue: newContent.inputValue
+				};
+			}
+			return node;
+		}
+
+		return {
+			...node,
+			first: applyRotation(node.first),
+			second: applyRotation(node.second)
+		};
+	}
+
+	return applyRotation(root);
 }
