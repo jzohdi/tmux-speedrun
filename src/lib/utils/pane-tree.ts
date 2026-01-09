@@ -896,3 +896,57 @@ export function rotatePanes(root: PaneNode): PaneNode {
 
 	return applyRotation(root);
 }
+
+/**
+ * Swap the content of two panes by their IDs.
+ *
+ * This swaps the content (history, mode, inputValue) between two panes
+ * while keeping their structural positions unchanged.
+ *
+ * @param root - The root of the pane tree
+ * @param paneId1 - ID of the first pane
+ * @param paneId2 - ID of the second pane
+ * @returns New tree with swapped pane content
+ */
+export function swapPaneContent(root: PaneNode, paneId1: string, paneId2: string): PaneNode {
+	const pane1 = findPaneById(root, paneId1);
+	const pane2 = findPaneById(root, paneId2);
+
+	if (!pane1 || !pane2 || paneId1 === paneId2) {
+		return root;
+	}
+
+	// Extract content from both panes
+	const content1 = extractPaneContent(pane1);
+	const content2 = extractPaneContent(pane2);
+
+	// Create mapping: pane1 gets content2, pane2 gets content1
+	const contentMapping = new Map<string, PaneContent>();
+	contentMapping.set(paneId1, content2);
+	contentMapping.set(paneId2, content1);
+
+	// Apply the swap to the tree
+	function applySwap(node: PaneNode): PaneNode {
+		if (isPane(node)) {
+			const newContent = contentMapping.get(node.id);
+			if (newContent) {
+				return {
+					...node,
+					history: newContent.history,
+					mode: newContent.mode,
+					previousMode: newContent.previousMode,
+					inputValue: newContent.inputValue
+				};
+			}
+			return node;
+		}
+
+		return {
+			...node,
+			first: applySwap(node.first),
+			second: applySwap(node.second)
+		};
+	}
+
+	return applySwap(root);
+}

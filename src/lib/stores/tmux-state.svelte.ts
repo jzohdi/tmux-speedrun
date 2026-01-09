@@ -24,6 +24,7 @@ import {
 	getNextPane,
 	getPreviousPane,
 	rotatePanes,
+	swapPaneContent,
 	type TmuxState,
 	type TmuxSession,
 	type TmuxWindow,
@@ -1200,6 +1201,100 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		return true;
 	}
 
+	/**
+	 * Swap the focused pane's content with the next pane (higher index, wraps around).
+	 *
+	 * Panes are ordered by their index in the collected panes array (0, 1, 2, ...).
+	 * If the focused pane is at index N, this swaps with pane at index (N+1) % total.
+	 *
+	 * After swapping, focus moves to the target pane so the user's cursor stays
+	 * with their original content (which is now in the target pane's position).
+	 *
+	 * @returns true if swap was performed, false if not possible
+	 */
+	function swapPaneWithNext(): boolean {
+		if (!activeWindow) {
+			return false;
+		}
+
+		// Only swap when there are multiple panes
+		if (paneCount <= 1) {
+			return false;
+		}
+
+		const allPanes = collectAllPanes(activeWindow.paneTree);
+		const currentIndex = allPanes.findIndex((p) => p.id === focusedPaneId);
+
+		if (currentIndex === -1) {
+			return false;
+		}
+
+		// Get the next pane (wrap around)
+		const nextIndex = (currentIndex + 1) % allPanes.length;
+		const targetPane = allPanes[nextIndex];
+
+		const newTree = swapPaneContent(activeWindow.paneTree, focusedPaneId, targetPane.id);
+		updateActiveWindowTree(newTree);
+
+		// Move focus to the target pane (where our original content now lives)
+		setFocusedPane(targetPane.id);
+
+		// Emit signal for challenge tracking
+		emitSignal('pane-split', {
+			paneId: targetPane.id,
+			metadata: { action: 'swap-pane', direction: 'next' }
+		});
+
+		return true;
+	}
+
+	/**
+	 * Swap the focused pane's content with the previous pane (lower index, wraps around).
+	 *
+	 * Panes are ordered by their index in the collected panes array (0, 1, 2, ...).
+	 * If the focused pane is at index N, this swaps with pane at index (N-1+total) % total.
+	 *
+	 * After swapping, focus moves to the target pane so the user's cursor stays
+	 * with their original content (which is now in the target pane's position).
+	 *
+	 * @returns true if swap was performed, false if not possible
+	 */
+	function swapPaneWithPrevious(): boolean {
+		if (!activeWindow) {
+			return false;
+		}
+
+		// Only swap when there are multiple panes
+		if (paneCount <= 1) {
+			return false;
+		}
+
+		const allPanes = collectAllPanes(activeWindow.paneTree);
+		const currentIndex = allPanes.findIndex((p) => p.id === focusedPaneId);
+
+		if (currentIndex === -1) {
+			return false;
+		}
+
+		// Get the previous pane (wrap around)
+		const prevIndex = (currentIndex - 1 + allPanes.length) % allPanes.length;
+		const targetPane = allPanes[prevIndex];
+
+		const newTree = swapPaneContent(activeWindow.paneTree, focusedPaneId, targetPane.id);
+		updateActiveWindowTree(newTree);
+
+		// Move focus to the target pane (where our original content now lives)
+		setFocusedPane(targetPane.id);
+
+		// Emit signal for challenge tracking
+		emitSignal('pane-split', {
+			paneId: targetPane.id,
+			metadata: { action: 'swap-pane', direction: 'previous' }
+		});
+
+		return true;
+	}
+
 	// ========================================================================
 	// PANE CONTENT OPERATIONS
 	// ========================================================================
@@ -1904,6 +1999,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		focusLastPane,
 		togglePaneZoom,
 		rotatePanes: rotateWindowPanes,
+		swapPaneWithNext,
+		swapPaneWithPrevious,
 
 		// Pane content
 		addHistory,

@@ -311,6 +311,9 @@
 				// Handle select-window specially since we need the actual digit pressed
 				if (binding.commandName === CommandId.SELECT_WINDOW) {
 					handleSelectWindowByNumber(event.key);
+				} else if (binding.commandName === CommandId.SWAP_PANE) {
+					// Handle swap-pane specially to determine direction based on key pressed
+					handleSwapPane(event.key);
 				} else {
 					handleKeybinding(binding.commandName);
 				}
@@ -354,6 +357,37 @@
 
 		// Emit the command signal for challenge tracking
 		tmux.executeTmuxCommand(CommandId.SELECT_WINDOW);
+	}
+
+	/**
+	 * Handle swap-pane command (prefix + { or }).
+	 * @param key - The key pressed (should be '{' or '}')
+	 */
+	function handleSwapPane(key: string): void {
+		tmux.deactivatePrefix();
+
+		if (disabled) {
+			showFeedback('Challenge not active');
+			return;
+		}
+
+		// Only swap when there are multiple panes
+		if (tmux.paneCount <= 1) {
+			showFeedback('Cannot swap with single pane', 1000);
+			return;
+		}
+
+		// Determine direction based on key pressed
+		if (key === '}') {
+			// Swap with next pane (higher index)
+			tmux.swapPaneWithNext();
+		} else if (key === '{') {
+			// Swap with previous pane (lower index)
+			tmux.swapPaneWithPrevious();
+		}
+
+		// Emit the command signal for challenge tracking
+		tmux.executeTmuxCommand(CommandId.SWAP_PANE);
 	}
 
 	/**
