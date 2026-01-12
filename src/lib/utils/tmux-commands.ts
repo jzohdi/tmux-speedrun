@@ -129,6 +129,35 @@ export type SessionOperation =
 	| { type: 'rename'; name: string; target?: string | number };
 
 /**
+ * Pane operation types for command results.
+ * Used by pane management commands executed via text input or command-prompt.
+ */
+export type PaneOperation =
+	| { type: 'split'; direction: 'horizontal' | 'vertical' }
+	| { type: 'kill' }
+	| { type: 'toggle-zoom' }
+	| { type: 'rotate' }
+	| { type: 'swap'; direction: 'next' | 'previous' }
+	| { type: 'focus'; direction: 'up' | 'down' | 'left' | 'right' }
+	| { type: 'focus-next' }
+	| { type: 'focus-previous' }
+	| { type: 'focus-last' };
+
+/**
+ * Window operation types for command results.
+ * Used by window management commands executed via text input or command-prompt.
+ */
+export type WindowOperation =
+	| { type: 'create'; name?: string }
+	| { type: 'close'; index?: number }
+	| { type: 'switch'; index: number }
+	| { type: 'next' }
+	| { type: 'previous' }
+	| { type: 'rename'; name: string; index?: number }
+	| { type: 'last' }
+	| { type: 'list' };
+
+/**
  * Result returned from a command handler.
  */
 export type CommandResult = {
@@ -160,6 +189,14 @@ export type CommandResult = {
 	 * Session operation to perform (handled by store).
 	 */
 	sessionOperation?: SessionOperation;
+	/**
+	 * Pane operation to perform (handled by store).
+	 */
+	paneOperation?: PaneOperation;
+	/**
+	 * Window operation to perform (handled by store).
+	 */
+	windowOperation?: WindowOperation;
 };
 
 /**
@@ -405,12 +442,13 @@ registerCommand({
 
 /**
  * List windows command (tmux-style).
- * Supports: tmux list-windows, tmux lsw
+ * Supports: tmux list-windows, tmux lsw, list-windows, lsw
  * Uses LIST_WINDOWS as canonical name to match challenge expectations.
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.LIST_WINDOWS,
-	matchPatterns: ['tmux list-windows', 'tmux lsw'],
+	matchPatterns: ['tmux list-windows', 'tmux lsw', 'list-windows', 'lsw'],
 	description: 'List all windows',
 	handler: () => ({
 		handled: true,
@@ -420,10 +458,12 @@ registerCommand({
 
 /**
  * List panes command (tmux-style).
+ * Supports: tmux list-panes, tmux lsp, list-panes, lsp
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.TMUX_LIST_PANES,
-	aliases: [CommandId.LSP],
+	matchPatterns: ['tmux list-panes', 'tmux lsp', 'list-panes', 'lsp'],
 	description: 'List all panes in current window',
 	handler: () => ({
 		handled: true,
@@ -433,12 +473,13 @@ registerCommand({
 
 /**
  * List sessions command (tmux-style).
- * Supports: tmux list-sessions, tmux ls
+ * Supports: tmux list-sessions, tmux ls, list-sessions, ls
  * Uses LIST_SESSIONS as canonical name to match challenge expectations.
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.LIST_SESSIONS,
-	matchPatterns: ['tmux list-sessions', 'tmux ls'],
+	matchPatterns: ['tmux list-sessions', 'tmux ls', 'list-sessions', 'ls'],
 	description: 'List all tmux sessions',
 	handler: () => ({
 		handled: true,
@@ -448,11 +489,12 @@ registerCommand({
 
 /**
  * New session command (tmux-style).
- * Supports: tmux new-session, tmux new, tmux new-session -s <name>
+ * Supports: tmux new-session, tmux new, new-session, new, tmux new-session -s <name>
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.NEW_SESSION,
-	matchPatterns: ['tmux new-session', 'tmux new'],
+	matchPatterns: ['tmux new-session', 'tmux new', 'new-session', 'new'],
 	matchMode: 'prefix',
 	description: 'Create a new tmux session',
 	handler: (ctx) => {
@@ -473,11 +515,12 @@ registerCommand({
 
 /**
  * Attach session command (tmux-style).
- * Supports: tmux attach, tmux attach-session, tmux attach -t <target>, tmux a
+ * Supports: tmux attach, tmux attach-session, attach, attach-session, a, tmux attach -t <target>
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.ATTACH_SESSION,
-	matchPatterns: ['tmux attach-session', 'tmux attach', 'tmux a'],
+	matchPatterns: ['tmux attach-session', 'tmux attach', 'tmux a', 'attach-session', 'attach', 'a'],
 	matchMode: 'prefix',
 	description: 'Attach to an existing tmux session',
 	handler: (ctx) => {
@@ -506,12 +549,13 @@ registerCommand({
 
 /**
  * Detach command (tmux-style).
- * Supports: tmux detach, tmux detach-client
+ * Supports: tmux detach, tmux detach-client, detach, detach-client
  * Also triggered by prefix + d keybinding.
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.DETACH,
-	matchPatterns: ['tmux detach', 'tmux detach-client'],
+	matchPatterns: ['tmux detach', 'tmux detach-client', 'detach', 'detach-client'],
 	description: 'Detach from the current tmux session',
 	handler: () => ({
 		handled: true,
@@ -521,11 +565,12 @@ registerCommand({
 
 /**
  * Kill session command (tmux-style).
- * Supports: tmux kill-session, tmux kill-session -t <target>
+ * Supports: tmux kill-session, kill-session, tmux kill-session -t <target>
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.KILL_SESSION,
-	matchPatterns: ['tmux kill-session'],
+	matchPatterns: ['tmux kill-session', 'kill-session'],
 	matchMode: 'prefix',
 	description: 'Kill a tmux session',
 	handler: (ctx) => {
@@ -553,11 +598,12 @@ registerCommand({
 
 /**
  * Rename session command (tmux-style).
- * Supports: tmux rename-session <name>, tmux rename-session -t <target> <name>
+ * Supports: tmux rename-session, rename-session, tmux rename-session -t <target> <name>
+ * The non-"tmux" prefixed versions are for command-prompt usage.
  */
 registerCommand({
 	name: CommandId.RENAME_SESSION,
-	matchPatterns: ['tmux rename-session'],
+	matchPatterns: ['tmux rename-session', 'rename-session'],
 	matchMode: 'prefix',
 	description: 'Rename a tmux session',
 	handler: (ctx) => {
@@ -593,6 +639,298 @@ registerCommand({
 			sessionOperation: { type: 'rename', name }
 		};
 	}
+});
+
+// ============================================================================
+// PANE COMMANDS (for command-prompt and text input)
+// ============================================================================
+
+/**
+ * Split pane horizontally (top/bottom).
+ * In real tmux: split-window or split-window -v creates horizontal split.
+ * Note: tmux's -v means "vertical split line" which creates top/bottom panes.
+ */
+registerCommand({
+	name: CommandId.SPLIT_HORIZONTAL,
+	matchPatterns: ['split-window', 'split-window -v', 'splitw', 'splitw -v'],
+	description: 'Split pane horizontally (top/bottom)',
+	handler: () => ({
+		handled: true,
+		paneOperation: { type: 'split', direction: 'horizontal' }
+	})
+});
+
+/**
+ * Split pane vertically (left/right).
+ * In real tmux: split-window -h creates vertical split.
+ * Note: tmux's -h means "horizontal split line" which creates left/right panes.
+ */
+registerCommand({
+	name: CommandId.SPLIT_VERTICAL,
+	matchPatterns: ['split-window -h', 'splitw -h'],
+	description: 'Split pane vertically (left/right)',
+	handler: () => ({
+		handled: true,
+		paneOperation: { type: 'split', direction: 'vertical' }
+	})
+});
+
+/**
+ * Kill the current pane.
+ * Supports: kill-pane, killp
+ */
+registerCommand({
+	name: CommandId.KILL_PANE,
+	matchPatterns: ['kill-pane', 'killp'],
+	description: 'Kill the current pane',
+	handler: () => ({
+		handled: true,
+		paneOperation: { type: 'kill' }
+	})
+});
+
+/**
+ * Toggle pane zoom (fullscreen).
+ * In real tmux: resize-pane -Z
+ */
+registerCommand({
+	name: CommandId.TOGGLE_ZOOM,
+	matchPatterns: ['resize-pane -Z', 'resizep -Z'],
+	description: 'Toggle pane zoom (fullscreen)',
+	handler: () => ({
+		handled: true,
+		paneOperation: { type: 'toggle-zoom' }
+	})
+});
+
+/**
+ * Swap pane with previous or next pane.
+ * Supports: swap-pane -U (previous), swap-pane -D (next), swap-pane (defaults to next)
+ */
+registerCommand({
+	name: CommandId.SWAP_PANE,
+	matchPatterns: ['swap-pane', 'swapp'],
+	matchMode: 'prefix',
+	description: 'Swap pane with previous/next pane',
+	handler: (ctx) => {
+		// -U swaps with previous (up in index), -D swaps with next (down in index)
+		const hasUp = ctx.args.includes('-U') || ctx.args.includes('-u');
+		const direction = hasUp ? 'previous' : 'next';
+
+		return {
+			handled: true,
+			paneOperation: { type: 'swap', direction }
+		};
+	}
+});
+
+/**
+ * Rotate panes in the current window.
+ * In real tmux: rotate-window
+ */
+registerCommand({
+	name: CommandId.ROTATE_PANES,
+	matchPatterns: ['rotate-window', 'rotatew'],
+	description: 'Rotate panes in current window',
+	handler: () => ({
+		handled: true,
+		paneOperation: { type: 'rotate' }
+	})
+});
+
+/**
+ * Select pane by direction or target.
+ * Supports: select-pane -U/-D/-L/-R for direction, select-pane -t <target>
+ */
+registerCommand({
+	name: CommandId.SELECT_PANE,
+	matchPatterns: ['select-pane', 'selectp'],
+	matchMode: 'prefix',
+	description: 'Select pane by direction or target',
+	handler: (ctx) => {
+		// Check for direction flags
+		if (ctx.args.includes('-U') || ctx.args.includes('-u')) {
+			return { handled: true, paneOperation: { type: 'focus', direction: 'up' } };
+		}
+		if (ctx.args.includes('-D') || ctx.args.includes('-d')) {
+			return { handled: true, paneOperation: { type: 'focus', direction: 'down' } };
+		}
+		if (ctx.args.includes('-L') || ctx.args.includes('-l')) {
+			return { handled: true, paneOperation: { type: 'focus', direction: 'left' } };
+		}
+		if (ctx.args.includes('-R') || ctx.args.includes('-r')) {
+			return { handled: true, paneOperation: { type: 'focus', direction: 'right' } };
+		}
+
+		// Default: cycle to next pane
+		return { handled: true, paneOperation: { type: 'focus-next' } };
+	}
+});
+
+/**
+ * Switch to the last active pane.
+ */
+registerCommand({
+	name: CommandId.LAST_PANE,
+	matchPatterns: ['last-pane', 'lastp'],
+	description: 'Switch to last active pane',
+	handler: () => ({
+		handled: true,
+		paneOperation: { type: 'focus-last' }
+	})
+});
+
+// ============================================================================
+// WINDOW COMMANDS (for command-prompt and text input)
+// ============================================================================
+
+/**
+ * Create a new window.
+ * Supports: new-window, neww, new-window -n <name>
+ */
+registerCommand({
+	name: CommandId.NEW_WINDOW,
+	matchPatterns: ['new-window', 'neww'],
+	matchMode: 'prefix',
+	description: 'Create a new window',
+	handler: (ctx) => {
+		// Parse optional -n <name> argument
+		const nIndex = ctx.args.indexOf('-n');
+		const name = nIndex !== -1 && ctx.args[nIndex + 1] ? ctx.args[nIndex + 1] : undefined;
+
+		return {
+			handled: true,
+			windowOperation: { type: 'create', name }
+		};
+	}
+});
+
+/**
+ * Kill the current window.
+ * Supports: kill-window, killw
+ */
+registerCommand({
+	name: CommandId.KILL_WINDOW,
+	matchPatterns: ['kill-window', 'killw'],
+	matchMode: 'prefix',
+	description: 'Kill the current window',
+	handler: (ctx) => {
+		// Parse optional -t <index> argument
+		const tIndex = ctx.args.indexOf('-t');
+		const index =
+			tIndex !== -1 && ctx.args[tIndex + 1] ? parseInt(ctx.args[tIndex + 1], 10) : undefined;
+
+		return {
+			handled: true,
+			windowOperation: { type: 'close', index: isNaN(index ?? NaN) ? undefined : index }
+		};
+	}
+});
+
+/**
+ * Switch to the next window.
+ */
+registerCommand({
+	name: CommandId.NEXT_WINDOW,
+	matchPatterns: ['next-window', 'next'],
+	description: 'Switch to next window',
+	handler: () => ({
+		handled: true,
+		windowOperation: { type: 'next' }
+	})
+});
+
+/**
+ * Switch to the previous window.
+ */
+registerCommand({
+	name: CommandId.PREVIOUS_WINDOW,
+	matchPatterns: ['previous-window', 'prev'],
+	description: 'Switch to previous window',
+	handler: () => ({
+		handled: true,
+		windowOperation: { type: 'previous' }
+	})
+});
+
+/**
+ * Select window by index.
+ * Supports: select-window -t <index>, selectw -t <index>
+ */
+registerCommand({
+	name: CommandId.SELECT_WINDOW,
+	matchPatterns: ['select-window', 'selectw'],
+	matchMode: 'prefix',
+	description: 'Select window by index',
+	handler: (ctx) => {
+		// Parse -t <index> argument
+		const tIndex = ctx.args.indexOf('-t');
+		if (tIndex !== -1 && ctx.args[tIndex + 1]) {
+			const index = parseInt(ctx.args[tIndex + 1], 10);
+			if (!isNaN(index)) {
+				return {
+					handled: true,
+					windowOperation: { type: 'switch', index }
+				};
+			}
+		}
+
+		return { handled: true, error: 'usage: select-window -t <index>' };
+	}
+});
+
+/**
+ * Rename the current window.
+ * Supports: rename-window <name>, renamew <name>
+ */
+registerCommand({
+	name: CommandId.RENAME_WINDOW,
+	matchPatterns: ['rename-window', 'renamew'],
+	matchMode: 'prefix',
+	description: 'Rename the current window',
+	handler: (ctx) => {
+		// Parse: rename-window <name> or rename-window -t <index> <name>
+		const tIndex = ctx.args.indexOf('-t');
+
+		if (tIndex !== -1 && ctx.args[tIndex + 1] && ctx.args[tIndex + 2]) {
+			// Has -t <index> <name>
+			const index = parseInt(ctx.args[tIndex + 1], 10);
+			const name = ctx.args[tIndex + 2];
+
+			return {
+				handled: true,
+				windowOperation: { type: 'rename', name, index: isNaN(index) ? undefined : index }
+			};
+		}
+
+		// Find the name argument (last non-flag argument)
+		// Command format: rename-window <name> or renamew <name>
+		const nonFlagArgs = ctx.args.filter((arg) => !arg.startsWith('-'));
+		// First non-flag arg is the command name itself, second is the new name
+		const name = nonFlagArgs.length > 1 ? nonFlagArgs[nonFlagArgs.length - 1] : undefined;
+
+		if (!name) {
+			return { handled: true, error: 'usage: rename-window [-t target-window] <new-name>' };
+		}
+
+		return {
+			handled: true,
+			windowOperation: { type: 'rename', name }
+		};
+	}
+});
+
+/**
+ * Switch to the last active window.
+ */
+registerCommand({
+	name: CommandId.LAST_WINDOW,
+	matchPatterns: ['last-window', 'last'],
+	description: 'Switch to last active window',
+	handler: () => ({
+		handled: true,
+		windowOperation: { type: 'last' }
+	})
 });
 
 // ============================================================================

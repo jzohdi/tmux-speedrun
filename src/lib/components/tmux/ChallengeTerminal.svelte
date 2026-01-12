@@ -130,11 +130,6 @@
 	function handleStatusBarInputSubmit(value: string): void {
 		const trimmedValue = value.trim();
 
-		if (!trimmedValue) {
-			showFeedback('Enter a value');
-			return;
-		}
-
 		if (!inputModeCommand) {
 			inputModeCommand = null;
 			inputModeValue = '';
@@ -153,12 +148,41 @@
 
 		const commandName = inputModeCommand.name;
 
+		// Handle command-prompt specially - forward input to processCommand
+		if (commandName === CommandId.COMMAND_PROMPT) {
+			// Empty input = cancel (like Escape)
+			if (!trimmedValue) {
+				inputModeCommand = null;
+				inputModeValue = '';
+				restoreFocusAfterInputMode();
+				return;
+			}
+
+			// Forward the command to processCommand - it handles everything generically
+			// This will execute the command and emit the appropriate signal
+			tmux.processCommand(trimmedValue);
+
+			// Reset input mode and restore focus
+			inputModeCommand = null;
+			inputModeValue = '';
+			restoreFocusAfterInputMode();
+			return;
+		}
+
+		// For other input commands (rename-window, rename-session), require a value
+		if (!trimmedValue) {
+			showFeedback('Enter a value');
+			return;
+		}
+
 		// Execute the actual command based on command type
 		switch (commandName) {
 			case CommandId.RENAME_WINDOW:
 				tmux.renameWindow(trimmedValue);
 				break;
-			// Add other input commands here as needed
+			case CommandId.RENAME_SESSION:
+				tmux.renameSession(trimmedValue);
+				break;
 			default:
 				console.warn(`No handler for input command: ${commandName}`);
 		}
@@ -404,6 +428,18 @@
 
 		const cmd = getCommandByName(commandName);
 		if (!cmd) {
+			return;
+		}
+
+		// Special handling for command-prompt (prefix + :)
+		// 1. Emit the command-prompt signal immediately (for challenge tracking)
+		// 2. Enter command prompt input mode where user can type any tmux command
+		if (commandName === CommandId.COMMAND_PROMPT) {
+			// Emit signal first - this completes the "command-prompt" challenge step
+			tmux.executeTmuxCommand(CommandId.COMMAND_PROMPT);
+			// Enter command prompt input mode
+			inputModeCommand = cmd;
+			inputModeValue = '';
 			return;
 		}
 

@@ -41,7 +41,9 @@ import {
 	executeCommand,
 	type CommandIdType,
 	type CommandResult,
-	type SessionOperation
+	type SessionOperation,
+	type PaneOperation,
+	type WindowOperation
 } from '$lib/utils/tmux-commands';
 
 function formatPaneList(panes: Pane[], focusedId: string): string {
@@ -700,6 +702,146 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 						content: `[renamed session to ${operation.name}]`,
 						timestamp: Date.now()
 					});
+				}
+				break;
+			}
+		}
+	}
+
+	/**
+	 * Handle a pane operation from a command result.
+	 * This bridges the command system with the pane management methods.
+	 */
+	function handlePaneOperation(operation: PaneOperation): void {
+		switch (operation.type) {
+			case 'split': {
+				splitFocusedPane(operation.direction);
+				break;
+			}
+			case 'kill': {
+				// Note: When executed via text command/command-prompt, skip confirmation
+				// This matches real tmux behavior where text commands execute immediately
+				if (paneCount > 1) {
+					closeFocusedPane();
+				} else if (windowCount > 1) {
+					// Last pane in window - close window
+					closeWindow();
+					addHistory({
+						type: 'system',
+						content: '[window closed]',
+						timestamp: Date.now()
+					});
+				} else {
+					// Last pane in last window - detach
+					const detachedName = detachFromSession();
+					if (detachedName !== null) {
+						setMode('default');
+						addHistory({
+							type: 'system',
+							content: `[exited (from session ${detachedName})]`,
+							timestamp: Date.now()
+						});
+					}
+				}
+				break;
+			}
+			case 'toggle-zoom': {
+				if (paneCount > 1) {
+					togglePaneZoom();
+				}
+				break;
+			}
+			case 'rotate': {
+				if (paneCount > 1) {
+					rotateWindowPanes();
+				}
+				break;
+			}
+			case 'swap': {
+				if (paneCount > 1) {
+					if (operation.direction === 'next') {
+						swapPaneWithNext();
+					} else {
+						swapPaneWithPrevious();
+					}
+				}
+				break;
+			}
+			case 'focus': {
+				moveFocus(operation.direction);
+				break;
+			}
+			case 'focus-next': {
+				focusNextPane();
+				break;
+			}
+			case 'focus-previous': {
+				focusPreviousPane();
+				break;
+			}
+			case 'focus-last': {
+				focusLastPane();
+				break;
+			}
+		}
+	}
+
+	/**
+	 * Handle a window operation from a command result.
+	 * This bridges the command system with the window management methods.
+	 */
+	function handleWindowOperation(operation: WindowOperation): void {
+		switch (operation.type) {
+			case 'create': {
+				createNewWindow(operation.name);
+				break;
+			}
+			case 'close': {
+				const success = closeWindow(operation.index);
+				if (!success) {
+					addHistory({
+						type: 'error',
+						content: "can't kill last window",
+						timestamp: Date.now()
+					});
+				}
+				break;
+			}
+			case 'switch': {
+				if (operation.index >= 0 && operation.index < windowCount) {
+					switchWindow(operation.index);
+				} else {
+					addHistory({
+						type: 'error',
+						content: `window ${operation.index} not found`,
+						timestamp: Date.now()
+					});
+				}
+				break;
+			}
+			case 'next': {
+				nextWindow();
+				break;
+			}
+			case 'previous': {
+				previousWindow();
+				break;
+			}
+			case 'rename': {
+				renameWindow(operation.name, operation.index);
+				break;
+			}
+			case 'last': {
+				// Toggle to previous window (tmux "last-window" behavior)
+				if (windowCount > 1) {
+					previousWindow();
+				}
+				break;
+			}
+			case 'list': {
+				const output = generateOutput('window-list');
+				if (output) {
+					addHistory({ type: 'output', content: output, timestamp: Date.now() });
 				}
 				break;
 			}
@@ -1802,6 +1944,16 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				// Handle session operations
 				if (result.sessionOperation) {
 					handleSessionOperation(result.sessionOperation);
+				}
+
+				// Handle pane operations
+				if (result.paneOperation) {
+					handlePaneOperation(result.paneOperation);
+				}
+
+				// Handle window operations
+				if (result.windowOperation) {
+					handleWindowOperation(result.windowOperation);
 				}
 
 				// Emit command-executed signal for challenge tracking (type-safe)

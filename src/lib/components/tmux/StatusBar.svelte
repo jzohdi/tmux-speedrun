@@ -223,7 +223,13 @@
 	<!-- Input mode: orange bar with inline input -->
 	<div class="status-bar input-mode">
 		<div class="input-mode-content">
-			<span class="input-mode-label">({inputMode.actionLabel})</span>
+			{#if inputMode.actionLabel === 'command-prompt'}
+				<!-- Command prompt shows just ":" like real tmux -->
+				<span class="input-mode-label">:</span>
+			{:else}
+				<!-- Other input commands show "(command-name)" -->
+				<span class="input-mode-label">({inputMode.actionLabel})</span>
+			{/if}
 			<input
 				type="text"
 				class="status-input"
