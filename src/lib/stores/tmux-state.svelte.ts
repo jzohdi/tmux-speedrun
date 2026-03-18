@@ -260,6 +260,41 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	const zoomedPaneId = $derived(activeWindow?.zoomedPaneId ?? null);
 	const isZoomed = $derived(zoomedPaneId !== null);
 
+	function isDetachedState(): boolean {
+		return state.attachedSessionIndex === null;
+	}
+
+	function getAttachedSessionState(): TmuxSession | null {
+		if (state.attachedSessionIndex === null) {
+			return null;
+		}
+
+		return state.sessions[state.attachedSessionIndex] ?? null;
+	}
+
+	function getActiveWindowState(): TmuxWindow | null {
+		const currentAttachedSession = getAttachedSessionState();
+		if (!currentAttachedSession) {
+			return null;
+		}
+
+		return currentAttachedSession.windows[currentAttachedSession.activeWindowIndex] ?? null;
+	}
+
+	function getFocusedPaneState(): Pane | null {
+		if (isDetachedState()) {
+			return state.shellPane;
+		}
+
+		const currentAttachedSession = getAttachedSessionState();
+		const currentActiveWindow = getActiveWindowState();
+		if (!currentAttachedSession || !currentActiveWindow) {
+			return null;
+		}
+
+		return findPaneById(currentActiveWindow.paneTree, currentAttachedSession.focusedPaneId);
+	}
+
 	// ========================================================================
 	// SIGNAL EMISSION
 	// ========================================================================
@@ -499,7 +534,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Kill (destroy) a session.
 	 *
 	 * @param target - Session index or name. If not provided, kills the attached session.
-	 * @returns true if killed, false if not found or cannot kill
+	 * @returns true if killed, false if not found or no session is attached
 	 */
 	function killSessionByTarget(target?: number | string): boolean {
 		let sessionIndex: number;
@@ -517,26 +552,27 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			}
 		}
 
-		// Cannot kill the last session
-		if (state.sessions.length <= 1) {
-			return false;
-		}
-
 		const killedSession = state.sessions[sessionIndex];
+		const previousAttachedIndex = state.attachedSessionIndex;
 		const newSessions = state.sessions.filter((_, i) => i !== sessionIndex);
 
 		// Adjust attached session index if needed
-		let newAttachedIndex = state.attachedSessionIndex;
+		let newAttachedIndex = previousAttachedIndex;
 
-		if (state.attachedSessionIndex === sessionIndex) {
-			// We're killing the attached session - attach to the previous one, or first available
-			newAttachedIndex = Math.max(0, sessionIndex - 1);
-			if (newAttachedIndex >= newSessions.length) {
-				newAttachedIndex = newSessions.length - 1;
+		if (previousAttachedIndex === sessionIndex) {
+			// Killing the attached session exits tmux when no sessions remain.
+			if (newSessions.length === 0) {
+				newAttachedIndex = null;
+			} else {
+				// Otherwise, attach to the previous session, or the first remaining one.
+				newAttachedIndex = Math.max(0, sessionIndex - 1);
+				if (newAttachedIndex >= newSessions.length) {
+					newAttachedIndex = newSessions.length - 1;
+				}
 			}
-		} else if (state.attachedSessionIndex !== null && sessionIndex < state.attachedSessionIndex) {
+		} else if (previousAttachedIndex !== null && sessionIndex < previousAttachedIndex) {
 			// Killed a session before the attached one - adjust index
-			newAttachedIndex = state.attachedSessionIndex - 1;
+			newAttachedIndex = previousAttachedIndex - 1;
 		}
 
 		state = {
@@ -550,13 +586,15 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			sessionName: killedSession.name
 		});
 
-		// If we attached to a new session, emit that signal too
-		if (newAttachedIndex !== null && newAttachedIndex !== state.attachedSessionIndex) {
+		// If we attached to a different remaining session, emit that signal too.
+		if (newAttachedIndex !== null && newAttachedIndex !== previousAttachedIndex) {
 			const newAttachedSession = newSessions[newAttachedIndex];
 			emitSignal('session-attached', {
 				sessionId: newAttachedSession.id,
 				sessionName: newAttachedSession.name
 			});
+			triggerInputFocus();
+		} else if (newAttachedIndex === null && previousAttachedIndex === sessionIndex) {
 			triggerInputFocus();
 		}
 
@@ -666,19 +704,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				const sessionName = targetSession?.name ?? 'unknown';
 				const success = killSessionByTarget(operation.target);
 				if (!success) {
-					if (state.sessions.length <= 1) {
-						addHistory({
-							type: 'error',
-							content: `can't kill last session`,
-							timestamp: Date.now()
-						});
-					} else {
-						addHistory({
-							type: 'error',
-							content: `can't find session: ${operation.target}`,
-							timestamp: Date.now()
-						});
-					}
+					addHistory({
+						type: 'error',
+						content: `can't find session: ${operation.target}`,
+						timestamp: Date.now()
+					});
 				} else {
 					addHistory({
 						type: 'system',
@@ -1446,7 +1476,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 */
 	function addHistory(entry: HistoryEntry, paneId?: string): void {
 		// When detached, add history to the shell pane
-		if (isDetached) {
+		if (isDetachedState()) {
 			updateShellPane({
 				history: [...state.shellPane.history, entry]
 			});
@@ -2067,51 +2097,65 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		// Reactive state (read-only via getters)
 		// Session-level state
 		get sessions() {
-			return sessions;
+			return state.sessions;
 		},
 		get attachedSessionIndex() {
-			return attachedSessionIndex;
+			return state.attachedSessionIndex;
 		},
 		get attachedSession() {
-			return attachedSession;
+			return getAttachedSessionState();
 		},
 		get sessionCount() {
-			return sessionCount;
+			return state.sessions.length;
 		},
 		get isDetached() {
-			return isDetached;
+			return isDetachedState();
 		},
 
 		// Window/Pane state (scoped to attached session, or shell pane when detached)
 		get windows() {
-			return windows;
+			return getAttachedSessionState()?.windows ?? [];
 		},
 		get activeWindowIndex() {
-			return activeWindowIndex;
+			return getAttachedSessionState()?.activeWindowIndex ?? 0;
 		},
 		get activeWindow() {
-			return activeWindow;
+			return getActiveWindowState();
 		},
 		get focusedPaneId() {
-			return focusedPaneId;
+			return isDetachedState()
+				? state.shellPane.id
+				: (getAttachedSessionState()?.focusedPaneId ?? '');
 		},
 		get focusedPane() {
-			return focusedPane;
+			return getFocusedPaneState();
 		},
 		get allPanesInActiveWindow() {
-			return allPanesInActiveWindow;
+			if (isDetachedState()) {
+				return [state.shellPane];
+			}
+
+			const currentActiveWindow = getActiveWindowState();
+
+			return currentActiveWindow ? collectAllPanes(currentActiveWindow.paneTree) : [];
 		},
 		get paneCount() {
-			return paneCount;
+			if (isDetachedState()) {
+				return 1;
+			}
+
+			const currentActiveWindow = getActiveWindowState();
+
+			return currentActiveWindow ? countPanes(currentActiveWindow.paneTree) : 0;
 		},
 		get windowCount() {
-			return windowCount;
+			return getAttachedSessionState()?.windows.length ?? 0;
 		},
 		get zoomedPaneId() {
-			return zoomedPaneId;
+			return getActiveWindowState()?.zoomedPaneId ?? null;
 		},
 		get isZoomed() {
-			return isZoomed;
+			return (getActiveWindowState()?.zoomedPaneId ?? null) !== null;
 		},
 		get prefixActive() {
 			return prefixActive;
