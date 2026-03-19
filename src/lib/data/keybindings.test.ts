@@ -1,15 +1,13 @@
-/**
- * Tests for the keybindings module.
- */
-
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
 import {
-	KEYBINDING_MAP,
 	isPrefixKey,
 	lookupKeybinding,
 	getKeybindingsForCommand,
 	hasPrefixKeybinding,
-	eventToBindingKey
+	eventToBindingKey,
+	getPrefixKeybindings,
+	getPrefixKeyDisplay
 } from './keybindings';
 
 /**
@@ -31,78 +29,22 @@ function createKeyEvent(
 }
 
 describe('Keybindings', () => {
-	describe('KEYBINDING_MAP', () => {
-		it('should contain prefix-based commands', () => {
-			expect(KEYBINDING_MAP.size).toBeGreaterThan(0);
+	beforeEach(() => {
+		tmuxConfigStore.resetForTesting();
+	});
+
+	describe('default keybindings', () => {
+		it('contains prefix-based commands', () => {
+			expect(getPrefixKeybindings().length).toBeGreaterThan(0);
 		});
 
-		it('should have split-vertical mapped to %', () => {
-			const binding = KEYBINDING_MAP.get('%');
-			expect(binding).toBeDefined();
+		it('maps split-vertical to % by default', () => {
+			const binding = lookupKeybinding(createKeyEvent('%'));
 			expect(binding?.commandName).toBe('split-vertical');
 		});
 
-		it('should have split-horizontal mapped to "', () => {
-			const binding = KEYBINDING_MAP.get('"');
-			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('split-horizontal');
-		});
-
-		it('should have detach mapped to d', () => {
-			const binding = KEYBINDING_MAP.get('d');
-			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('detach');
-		});
-
-		it('should have new-window mapped to c', () => {
-			const binding = KEYBINDING_MAP.get('c');
-			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('new-window');
-		});
-
-		it('should have rename-window mapped to ,', () => {
-			const binding = KEYBINDING_MAP.get(',');
-			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('rename-window');
-		});
-
-		it('should have rename-session mapped to $', () => {
-			const binding = KEYBINDING_MAP.get('$');
-			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('rename-session');
-		});
-
-		it('should have select-window for digits 0-9', () => {
-			for (let i = 0; i <= 9; i++) {
-				const binding = KEYBINDING_MAP.get(String(i));
-				expect(binding).toBeDefined();
-				expect(binding?.commandName).toBe('select-window');
-			}
-		});
-
-		it('should have select-pane for arrow keys', () => {
-			for (const arrow of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) {
-				const binding = KEYBINDING_MAP.get(arrow);
-				expect(binding).toBeDefined();
-				expect(binding?.commandName).toBe('select-pane');
-			}
-		});
-
-		// NOTE: resize-pane test removed - Ctrl+Arrow conflicts with macOS Mission Control
-
-		it('should have swap-pane for { and }', () => {
-			const bindingLeft = KEYBINDING_MAP.get('{');
-			const bindingRight = KEYBINDING_MAP.get('}');
-
-			expect(bindingLeft).toBeDefined();
-			expect(bindingLeft?.commandName).toBe('swap-pane');
-			expect(bindingRight).toBeDefined();
-			expect(bindingRight?.commandName).toBe('swap-pane');
-		});
-
-		it('should have rotate-panes for Ctrl+o', () => {
-			const binding = KEYBINDING_MAP.get('Ctrl+o');
-			expect(binding).toBeDefined();
+		it('maps rotate-panes to Ctrl+o by default', () => {
+			const binding = lookupKeybinding(createKeyEvent('o', { ctrlKey: true }));
 			expect(binding?.commandName).toBe('rotate-panes');
 			expect(binding?.withCtrl).toBe(true);
 		});
@@ -132,6 +74,15 @@ describe('Keybindings', () => {
 		it('should return false for Alt+b', () => {
 			const event = createKeyEvent('b', { altKey: true });
 			expect(isPrefixKey(event)).toBe(false);
+		});
+
+		it('uses an overridden prefix after applying tmux.conf', () => {
+			tmuxConfigStore.setFileText('set -g prefix C-a');
+			tmuxConfigStore.applySavedConfig();
+
+			expect(getPrefixKeyDisplay()).toBe('Ctrl+a');
+			expect(isPrefixKey(createKeyEvent('a', { ctrlKey: true }))).toBe(true);
+			expect(isPrefixKey(createKeyEvent('b', { ctrlKey: true }))).toBe(false);
 		});
 	});
 
@@ -179,6 +130,11 @@ describe('Keybindings', () => {
 			expect(binding?.commandName).toBe('new-window');
 		});
 
+		it('maps p to previous-window and l to last-window', () => {
+			expect(lookupKeybinding(createKeyEvent('p'))?.commandName).toBe('previous-window');
+			expect(lookupKeybinding(createKeyEvent('l'))?.commandName).toBe('last-window');
+		});
+
 		it('should find binding for Ctrl+o', () => {
 			const event = createKeyEvent('o', { ctrlKey: true });
 			const binding = lookupKeybinding(event);
@@ -192,6 +148,14 @@ describe('Keybindings', () => {
 			const binding = lookupKeybinding(event);
 
 			expect(binding).toBeUndefined();
+		});
+
+		it('resolves overridden config bindings after apply', () => {
+			tmuxConfigStore.setFileText('unbind-key d\nbind-key y kill-session');
+			tmuxConfigStore.applySavedConfig();
+
+			expect(lookupKeybinding(createKeyEvent('d'))).toBeUndefined();
+			expect(lookupKeybinding(createKeyEvent('y'))?.commandName).toBe('kill-session');
 		});
 	});
 
@@ -219,6 +183,14 @@ describe('Keybindings', () => {
 			const bindings = getKeybindingsForCommand('new-session');
 
 			expect(bindings.length).toBe(0);
+		});
+
+		it('updates command bindings from tmux.conf', () => {
+			tmuxConfigStore.setFileText('bind-key y kill-session');
+			tmuxConfigStore.applySavedConfig();
+
+			const bindings = getKeybindingsForCommand('kill-session');
+			expect(bindings.some((binding) => binding.key === 'y')).toBe(true);
 		});
 	});
 

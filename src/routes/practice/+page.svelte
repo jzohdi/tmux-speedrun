@@ -7,14 +7,19 @@
 		getPrefixKeyDisplay,
 		type Keybinding
 	} from '$lib/data/keybindings';
+	import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
 	import type { TmuxCommand } from '$lib/data/tmux-commands';
 	import { isValidCommandId, type CommandIdType } from '$lib/utils/tmux-commands';
 
 	// Component ref
 	let terminalRef = $state<ReturnType<typeof ChallengeTerminal> | null>(null);
 
-	// All commands that can be practiced (have prefix keybindings)
-	const practiceCommands = getCommandsWithPrefixKeybindings();
+	const configRevision = $derived(tmuxConfigStore.revision);
+	const practiceCommands = $derived.by(() => {
+		configRevision;
+
+		return getCommandsWithPrefixKeybindings();
+	});
 
 	// Mode: sequential or random
 	let isRandomMode = $state(false);
@@ -33,12 +38,19 @@
 
 	// Derived state
 	const currentCommand = $derived(commandQueue[currentIndex] ?? null);
-	const currentKeybindings = $derived(
-		currentCommand && isValidCommandId(currentCommand.name)
-			? getKeybindingsForCommand(currentCommand.name as CommandIdType)
-			: []
-	);
-	const prefixKey = getPrefixKeyDisplay();
+	const currentKeybindings = $derived.by(() => {
+		configRevision;
+		if (!currentCommand || !isValidCommandId(currentCommand.name)) {
+			return [];
+		}
+
+		return getKeybindingsForCommand(currentCommand.name as CommandIdType);
+	});
+	const prefixKey = $derived.by(() => {
+		configRevision;
+
+		return getPrefixKeyDisplay();
+	});
 	const isComplete = $derived(
 		!isRandomMode && currentIndex >= commandQueue.length && commandQueue.length > 0
 	);
@@ -280,6 +292,7 @@
 			<a href="/" class="back-link">← Back</a>
 			<h1 class="page-title">Practice</h1>
 			<span class="page-subtitle">Learn tmux keybindings</span>
+			<a href="/tmux-conf" class="config-link">tmux.conf</a>
 		</header>
 
 		<!-- Mode Toggle & Controls -->
@@ -373,7 +386,8 @@
 		<!-- Help Text -->
 		<div class="help-text">
 			<p>
-				<strong>Tip:</strong> Type <code>tmux</code> to enter tmux mode.
+				<strong>Tip:</strong> Type <code>tmux</code> to enter tmux mode, or edit
+				<a href="/tmux-conf">tmux.conf</a> to practice your custom bindings.
 			</p>
 		</div>
 
@@ -466,6 +480,14 @@
 	.page-subtitle {
 		font-size: 14px;
 		color: #666;
+	}
+
+	.config-link {
+		margin-left: auto;
+		font-size: 13px;
+		color: #8be9fd;
+		text-decoration: none;
+		font-family: 'JetBrains Mono', monospace;
 	}
 
 	/* Controls Bar */
@@ -853,6 +875,10 @@
 		padding: 2px 6px;
 		border-radius: 3px;
 		color: #8be9fd;
+	}
+
+	.help-text a {
+		color: #50fa7b;
 	}
 
 	/* Responsive */

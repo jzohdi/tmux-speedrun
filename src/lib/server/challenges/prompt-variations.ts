@@ -103,10 +103,10 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 	],
 	'last-window': [
 		'Switch to the last active window',
-		'Go to the previous active window',
+		'Go to the most recently active window',
 		'Jump to the last used window',
 		'Return to the last window',
-		'Toggle to the previous window'
+		'Toggle to the last used window'
 	],
 
 	// Pane Management

@@ -181,6 +181,7 @@
 		<header class="challenge-header">
 			<button class="back-link" onclick={handleBackClick}>← Back</button>
 			<span class="challenge-label">Challenge {data.challengeIndex}</span>
+			<a href="/tmux-conf" class="config-link">tmux.conf</a>
 			<span class="help-hint">
 				<code>man tmux</code> for help
 			</span>
@@ -347,6 +348,13 @@
 		font-size: 14px;
 		font-weight: 500;
 		color: #666;
+	}
+
+	.config-link {
+		font-size: 12px;
+		color: #8be9fd;
+		text-decoration: none;
+		font-family: 'JetBrains Mono', monospace;
 	}
 
 	.help-hint {

@@ -157,6 +157,11 @@ export type WindowOperation =
 	| { type: 'last' }
 	| { type: 'list' };
 
+export type ConfigOperation = {
+	type: 'reload';
+	path: string;
+};
+
 /**
  * Result returned from a command handler.
  */
@@ -197,6 +202,10 @@ export type CommandResult = {
 	 * Window operation to perform (handled by store).
 	 */
 	windowOperation?: WindowOperation;
+	/**
+	 * Config operation to perform (handled by store).
+	 */
+	configOperation?: ConfigOperation;
 };
 
 /**
@@ -282,14 +291,15 @@ function matchesPattern(
 	const normalizedPattern = pattern.toLowerCase();
 
 	if (matchMode === 'exact') {
-		return (
-			normalizedCommand === normalizedPattern ||
-			normalizedCommand.startsWith(normalizedPattern + ' ')
-		);
+		return normalizedCommand === normalizedPattern;
 	}
 
-	// prefix mode
-	return normalizedCommand.startsWith(normalizedPattern);
+	// prefix mode still needs a token boundary so aliases like "new"
+	// don't accidentally match different commands like "new-window".
+	return (
+		normalizedCommand === normalizedPattern ||
+		normalizedCommand.startsWith(normalizedPattern + ' ')
+	);
 }
 
 /**
@@ -382,6 +392,15 @@ export function executeCommand(
 	};
 }
 
+function getTrailingArgument(args: string[]): string | null {
+	const nonFlagArgs = args.filter((arg) => !arg.startsWith('-'));
+	if (nonFlagArgs.length < 2) {
+		return null;
+	}
+
+	return nonFlagArgs[nonFlagArgs.length - 1];
+}
+
 // ============================================================================
 // BUILT-IN TEXT COMMANDS
 // ============================================================================
@@ -436,6 +455,35 @@ registerCommand({
 		return {
 			handled: true,
 			output: `Available commands:\n${helpText}`
+		};
+	}
+});
+
+/**
+ * Reload the tmux configuration file.
+ * Supports: tmux source-file <file>, tmux source <file>, source-file <file>, source <file>
+ * The non-"tmux" prefixed versions are for command-prompt usage.
+ */
+registerCommand({
+	name: CommandId.RELOAD_CONFIG,
+	matchPatterns: ['tmux source-file', 'tmux source', 'source-file', 'source'],
+	matchMode: 'prefix',
+	description: 'Reload the tmux configuration file',
+	handler: (ctx) => {
+		const configPath = getTrailingArgument(ctx.args);
+		if (!configPath) {
+			return {
+				handled: true,
+				error: 'usage: source-file <path-to-config>'
+			};
+		}
+
+		return {
+			handled: true,
+			configOperation: {
+				type: 'reload',
+				path: configPath
+			}
 		};
 	}
 });

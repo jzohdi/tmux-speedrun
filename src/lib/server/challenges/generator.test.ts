@@ -121,6 +121,18 @@ describe('Prompt Variations', () => {
 	it('throws for unknown command', () => {
 		expect(() => getRandomPrompt('unknown-command')).toThrow();
 	});
+
+	it('keeps previous-window and last-window prompts unambiguous', () => {
+		expect(PROMPT_VARIATIONS['previous-window'].some((prompt) => prompt.includes('previous active'))).toBe(
+			false
+		);
+		expect(PROMPT_VARIATIONS['last-window'].some((prompt) => prompt.includes('previous active'))).toBe(
+			false
+		);
+		expect(PROMPT_VARIATIONS['last-window'].some((prompt) => prompt.includes('Toggle to the previous'))).toBe(
+			false
+		);
+	});
 });
 
 /**

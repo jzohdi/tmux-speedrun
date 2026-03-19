@@ -225,7 +225,7 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 	},
 	{
 		name: 'reload-config',
-		shortcut: 'tmux source-file ~/.tmux.conf',
+		shortcut: 'tmux source-file <file>, tmux source <file>, source-file <file>, source <file>',
 		description: 'Reload tmux configuration file',
 		difficulty: 'intermediate',
 		category: 'misc'

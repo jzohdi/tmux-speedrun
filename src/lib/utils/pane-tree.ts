@@ -15,8 +15,9 @@
  * - 'default': Standard shell mode with '$' prompt
  * - 'tmux': Tmux mode with '%' prompt, prefix key handling
  * - 'man': Man page viewer mode (no input, scroll only)
+ * - 'editor': Lightweight vi-style tmux.conf editor
  */
-export type PaneMode = 'default' | 'tmux' | 'man';
+export type PaneMode = 'default' | 'tmux' | 'man' | 'editor';
 
 /**
  * History entry types for pane output.
@@ -45,12 +46,21 @@ export type Pane = {
 	/** The mode before entering man mode (for restoring when exiting man) */
 	previousMode?: PaneMode;
 	inputValue: string;
+	editorState?: PaneEditorState;
 	/**
 	 * The order in which this pane was created within its window.
 	 * Used for rotate-panes command to determine rotation order.
 	 * Lower numbers were created earlier.
 	 */
 	creationIndex: number;
+};
+
+export type PaneEditorState = {
+	filePath: string;
+	buffer: string;
+	insertMode: boolean;
+	commandLine: string;
+	isDirty: boolean;
 };
 
 /**
@@ -816,6 +826,7 @@ export type PaneContent = {
 	mode: PaneMode;
 	previousMode?: PaneMode;
 	inputValue: string;
+	editorState?: PaneEditorState;
 };
 
 /**
@@ -826,7 +837,8 @@ function extractPaneContent(pane: Pane): PaneContent {
 		history: pane.history,
 		mode: pane.mode,
 		previousMode: pane.previousMode,
-		inputValue: pane.inputValue
+		inputValue: pane.inputValue,
+		editorState: pane.editorState
 	};
 }
 
@@ -881,7 +893,8 @@ export function rotatePanes(root: PaneNode): PaneNode {
 					history: newContent.history,
 					mode: newContent.mode,
 					previousMode: newContent.previousMode,
-					inputValue: newContent.inputValue
+					inputValue: newContent.inputValue,
+					editorState: newContent.editorState
 				};
 			}
 			return node;
@@ -935,7 +948,8 @@ export function swapPaneContent(root: PaneNode, paneId1: string, paneId2: string
 					history: newContent.history,
 					mode: newContent.mode,
 					previousMode: newContent.previousMode,
-					inputValue: newContent.inputValue
+					inputValue: newContent.inputValue,
+					editorState: newContent.editorState
 				};
 			}
 			return node;

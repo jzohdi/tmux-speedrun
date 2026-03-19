@@ -43,23 +43,26 @@ import {
 	type CommandResult,
 	type SessionOperation,
 	type PaneOperation,
-	type WindowOperation
+	type WindowOperation,
+	type ConfigOperation
 } from '$lib/utils/tmux-commands';
+import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
+import { TMUX_CONFIG_PATH } from '$lib/utils/tmux-conf';
 
 function formatPaneList(panes: Pane[], focusedId: string): string {
 	const currentPanes =
 		typeof window !== 'undefined'
 			? Array.from(document.querySelectorAll('.pane-container')).map((node) => {
-					const bounds = node.getBoundingClientRect();
-					return {
-						width: Math.round(bounds.width),
-						height: Math.round(bounds.height)
-					};
-				})
+				const bounds = node.getBoundingClientRect();
+				return {
+					width: Math.round(bounds.width),
+					height: Math.round(bounds.height)
+				};
+			})
 			: panes.map(() => ({
-					width: 160,
-					height: 24
-				}));
+				width: 160,
+				height: 24
+			}));
 	return panes
 		.map((pane, index) => {
 			const isActive = pane.id === focusedId;
@@ -1186,10 +1189,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 						windows: session.windows.map((w, windowIdx) =>
 							windowIdx === session.activeWindowIndex
 								? {
-										...w,
-										paneTree: newTree,
-										zoomedPaneId: shouldClearZoom ? null : w.zoomedPaneId
-									}
+									...w,
+									paneTree: newTree,
+									zoomedPaneId: shouldClearZoom ? null : w.zoomedPaneId
+								}
 								: w
 						)
 					};
@@ -1683,6 +1686,132 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		updateActiveWindowTree(newTree);
 	}
 
+	function updateFocusedEditorState(updates: Partial<NonNullable<Pane['editorState']>>): void {
+		const currentPane = getFocusedPaneState();
+		if (!currentPane?.editorState) {
+			return;
+		}
+
+		updateFocusedPane({
+			editorState: {
+				...currentPane.editorState,
+				...updates
+			}
+		});
+	}
+
+	function openConfigEditor(): void {
+		const currentPane = getFocusedPaneState();
+		if (!currentPane) {
+			return;
+		}
+
+		const nextMode = currentPane.mode;
+		updateFocusedPane({
+			mode: 'editor',
+			previousMode: nextMode,
+			editorState: {
+				filePath: TMUX_CONFIG_PATH,
+				buffer: tmuxConfigStore.fileText,
+				insertMode: true,
+				commandLine: '',
+				isDirty: false
+			},
+			inputValue: ''
+		});
+		triggerInputFocus();
+	}
+
+	function closeConfigEditor(discard = false): void {
+		const currentPane = getFocusedPaneState();
+		if (!currentPane?.editorState) {
+			return;
+		}
+
+		const previousMode = currentPane.previousMode ?? 'default';
+		const historyMessage = discard
+			? `[discarded changes to ${currentPane.editorState.filePath}]`
+			: `[wrote ${currentPane.editorState.filePath}]`;
+
+		updateFocusedPane({
+			mode: previousMode,
+			previousMode: undefined,
+			editorState: undefined
+		});
+
+		addHistory({
+			type: 'system',
+			content: historyMessage,
+			timestamp: Date.now()
+		});
+		triggerInputFocus();
+	}
+
+	function saveConfigEditor(): void {
+		const currentPane = getFocusedPaneState();
+		if (!currentPane?.editorState) {
+			return;
+		}
+
+		tmuxConfigStore.setFileText(currentPane.editorState.buffer);
+		closeConfigEditor(false);
+	}
+
+	function setConfigEditorBuffer(buffer: string): void {
+		const currentPane = getFocusedPaneState();
+		if (!currentPane?.editorState) {
+			return;
+		}
+
+		updateFocusedEditorState({
+			buffer,
+			isDirty: buffer !== tmuxConfigStore.fileText
+		});
+	}
+
+	function setConfigEditorInsertMode(insertMode: boolean): void {
+		updateFocusedEditorState({
+			insertMode
+		});
+	}
+
+	function setConfigEditorCommandLine(commandLine: string): void {
+		updateFocusedEditorState({
+			commandLine
+		});
+	}
+
+	function handleConfigOperation(operation: ConfigOperation): void {
+		if (operation.type !== 'reload') {
+			return;
+		}
+
+		const result = tmuxConfigStore.reloadFromPath(operation.path);
+		if (!result.ok) {
+			addHistory({
+				type: 'error',
+				content: result.error ?? `can't read ${operation.path}`,
+				timestamp: Date.now()
+			});
+			return;
+		}
+
+		addHistory({
+			type: 'system',
+			content: `[tmux config reloaded from ${result.path}]`,
+			timestamp: Date.now()
+		});
+
+		for (const warning of result.warnings) {
+			const warningPrefix = warning.severity === 'error' ? 'error' : 'warning';
+			addHistory({
+				type: warning.severity === 'error' ? 'error' : 'system',
+				content: `[tmux.conf ${warningPrefix}] line ${warning.line}: ${warning.message}`,
+				timestamp: Date.now()
+			});
+		}
+	}
+
 	// ========================================================================
 	// PREFIX MODE
 	// ========================================================================
@@ -1712,6 +1841,106 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	// COMMAND PROCESSING
 	// ========================================================================
 
+	function executeRegisteredTmuxCommand(commandText: string): boolean {
+		if (!focusedPane || focusedPane.mode !== 'tmux') {
+			return false;
+		}
+
+		const execution = executeCommand(commandText, focusedPane.id, focusedPane.mode);
+		if (!execution || !execution.result.handled) {
+			return false;
+		}
+
+		const { result, commandName } = execution;
+
+		if (result.output) {
+			addHistory({
+				type: 'output',
+				content: result.output,
+				timestamp: Date.now()
+			});
+		}
+
+		if (result.error) {
+			addHistory({
+				type: 'error',
+				content: result.error,
+				timestamp: Date.now()
+			});
+		}
+
+		if (result.system) {
+			addHistory({
+				type: 'system',
+				content: result.system,
+				timestamp: Date.now()
+			});
+		}
+
+		if (result.clearHistory) {
+			clearHistory();
+		}
+
+		if (result.newMode) {
+			setMode(result.newMode);
+		}
+
+		if (result.signal) {
+			emitSignal(result.signal.type as TmuxSignalType, result.signal.data);
+		}
+
+		if (result.generateOutput) {
+			const output = generateOutput(result.generateOutput);
+			if (output) {
+				addHistory({ type: 'output', content: output, timestamp: Date.now() });
+			}
+		}
+
+		if (result.exitBehavior === 'close-pane-or-detach') {
+			if (paneCount > 1) {
+				closeFocusedPane();
+				addHistory({
+					type: 'system',
+					content: '[pane closed]',
+					timestamp: Date.now()
+				});
+			} else {
+				const detachedSessionName = detachFromSession();
+				setMode('default');
+				addHistory({
+					type: 'system',
+					content: `[detached (from session ${detachedSessionName ?? '0'})]`,
+					timestamp: Date.now()
+				});
+			}
+		}
+
+		if (result.sessionOperation) {
+			handleSessionOperation(result.sessionOperation);
+		}
+
+		if (result.paneOperation) {
+			handlePaneOperation(result.paneOperation);
+		}
+
+		if (result.windowOperation) {
+			handleWindowOperation(result.windowOperation);
+		}
+
+		if (result.configOperation) {
+			handleConfigOperation(result.configOperation);
+		}
+
+		emitSignal('command-executed', {
+			commandName,
+			command: commandName,
+			paneId: focusedPane.id
+		});
+
+		triggerInputFocus();
+		return true;
+	}
+
 	/**
 	 * Process a command in the focused pane.
 	 * This handles mode switching and command recording.
@@ -1740,6 +1969,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 		// Clear input
 		setInput('');
+
+		if (trimmedCommand === `vi ${TMUX_CONFIG_PATH}` || trimmedCommand === `vim ${TMUX_CONFIG_PATH}`) {
+			openConfigEditor();
+			return;
+		}
 
 		// Handle mode-switching commands in default mode
 		if (focusedPane.mode === 'default') {
@@ -1823,6 +2057,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 						}
 					}
 
+					if (result.configOperation) {
+						handleConfigOperation(result.configOperation);
+					}
+
 					// Handle session operations (attach, new-session, etc.)
 					if (result.sessionOperation) {
 						const op = result.sessionOperation;
@@ -1900,103 +2138,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				return;
 			}
 
-			const execution = executeCommand(trimmedCommand, focusedPane.id, focusedPane.mode);
-
-			if (execution && execution.result.handled) {
-				const { result, commandName } = execution;
-
-				// Apply command result side effects
-				if (result.output) {
-					addHistory({
-						type: 'output',
-						content: result.output,
-						timestamp: Date.now()
-					});
-				}
-
-				if (result.error) {
-					addHistory({
-						type: 'error',
-						content: result.error,
-						timestamp: Date.now()
-					});
-				}
-
-				if (result.system) {
-					addHistory({
-						type: 'system',
-						content: result.system,
-						timestamp: Date.now()
-					});
-				}
-
-				if (result.clearHistory) {
-					clearHistory();
-				}
-
-				if (result.newMode) {
-					setMode(result.newMode);
-				}
-
-				if (result.signal) {
-					emitSignal(result.signal.type as TmuxSignalType, result.signal.data);
-				}
-
-				if (result.generateOutput) {
-					const output = generateOutput(result.generateOutput);
-					if (output) {
-						addHistory({ type: 'output', content: output, timestamp: Date.now() });
-					}
-				}
-
-				// Handle special exit behavior
-				if (result.exitBehavior === 'close-pane-or-detach') {
-					if (paneCount > 1) {
-						// Multiple panes: close current pane and focus another
-						closeFocusedPane();
-						addHistory({
-							type: 'system',
-							content: '[pane closed]',
-							timestamp: Date.now()
-						});
-					} else {
-						// Single pane: detach from tmux session (preserves session in background)
-						const detachedSessionName = detachFromSession();
-						setMode('default');
-						addHistory({
-							type: 'system',
-							content: `[detached (from session ${detachedSessionName ?? '0'})]`,
-							timestamp: Date.now()
-						});
-					}
-				}
-
-				// Handle session operations
-				if (result.sessionOperation) {
-					handleSessionOperation(result.sessionOperation);
-				}
-
-				// Handle pane operations
-				if (result.paneOperation) {
-					handlePaneOperation(result.paneOperation);
-				}
-
-				// Handle window operations
-				if (result.windowOperation) {
-					handleWindowOperation(result.windowOperation);
-				}
-
-				// Emit command-executed signal for challenge tracking (type-safe)
-				// Use commandName as the answer (canonical name like 'list-sessions')
-				// NOT trimmedCommand (which is what user typed like 'tmux ls')
-				emitSignal('command-executed', {
-					commandName,
-					command: commandName,
-					paneId: focusedPane.id
-				});
-
-				// Ensure focus stays on input after command execution
-				triggerInputFocus();
+			if (executeRegisteredTmuxCommand(trimmedCommand)) {
 				return;
 			}
 
@@ -2205,6 +2347,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		exitManMode,
 		setInput,
 		updateFocusedPane,
+		openConfigEditor,
+		closeConfigEditor,
+		saveConfigEditor,
+		setConfigEditorBuffer,
+		setConfigEditorInsertMode,
+		setConfigEditorCommandLine,
 
 		// Prefix mode
 		togglePrefix,
@@ -2213,6 +2361,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 		// Command processing
 		processCommand,
+		executeRegisteredTmuxCommand,
 		executeTmuxCommand,
 
 		// Output generation (for prefix keybindings)

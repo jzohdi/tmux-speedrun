@@ -93,6 +93,10 @@
 					<span>learn step by step</span>
 				</div>
 				<div class="hint">
+					<code>tsr config</code>
+					<span>customize tmux.conf</span>
+				</div>
+				<div class="hint">
 					<code>man tmux</code>
 					<span>command reference</span>
 				</div>

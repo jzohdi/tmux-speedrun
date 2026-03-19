@@ -81,6 +81,7 @@
 		addOutput('  tsr start <num>     Start a challenge (e.g. tsr start 0)');
 		addOutput('  tsr free-play       Practice keybindings in free play mode');
 		addOutput('  tsr practice        Learn tmux commands step by step');
+		addOutput('  tsr config          Edit and apply tmux.conf');
 		addOutput('  man tmux            Show tmux command reference');
 		addOutput('  clear               Clear the terminal');
 		addOutput('  help                Show this help message');
@@ -243,8 +244,14 @@
 				return;
 			}
 
+			if (subcommand === 'config') {
+				addOutput('Opening tmux.conf...');
+				goto('/tmux-conf');
+				return;
+			}
+
 			addOutput(`Unknown subcommand: ${subcommand}`, 'error');
-			addOutput('Available: ls, lb, start, free-play, practice', 'error');
+			addOutput('Available: ls, lb, start, free-play, practice, config', 'error');
 			return;
 		}
 

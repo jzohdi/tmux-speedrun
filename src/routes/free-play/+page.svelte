@@ -88,6 +88,7 @@
 			<a href="/" class="back-link">← Back</a>
 			<h1 class="page-title">Free Play</h1>
 			<span class="page-subtitle">Practice tmux keybindings</span>
+			<a href="/tmux-conf" class="config-link">tmux.conf</a>
 		</header>
 
 		<!-- Terminal Section -->
@@ -221,6 +222,14 @@
 	.page-subtitle {
 		font-size: 14px;
 		color: #666;
+	}
+
+	.config-link {
+		margin-left: auto;
+		font-size: 13px;
+		color: #8be9fd;
+		text-decoration: none;
+		font-family: 'JetBrains Mono', monospace;
 	}
 
 	.terminal-section {

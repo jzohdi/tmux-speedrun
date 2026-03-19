@@ -1,15 +1,9 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import type { Pane, HistoryEntry } from '$lib/utils/pane-tree';
+	import { isPrefixKey } from '$lib/data/keybindings';
+	import { getPaneOverlayText, type PaneOverlay } from '$lib/utils/tmux-overlay';
 	import Manpage from '../Manpage.svelte';
-
-	/**
-	 * Clock overlay state passed down from ChallengeTerminal.
-	 */
-	type ClockState = {
-		paneId: string;
-		timeString: string;
-	};
 
 	type PaneViewProps = {
 		/** The pane data to render */
@@ -18,8 +12,8 @@
 		isFocused: boolean;
 		/** Counter that increments when focus should be refreshed */
 		focusTrigger?: number;
-		/** Clock overlay state - if paneId matches this pane, show the clock */
-		clockState?: ClockState | null;
+		/** Transient overlay state - if this pane has an entry, show it */
+		paneOverlay?: PaneOverlay | null;
 		/** Callback when input changes */
 		onInputChange?: (value: string) => void;
 		/** Callback when Enter is pressed in input */
@@ -28,6 +22,12 @@
 		onFocus?: () => void;
 		/** Callback to exit man mode */
 		onExitMan?: () => void;
+		/** Editor callbacks */
+		onEditorInputChange?: (value: string) => void;
+		onEditorEscape?: () => void;
+		onEditorResumeInsert?: () => void;
+		onEditorCommandChange?: (value: string) => void;
+		onEditorCommandSubmit?: (value: string) => void;
 		/**
 		 * Callback for key events that should be handled by the parent.
 		 * Used for prefix key in tmux mode.
@@ -39,11 +39,16 @@
 		pane,
 		isFocused,
 		focusTrigger,
-		clockState,
+		paneOverlay,
 		onInputChange,
 		onSubmit,
 		onFocus,
 		onExitMan,
+		onEditorInputChange,
+		onEditorEscape,
+		onEditorResumeInsert,
+		onEditorCommandChange,
+		onEditorCommandSubmit,
 		onKeyDown
 	}: PaneViewProps = $props();
 
@@ -51,12 +56,20 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let historyRef = $state<HTMLDivElement | null>(null);
 	let manpageRef = $state<HTMLDivElement | null>(null);
+	let editorRef = $state<HTMLTextAreaElement | null>(null);
+	let editorCommandRef = $state<HTMLInputElement | null>(null);
 
 	// Derived
 	const prompt = $derived(pane.mode === 'tmux' ? '%' : '$');
-	const showInput = $derived(pane.mode !== 'man');
-	const showHistory = $derived(pane.mode !== 'man');
-	const showClock = $derived(clockState?.paneId === pane.id);
+	const showInput = $derived(pane.mode !== 'man' && pane.mode !== 'editor');
+	const showHistory = $derived(pane.mode !== 'man' && pane.mode !== 'editor');
+	const isEditorMode = $derived(pane.mode === 'editor');
+	const editorState = $derived(pane.editorState);
+	const overlayText = $derived(getPaneOverlayText(paneOverlay, pane.id));
+	const showPaneOverlay = $derived(overlayText !== null);
+	const overlayClassName = $derived(
+		paneOverlay?.kind === 'pane-number' ? 'pane-overlay pane-number-overlay' : 'pane-overlay clock-overlay'
+	);
 
 	/**
 	 * Scroll history to bottom.
@@ -75,9 +88,9 @@
 	 * Handle input keydown.
 	 */
 	function handleInputKeyDown(event: KeyboardEvent): void {
-		// Check for prefix key (Ctrl+B) in tmux mode
+		// Check for the configured prefix key in tmux mode
 		// Must intercept this before it reaches browser default behavior
-		if (pane.mode === 'tmux' && event.ctrlKey && event.key.toLowerCase() === 'b') {
+		if (pane.mode === 'tmux' && isPrefixKey(event)) {
 			event.preventDefault();
 			event.stopPropagation();
 			if (onKeyDown) {
@@ -120,7 +133,9 @@
 			onFocus();
 		}
 		// Also directly focus the input
-		if (pane.mode !== 'man') {
+		if (pane.mode === 'editor') {
+			editorRef?.focus();
+		} else if (pane.mode !== 'man') {
 			inputRef?.focus();
 		} else {
 			manpageRef?.focus();
@@ -133,6 +148,62 @@
 	function handleManQuit(): void {
 		if (onExitMan) {
 			onExitMan();
+		}
+	}
+
+	function handleEditorInput(event: Event): void {
+		const target = event.target as HTMLTextAreaElement;
+		onEditorInputChange?.(target.value);
+	}
+
+	function handleEditorKeyDown(event: KeyboardEvent): void {
+		if (!editorState?.insertMode) {
+			event.preventDefault();
+			return;
+		}
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			onEditorEscape?.();
+		}
+	}
+
+	function handleEditorNormalModeKeyDown(event: KeyboardEvent): void {
+		if (editorState?.insertMode) {
+			return;
+		}
+
+		if (event.key === 'i') {
+			event.preventDefault();
+			onEditorResumeInsert?.();
+			return;
+		}
+
+		if (event.key === ':') {
+			event.preventDefault();
+			onEditorCommandChange?.('');
+			requestAnimationFrame(() => {
+				editorCommandRef?.focus();
+			});
+		}
+	}
+
+	function handleEditorCommandInput(event: Event): void {
+		const target = event.target as HTMLInputElement;
+		onEditorCommandChange?.(target.value);
+	}
+
+	function handleEditorCommandKeyDown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			onEditorCommandChange?.('');
+			editorRef?.focus();
+			return;
+		}
+
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			onEditorCommandSubmit?.(editorState?.commandLine ?? '');
 		}
 	}
 
@@ -178,7 +249,7 @@
 			paneMode
 		);
 
-		if (shouldFocus && paneMode !== 'man') {
+		if (shouldFocus && paneMode !== 'man' && paneMode !== 'editor') {
 			// Use tick() to wait for Svelte DOM updates, then focus
 			tick().then(() => {
 				console.debug(
@@ -198,6 +269,16 @@
 			tick().then(() => {
 				manpageRef?.focus();
 			});
+		} else if (shouldFocus && paneMode === 'editor') {
+			tick().then(() => {
+				if (pane.editorState?.insertMode) {
+					editorRef?.focus();
+				} else if (pane.editorState?.commandLine !== '') {
+					editorCommandRef?.focus();
+				} else {
+					editorRef?.focus();
+				}
+			});
 		}
 	});
 
@@ -215,6 +296,8 @@
 		await tick();
 		if (pane.mode === 'man') {
 			manpageRef?.focus();
+		} else if (pane.mode === 'editor') {
+			editorRef?.focus();
 		} else {
 			inputRef?.focus();
 		}
@@ -229,15 +312,50 @@
 	class:man-mode={pane.mode === 'man'}
 	onclick={handleClick}
 >
-	<!-- Clock Overlay (show-time command) -->
-	{#if showClock && clockState}
-		<div class="clock-overlay">
-			{clockState.timeString}
+	<!-- Transient overlay (clock, pane numbers) -->
+	{#if showPaneOverlay && overlayText}
+		<div class={overlayClassName}>
+			{overlayText}
 		</div>
 	{/if}
 
 	{#if pane.mode === 'man'}
 		<Manpage onQuit={handleManQuit} bind:containerRef={manpageRef} />
+	{:else if isEditorMode && editorState}
+		<div class="editor-shell" onkeydown={handleEditorNormalModeKeyDown}>
+			<textarea
+				class="editor-textarea"
+				class:readonly={!editorState.insertMode}
+				bind:this={editorRef}
+				value={editorState.buffer}
+				oninput={handleEditorInput}
+				onkeydown={handleEditorKeyDown}
+				readonly={!editorState.insertMode}
+				spellcheck="false"
+			></textarea>
+			<div class="editor-status">
+				<span class="editor-file">{editorState.filePath}</span>
+				<span class="editor-mode">
+					{editorState.insertMode ? '-- INSERT --' : '-- NORMAL --'}
+				</span>
+				<span class="editor-dirty">{editorState.isDirty ? '[+]' : ''}</span>
+			</div>
+			<div class="editor-command-line">
+				<span class="editor-command-prefix">:</span>
+				<input
+					type="text"
+					class="editor-command-input"
+					bind:this={editorCommandRef}
+					value={editorState.commandLine}
+					oninput={handleEditorCommandInput}
+					onkeydown={handleEditorCommandKeyDown}
+					autocomplete="off"
+					autocorrect="off"
+					autocapitalize="off"
+					spellcheck="false"
+				/>
+			</div>
+		</div>
 	{:else}
 		<!-- History -->
 		{#if showHistory}
@@ -284,8 +402,8 @@
 		border: 1px solid #2d2d2d;
 	}
 
-	/* Clock Overlay (prefix + t / show-time command) */
-	.clock-overlay {
+	/* Shared transient pane overlay */
+	.pane-overlay {
 		position: absolute;
 		inset: 0;
 		display: flex;
@@ -293,10 +411,22 @@
 		align-items: center;
 		background: #1c1c1c;
 		z-index: 10;
+		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
+	}
+
+	.clock-overlay {
 		font-size: 1.7rem;
 		font-weight: 500;
-		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
 		color: #50fa7b;
+	}
+
+	.pane-number-overlay {
+		font-size: 3.2rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		color: #ffb86c;
+		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
+		text-shadow: 0 0 18px rgba(255, 184, 108, 0.2);
 	}
 
 	/* .pane-view.man-mode {
@@ -380,6 +510,79 @@
 
 	.pane-input::placeholder {
 		color: #4d4d4d;
+	}
+
+	.editor-shell {
+		display: flex;
+		flex: 1;
+		min-height: 0;
+		flex-direction: column;
+		background: #111;
+	}
+
+	.editor-textarea {
+		flex: 1;
+		min-height: 0;
+		resize: none;
+		border: none;
+		outline: none;
+		background: #111;
+		color: #e0e0e0;
+		padding: 12px;
+		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
+		font-size: 13px;
+		line-height: 1.5;
+		caret-color: #50fa7b;
+	}
+
+	.editor-textarea.readonly {
+		caret-color: transparent;
+	}
+
+	.editor-status,
+	.editor-command-line {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 6px 10px;
+		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
+		font-size: 12px;
+	}
+
+	.editor-status {
+		background: #1a1a1a;
+		color: #8be9fd;
+		border-top: 1px solid #2d2d2d;
+	}
+
+	.editor-mode {
+		color: #50fa7b;
+	}
+
+	.editor-dirty {
+		margin-left: auto;
+		color: #ffb86c;
+	}
+
+	.editor-command-line {
+		background: #0d0d0d;
+		color: #ffb86c;
+		border-top: 1px solid #222;
+	}
+
+	.editor-command-prefix {
+		font-weight: 700;
+	}
+
+	.editor-command-input {
+		flex: 1;
+		background: transparent;
+		border: none;
+		outline: none;
+		color: inherit;
+		font-family: inherit;
+		font-size: inherit;
+		caret-color: #ffb86c;
 	}
 
 	/* Man mode fills entire pane */

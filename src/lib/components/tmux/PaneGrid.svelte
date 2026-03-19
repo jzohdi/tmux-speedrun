@@ -1,15 +1,8 @@
 <script lang="ts">
 	import { isPane, isSplit, findPaneById, type PaneNode } from '$lib/utils/pane-tree';
+	import type { PaneOverlay } from '$lib/utils/tmux-overlay';
 	import PaneView from './PaneView.svelte';
 	import PaneGrid from './PaneGrid.svelte';
-
-	/**
-	 * Clock overlay state passed down to panes.
-	 */
-	type ClockState = {
-		paneId: string;
-		timeString: string;
-	};
 
 	type PaneGridProps = {
 		/** The pane tree node to render */
@@ -18,8 +11,8 @@
 		focusedPaneId: string;
 		/** Counter that increments when focus should be refreshed */
 		focusTrigger?: number;
-		/** Clock overlay state - shows time on specific pane */
-		clockState?: ClockState | null;
+		/** Transient overlay shown on one or more panes */
+		paneOverlay?: PaneOverlay | null;
 		/** ID of the zoomed pane (when zoomed, only this pane is rendered) */
 		zoomedPaneId?: string | null;
 		/** Callback when input changes in a pane */
@@ -30,6 +23,12 @@
 		onFocusPane?: (paneId: string) => void;
 		/** Callback to exit man mode for a pane */
 		onExitMan?: (paneId: string) => void;
+		/** Editor callbacks */
+		onEditorInputChange?: (paneId: string, value: string) => void;
+		onEditorEscape?: (paneId: string) => void;
+		onEditorResumeInsert?: (paneId: string) => void;
+		onEditorCommandChange?: (paneId: string, value: string) => void;
+		onEditorCommandSubmit?: (paneId: string, value: string) => void;
 		/** Callback for key events to be handled at the top level */
 		onKeyDown?: (event: KeyboardEvent) => void;
 	};
@@ -38,12 +37,17 @@
 		node,
 		focusedPaneId,
 		focusTrigger,
-		clockState,
+		paneOverlay,
 		zoomedPaneId,
 		onInputChange,
 		onSubmit,
 		onFocusPane,
 		onExitMan,
+		onEditorInputChange,
+		onEditorEscape,
+		onEditorResumeInsert,
+		onEditorCommandChange,
+		onEditorCommandSubmit,
 		onKeyDown
 	}: PaneGridProps = $props();
 
@@ -93,6 +97,36 @@
 			}
 		};
 	}
+
+	function handleEditorInputChangeForPane(paneId: string): (value: string) => void {
+		return (value: string) => {
+			onEditorInputChange?.(paneId, value);
+		};
+	}
+
+	function handleEditorEscapeForPane(paneId: string): () => void {
+		return () => {
+			onEditorEscape?.(paneId);
+		};
+	}
+
+	function handleEditorResumeInsertForPane(paneId: string): () => void {
+		return () => {
+			onEditorResumeInsert?.(paneId);
+		};
+	}
+
+	function handleEditorCommandChangeForPane(paneId: string): (value: string) => void {
+		return (value: string) => {
+			onEditorCommandChange?.(paneId, value);
+		};
+	}
+
+	function handleEditorCommandSubmitForPane(paneId: string): (value: string) => void {
+		return (value: string) => {
+			onEditorCommandSubmit?.(paneId, value);
+		};
+	}
 </script>
 
 {#if zoomedPane}
@@ -102,11 +136,16 @@
 			pane={zoomedPane}
 			isFocused={zoomedPane.id === focusedPaneId}
 			{focusTrigger}
-			{clockState}
+			{paneOverlay}
 			onInputChange={handleInputChange(zoomedPane.id)}
 			onSubmit={handleSubmit(zoomedPane.id)}
 			onFocus={handleFocus(zoomedPane.id)}
 			onExitMan={handleExitMan(zoomedPane.id)}
+			onEditorInputChange={handleEditorInputChangeForPane(zoomedPane.id)}
+			onEditorEscape={handleEditorEscapeForPane(zoomedPane.id)}
+			onEditorResumeInsert={handleEditorResumeInsertForPane(zoomedPane.id)}
+			onEditorCommandChange={handleEditorCommandChangeForPane(zoomedPane.id)}
+			onEditorCommandSubmit={handleEditorCommandSubmitForPane(zoomedPane.id)}
 			{onKeyDown}
 		/>
 	</div>
@@ -117,11 +156,16 @@
 			pane={node}
 			isFocused={node.id === focusedPaneId}
 			{focusTrigger}
-			{clockState}
+			{paneOverlay}
 			onInputChange={handleInputChange(node.id)}
 			onSubmit={handleSubmit(node.id)}
 			onFocus={handleFocus(node.id)}
 			onExitMan={handleExitMan(node.id)}
+			onEditorInputChange={handleEditorInputChangeForPane(node.id)}
+			onEditorEscape={handleEditorEscapeForPane(node.id)}
+			onEditorResumeInsert={handleEditorResumeInsertForPane(node.id)}
+			onEditorCommandChange={handleEditorCommandChangeForPane(node.id)}
+			onEditorCommandSubmit={handleEditorCommandSubmitForPane(node.id)}
 			{onKeyDown}
 		/>
 	</div>
@@ -137,12 +181,17 @@
 				node={node.first}
 				{focusedPaneId}
 				{focusTrigger}
-				{clockState}
+				{paneOverlay}
 				{zoomedPaneId}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}
 				{onExitMan}
+				{onEditorInputChange}
+				{onEditorEscape}
+				{onEditorResumeInsert}
+				{onEditorCommandChange}
+				{onEditorCommandSubmit}
 				{onKeyDown}
 			/>
 		</div>
@@ -152,12 +201,17 @@
 				node={node.second}
 				{focusedPaneId}
 				{focusTrigger}
-				{clockState}
+				{paneOverlay}
 				{zoomedPaneId}
 				{onInputChange}
 				{onSubmit}
 				{onFocusPane}
 				{onExitMan}
+				{onEditorInputChange}
+				{onEditorEscape}
+				{onEditorResumeInsert}
+				{onEditorCommandChange}
+				{onEditorCommandSubmit}
 				{onKeyDown}
 			/>
 		</div>

@@ -2,9 +2,20 @@
 	import { tick, onMount, onDestroy } from 'svelte';
 	import { createTmuxStore, type TmuxStore } from '$lib/stores/tmux-state.svelte';
 	import type { TmuxSignal } from '$lib/utils/pane-tree';
-	import { isPrefixKey, lookupKeybinding } from '$lib/data/keybindings';
+	import {
+		getPrefixKeyDisplay,
+		isPrefixKey,
+		lookupKeybinding,
+		type Keybinding
+	} from '$lib/data/keybindings';
 	import { getCommandByName, type TmuxCommand } from '$lib/data/tmux-commands';
 	import { CommandId, type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';
+	import {
+		advanceOverlayDismissal,
+		createClockOverlay,
+		createDisplayPanesOverlay,
+		type PaneOverlay
+	} from '$lib/utils/tmux-overlay';
 	import TabBar from './TabBar.svelte';
 	import PaneGrid from './PaneGrid.svelte';
 	import StatusBar from './StatusBar.svelte';
@@ -48,17 +59,8 @@
 	let containerRef = $state<HTMLDivElement | null>(null);
 	let feedbackMessage = $state<string | null>(null);
 	let feedbackTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
-	let timeState = $state<{
-		interval: NodeJS.Timeout | null;
-		timeString: string;
-		paneId: string; // Which pane should display the clock overlay
-		canCloseYet: boolean; // The keydown binding fires too early, need to store if it can close yet
-	} | null>(null);
-
-	// Derived clock state to pass down to PaneGrid/PaneView
-	const clockState = $derived(
-		timeState ? { paneId: timeState.paneId, timeString: timeState.timeString } : null
-	);
+	let paneOverlay = $state<PaneOverlay | null>(null);
+	let clockInterval = $state<ReturnType<typeof setInterval> | null>(null);
 
 	// Input mode state (for commands that require text input like rename-window)
 	let inputModeCommand = $state<TmuxCommand | null>(null);
@@ -71,6 +73,8 @@
 	// Derived state
 	const isInTmuxMode = $derived(tmux.focusedPane?.mode === 'tmux');
 	const isInManMode = $derived(tmux.focusedPane?.mode === 'man');
+	const isInEditorMode = $derived(tmux.focusedPane?.mode === 'editor');
+	const prefixHint = $derived(getPrefixKeyDisplay());
 	// const isInDefaultMode = $derived(tmux.focusedPane?.mode === 'default');
 	const isInInputMode = $derived(inputModeCommand !== null);
 	const isInConfirmMode = $derived(confirmModeAction !== null);
@@ -332,15 +336,7 @@
 
 			const binding = lookupKeybinding(event);
 			if (binding) {
-				// Handle select-window specially since we need the actual digit pressed
-				if (binding.commandName === CommandId.SELECT_WINDOW) {
-					handleSelectWindowByNumber(event.key);
-				} else if (binding.commandName === CommandId.SWAP_PANE) {
-					// Handle swap-pane specially to determine direction based on key pressed
-					handleSwapPane(event.key);
-				} else {
-					handleKeybinding(binding.commandName);
-				}
+				void handleKeybinding(binding);
 			} else {
 				// Unknown key - show feedback but stay in prefix mode
 				showFeedback(`Unknown: ${event.key}`, 1000);
@@ -353,72 +349,9 @@
 	}
 
 	/**
-	 * Handle select-window command by number (prefix + 0-9).
-	 * @param key - The key pressed (should be '0'-'9')
-	 */
-	function handleSelectWindowByNumber(key: string): void {
-		tmux.deactivatePrefix();
-
-		if (disabled) {
-			showFeedback('Challenge not active');
-			return;
-		}
-
-		const windowIndex = parseInt(key, 10);
-
-		if (isNaN(windowIndex) || windowIndex < 0 || windowIndex > 9) {
-			return;
-		}
-
-		// Check if the window exists
-		if (windowIndex >= tmux.windowCount) {
-			showFeedback(`Window ${windowIndex} does not exist`, 1000);
-			return;
-		}
-
-		// Switch to the window
-		tmux.switchWindow(windowIndex);
-
-		// Emit the command signal for challenge tracking
-		tmux.executeTmuxCommand(CommandId.SELECT_WINDOW);
-	}
-
-	/**
-	 * Handle swap-pane command (prefix + { or }).
-	 * @param key - The key pressed (should be '{' or '}')
-	 */
-	function handleSwapPane(key: string): void {
-		tmux.deactivatePrefix();
-
-		if (disabled) {
-			showFeedback('Challenge not active');
-			return;
-		}
-
-		// Only swap when there are multiple panes
-		if (tmux.paneCount <= 1) {
-			showFeedback('Cannot swap with single pane', 1000);
-			return;
-		}
-
-		// Determine direction based on key pressed
-		if (key === '}') {
-			// Swap with next pane (higher index)
-			tmux.swapPaneWithNext();
-		} else if (key === '{') {
-			// Swap with previous pane (lower index)
-			tmux.swapPaneWithPrevious();
-		}
-
-		// Emit the command signal for challenge tracking
-		tmux.executeTmuxCommand(CommandId.SWAP_PANE);
-	}
-
-	/**
 	 * Handle a detected keybinding command.
-	 * @param commandName - The type-safe command ID from the keybinding
 	 */
-	async function handleKeybinding(commandName: CommandIdType): Promise<void> {
+	async function handleKeybinding(binding: Keybinding): Promise<void> {
 		tmux.deactivatePrefix();
 
 		if (disabled) {
@@ -426,6 +359,7 @@
 			return;
 		}
 
+		const commandName = binding.commandName;
 		const cmd = getCommandByName(commandName);
 		if (!cmd) {
 			return;
@@ -457,11 +391,12 @@
 			return;
 		}
 
-		// Emit the command signal for challenge verification BEFORE executing
-		// (Important: must emit before mode changes like 'detach' which exits tmux mode)
-		tmux.executeTmuxCommand(commandName);
+		if (binding.commandText) {
+			tmux.executeRegisteredTmuxCommand(binding.commandText);
+			return;
+		}
 
-		// Execute commands that affect local state
+		tmux.executeTmuxCommand(commandName);
 		executeLocalCommand(commandName);
 	}
 
@@ -499,9 +434,7 @@
 			case CommandId.KILL_PANE: {
 				// Enter confirmation mode instead of directly killing
 				// Find the index of the focused pane
-				const paneIndex = tmux.allPanesInActiveWindow.findIndex(
-					(p) => p.id === tmux.focusedPaneId
-				);
+				const paneIndex = tmux.allPanesInActiveWindow.findIndex((p) => p.id === tmux.focusedPaneId);
 				confirmModeAction = 'kill-pane';
 				confirmModePaneIndex = paneIndex >= 0 ? paneIndex : 0;
 				// Note: Signal is emitted in handleConfirmAccept when user confirms
@@ -542,8 +475,11 @@
 			// Note: This is handled by handleSelectWindowByNumber() before this function is called
 			case CommandId.SELECT_WINDOW:
 				break;
+			case CommandId.DISPLAY_PANES:
+				showPaneNumbers();
+				break;
 			case CommandId.SHOW_TIME:
-				clearTimestate();
+				clearPaneOverlay();
 				showCurrentTime();
 				break;
 			// Session commands
@@ -563,40 +499,13 @@
 		}
 	}
 
-	/**
-	 * Handle arrow key navigation when prefix is active.
-	 */
-	function handlePrefixArrowKey(event: KeyboardEvent): void {
-		if (!tmux.prefixActive) {
-			return;
+	function clearPaneOverlay(): void {
+		if (clockInterval) {
+			clearInterval(clockInterval);
+			clockInterval = null;
 		}
 
-		const direction = event.key.replace('Arrow', '').toLowerCase() as
-			| 'up'
-			| 'down'
-			| 'left'
-			| 'right';
-
-		console.debug(
-			'[ChallengeTerminal] Arrow navigation - direction:',
-			direction,
-			'currentFocusedPaneId:',
-			tmux.focusedPaneId
-		);
-
-		tmux.moveFocus(direction);
-
-		console.debug('[ChallengeTerminal] After moveFocus - newFocusedPaneId:', tmux.focusedPaneId);
-
-		tmux.deactivatePrefix();
-
-		// Also emit the select-pane command
-		tmux.executeTmuxCommand(CommandId.SELECT_PANE);
-	}
-
-	function clearTimestate(): void {
-		clearInterval(timeState?.interval ?? undefined);
-		timeState = null;
+		paneOverlay = null;
 	}
 
 	function getCurrentTime(): string {
@@ -607,29 +516,41 @@
 	}
 
 	function showCurrentTime(): void {
-		if (timeState?.interval) {
-			clearInterval(timeState.interval);
-		}
+		clearPaneOverlay();
 
 		// which pane triggered the clock command
 		const targetPaneId = tmux.focusedPaneId;
 
 		const interval = setInterval(() => {
-			if (!timeState) {
+			if (!paneOverlay || paneOverlay.kind !== 'clock') {
 				return;
 			}
-			timeState = {
-				...timeState,
-				timeString: getCurrentTime()
-			};
+
+			paneOverlay = createClockOverlay(targetPaneId, getCurrentTime());
 		}, 1000 * 60);
 
-		timeState = {
-			interval,
-			timeString: getCurrentTime(),
-			paneId: targetPaneId,
-			canCloseYet: false
-		};
+		clockInterval = interval;
+		paneOverlay = createClockOverlay(targetPaneId, getCurrentTime());
+	}
+
+	function showPaneNumbers(): void {
+		clearPaneOverlay();
+		paneOverlay = createDisplayPanesOverlay(tmux.allPanesInActiveWindow);
+	}
+
+	function dismissPaneOverlayIfOpen(): boolean {
+		if (!paneOverlay) {
+			return false;
+		}
+
+		const nextOverlay = advanceOverlayDismissal(paneOverlay);
+		if (nextOverlay) {
+			paneOverlay = nextOverlay;
+			return true;
+		}
+
+		clearPaneOverlay();
+		return true;
 	}
 
 	/**
@@ -637,28 +558,16 @@
 	 */
 	function handleKeyDown(event: KeyboardEvent): void {
 		// In man mode, let the pane handle keyboard events
-		if (isInManMode) {
+		if (isInManMode || isInEditorMode) {
 			return;
 		}
 
-		if (timeState && tmux.focusedPaneId === timeState.paneId) {
-			if (timeState.canCloseYet) {
-				clearTimestate();
-			} else {
-				timeState.canCloseYet = true;
-			}
+		if (dismissPaneOverlayIfOpen()) {
 			return;
 		}
 
 		// In tmux mode, handle prefix key
 		if (isInTmuxMode) {
-			// Handle arrow keys for pane navigation when prefix is active
-			if (tmux.prefixActive && event.key.startsWith('Arrow')) {
-				event.preventDefault();
-				handlePrefixArrowKey(event);
-				return;
-			}
-
 			handleTmuxModeKeyDown(event);
 			return;
 		}
@@ -694,6 +603,45 @@
 	 */
 	function handlePaneFocus(paneId: string): void {
 		tmux.focusPane(paneId);
+	}
+
+	function handleEditorInputChange(paneId: string, value: string): void {
+		tmux.focusPane(paneId);
+		tmux.setConfigEditorBuffer(value);
+	}
+
+	function handleEditorEscape(paneId: string): void {
+		tmux.focusPane(paneId);
+		tmux.setConfigEditorInsertMode(false);
+		tmux.setConfigEditorCommandLine('');
+	}
+
+	function handleEditorResumeInsert(paneId: string): void {
+		tmux.focusPane(paneId);
+		tmux.setConfigEditorInsertMode(true);
+		tmux.setConfigEditorCommandLine('');
+	}
+
+	function handleEditorCommandChange(paneId: string, value: string): void {
+		tmux.focusPane(paneId);
+		tmux.setConfigEditorCommandLine(value);
+	}
+
+	function handleEditorCommandSubmit(paneId: string, value: string): void {
+		tmux.focusPane(paneId);
+		const trimmedValue = value.trim();
+		if (trimmedValue === 'wq') {
+			tmux.saveConfigEditor();
+			return;
+		}
+
+		if (trimmedValue === 'q!') {
+			tmux.closeConfigEditor(true);
+			return;
+		}
+
+		showFeedback(`Unsupported editor command: ${trimmedValue || ':'}`, 1200);
+		tmux.setConfigEditorCommandLine('');
 	}
 
 	/**
@@ -735,15 +683,14 @@
 		await tick();
 		// Use requestAnimationFrame to ensure browser has rendered
 		requestAnimationFrame(() => {
-			// Focus the input in the currently focused pane (has .focused class)
-			const focusedPaneInput = containerRef?.querySelector(
-				'.pane-view.focused input'
-			) as HTMLInputElement | null;
-			if (focusedPaneInput) {
-				focusedPaneInput.focus();
+			const focusedPaneField = containerRef?.querySelector(
+				'.pane-view.focused input, .pane-view.focused textarea'
+			) as HTMLElement | null;
+			if (focusedPaneField) {
+				focusedPaneField.focus();
 			} else {
-				// Fallback to first input if no focused pane found
-				containerRef?.querySelector('input')?.focus();
+				const fallbackField = containerRef?.querySelector('input, textarea') as HTMLElement | null;
+				fallbackField?.focus();
 			}
 		});
 	}
@@ -763,6 +710,7 @@
 	 * Reset the terminal to initial state.
 	 */
 	export function reset(): void {
+		clearPaneOverlay();
 		tmux.reset();
 		inputModeCommand = null;
 		inputModeValue = '';
@@ -787,7 +735,7 @@
 	});
 
 	onDestroy(() => {
-		clearTimestate();
+		clearPaneOverlay();
 	});
 </script>
 
@@ -802,7 +750,7 @@
 	onkeydown={handleKeyDown}
 	tabindex="0"
 	role="application"
-	aria-label="Challenge terminal - press Ctrl+b for prefix"
+	aria-label={`Challenge terminal - press ${prefixHint} for prefix`}
 >
 	<!-- Terminal Header -->
 	<div class="terminal-header">
@@ -814,6 +762,8 @@
 		<span class="terminal-title">
 			{#if isInManMode}
 				man tmux
+			{:else if isInEditorMode}
+				vi {tmux.focusedPane?.editorState?.filePath ?? '~/.tmux.conf'}
 			{:else if isInTmuxMode}
 				tmux: {tmux.activeWindow?.name ?? 'main'}
 			{:else}
@@ -853,11 +803,16 @@
 				focusedPaneId={tmux.focusedPaneId}
 				focusTrigger={tmux.focusTrigger}
 				zoomedPaneId={tmux.zoomedPaneId}
-				{clockState}
+				{paneOverlay}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
 				onFocusPane={handlePaneFocus}
 				onExitMan={handleExitMan}
+				onEditorInputChange={handleEditorInputChange}
+				onEditorEscape={handleEditorEscape}
+				onEditorResumeInsert={handleEditorResumeInsert}
+				onEditorCommandChange={handleEditorCommandChange}
+				onEditorCommandSubmit={handleEditorCommandSubmit}
 				onKeyDown={handleKeyDown}
 			/>
 		{:else if tmux.focusedPane}
@@ -866,11 +821,16 @@
 				node={tmux.focusedPane}
 				focusedPaneId={tmux.focusedPaneId}
 				focusTrigger={tmux.focusTrigger}
-				{clockState}
+				{paneOverlay}
 				onInputChange={handlePaneInputChange}
 				onSubmit={handlePaneSubmit}
 				onFocusPane={handlePaneFocus}
 				onExitMan={handleExitMan}
+				onEditorInputChange={handleEditorInputChange}
+				onEditorEscape={handleEditorEscape}
+				onEditorResumeInsert={handleEditorResumeInsert}
+				onEditorCommandChange={handleEditorCommandChange}
+				onEditorCommandSubmit={handleEditorCommandSubmit}
 				onKeyDown={handleKeyDown}
 			/>
 		{/if}
