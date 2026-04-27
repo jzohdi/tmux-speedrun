@@ -830,11 +830,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				break;
 			}
 			case 'close': {
-				const success = closeWindow(operation.index);
+				const targetIndex = operation.index ?? activeWindowIndex;
+				const success = killWindow(operation.index);
 				if (!success) {
 					addHistory({
 						type: 'error',
-						content: "can't kill last window",
+						content: `window ${targetIndex} not found`,
 						timestamp: Date.now()
 					});
 				}
@@ -911,30 +912,34 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 	/**
 	 * Close a window by index.
-	 * Cannot close if it's the last window.
+	 * This low-level helper refuses to close the last remaining window.
 	 *
 	 * @param index - Window index to close (defaults to active window)
-	 * @returns true if closed, false if refused (last window)
+	 * @returns true if closed, false if the index is invalid or it is the last window
 	 */
 	function closeWindow(index?: number): boolean {
-		if (!attachedSession) {
+		const currentSession = attachedSession;
+		if (!currentSession) {
 			return false;
 		}
 
-		const targetIndex = index ?? attachedSession.activeWindowIndex;
+		const targetIndex = index ?? currentSession.activeWindowIndex;
+		if (targetIndex < 0 || targetIndex >= currentSession.windows.length) {
+			return false;
+		}
 
 		// Guard: cannot close last window
-		if (attachedSession.windows.length <= 1) {
+		if (currentSession.windows.length <= 1) {
 			return false;
 		}
 
-		const closedWindow = attachedSession.windows[targetIndex];
-		const newWindows = attachedSession.windows.filter((_, i) => i !== targetIndex);
+		const closedWindow = currentSession.windows[targetIndex];
+		const newWindows = currentSession.windows.filter((_, i) => i !== targetIndex);
 
 		// Adjust active index if needed
-		let newActiveIndex = attachedSession.activeWindowIndex;
-		if (targetIndex <= attachedSession.activeWindowIndex) {
-			newActiveIndex = Math.max(0, attachedSession.activeWindowIndex - 1);
+		let newActiveIndex = currentSession.activeWindowIndex;
+		if (targetIndex <= currentSession.activeWindowIndex) {
+			newActiveIndex = Math.max(0, currentSession.activeWindowIndex - 1);
 		}
 		if (newActiveIndex >= newWindows.length) {
 			newActiveIndex = newWindows.length - 1;
@@ -955,6 +960,72 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		triggerInputFocus();
 
 		return true;
+	}
+
+	/**
+	 * Kill the attached session and always return to the default shell.
+	 * Unlike kill-session, this does not auto-attach to another remaining session.
+	 *
+	 * @returns The killed session name, or null if no session was attached
+	 */
+	function killAttachedSessionAndDetach(): string | null {
+		const currentAttachedIndex = state.attachedSessionIndex;
+		if (currentAttachedIndex === null) {
+			return null;
+		}
+
+		const killedSession = state.sessions[currentAttachedIndex];
+
+		state = {
+			...state,
+			sessions: state.sessions.filter((_, index) => index !== currentAttachedIndex),
+			attachedSessionIndex: null
+		};
+
+		emitSignal('session-killed', {
+			sessionId: killedSession.id,
+			sessionName: killedSession.name
+		});
+
+		triggerInputFocus();
+
+		return killedSession.name;
+	}
+
+	/**
+	 * Kill a window by index.
+	 * If the target is the session's last window, destroy the session and exit tmux mode.
+	 *
+	 * @param index - Window index to kill (defaults to active window)
+	 * @returns true if the command succeeded
+	 */
+	function killWindow(index?: number): boolean {
+		const currentSession = attachedSession;
+		if (!currentSession) {
+			return false;
+		}
+
+		const targetIndex = index ?? currentSession.activeWindowIndex;
+		if (targetIndex < 0 || targetIndex >= currentSession.windows.length) {
+			return false;
+		}
+
+		if (currentSession.windows.length === 1) {
+			const killedSessionName = killAttachedSessionAndDetach();
+			if (killedSessionName === null) {
+				return false;
+			}
+
+			addHistory({
+				type: 'system',
+				content: `[killed session ${killedSessionName}]`,
+				timestamp: Date.now()
+			});
+
+			return true;
+		}
+
+		return closeWindow(targetIndex);
 	}
 
 	/**
@@ -2320,6 +2391,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 		// Window operations
 		createWindow: createNewWindow,
+		killWindow,
 		closeWindow,
 		switchWindow,
 		nextWindow,

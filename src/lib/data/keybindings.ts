@@ -17,6 +17,8 @@ import { type CommandIdType } from '$lib/utils/tmux-commands';
 
 export type Keybinding = TmuxConfigBinding;
 
+const MODIFIER_ONLY_KEYS = new Set(['Alt', 'AltGraph', 'Control', 'Meta', 'OS', 'Shift']);
+
 const DEFAULT_PREFIX_KEY: TmuxBindingKey = {
 	key: 'b',
 	withCtrl: true,
@@ -120,6 +122,10 @@ export function eventToBindingKey(event: KeyboardEvent): string {
 	parts.push(event.key);
 
 	return parts.join('+');
+}
+
+export function isModifierOnlyKey(event: KeyboardEvent): boolean {
+	return MODIFIER_ONLY_KEYS.has(event.key);
 }
 
 function buildEffectiveKeybindingMap(): Map<string, Keybinding> {

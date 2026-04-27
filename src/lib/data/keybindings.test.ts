@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
 import {
 	isPrefixKey,
+	isModifierOnlyKey,
 	lookupKeybinding,
 	getKeybindingsForCommand,
 	hasPrefixKeybinding,
@@ -110,6 +111,21 @@ describe('Keybindings', () => {
 		it('should return Ctrl+Arrow', () => {
 			const event = createKeyEvent('ArrowLeft', { ctrlKey: true });
 			expect(eventToBindingKey(event)).toBe('Ctrl+ArrowLeft');
+		});
+	});
+
+	describe('isModifierOnlyKey', () => {
+		it('should return true for modifier-only keys', () => {
+			expect(isModifierOnlyKey(createKeyEvent('Shift'))).toBe(true);
+			expect(isModifierOnlyKey(createKeyEvent('Control'))).toBe(true);
+			expect(isModifierOnlyKey(createKeyEvent('Alt'))).toBe(true);
+			expect(isModifierOnlyKey(createKeyEvent('Meta'))).toBe(true);
+		});
+
+		it('should return false for command keys', () => {
+			expect(isModifierOnlyKey(createKeyEvent('%'))).toBe(false);
+			expect(isModifierOnlyKey(createKeyEvent('o', { ctrlKey: true }))).toBe(false);
+			expect(isModifierOnlyKey(createKeyEvent('ArrowUp'))).toBe(false);
 		});
 	});
 

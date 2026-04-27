@@ -861,7 +861,7 @@ registerCommand({
 	name: CommandId.KILL_WINDOW,
 	matchPatterns: ['kill-window', 'killw'],
 	matchMode: 'prefix',
-	description: 'Kill the current window',
+	description: 'Kill the current window, or kill the session if it is the last window',
 	handler: (ctx) => {
 		// Parse optional -t <index> argument
 		const tIndex = ctx.args.indexOf('-t');

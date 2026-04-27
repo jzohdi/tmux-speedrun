@@ -386,7 +386,8 @@
 		<!-- Help Text -->
 		<div class="help-text">
 			<p>
-				<strong>Tip:</strong> Type <code>tmux</code> to enter tmux mode, or edit
+				<strong>Tip: After leaving a tmux session, </strong> Type <code>tmux</code> to enter tmux
+				mode, or edit
 				<a href="/tmux-conf">tmux.conf</a> to practice your custom bindings.
 			</p>
 		</div>

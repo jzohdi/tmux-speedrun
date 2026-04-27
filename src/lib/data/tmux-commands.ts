@@ -104,7 +104,7 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 	{
 		name: 'kill-window',
 		shortcut: 'prefix + &',
-		description: 'Kill the current window',
+		description: 'Kill the current window, or kill the session if it is the last window',
 		difficulty: 'intermediate',
 		category: 'window'
 	},

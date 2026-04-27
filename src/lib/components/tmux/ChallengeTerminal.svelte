@@ -4,6 +4,7 @@
 	import type { TmuxSignal } from '$lib/utils/pane-tree';
 	import {
 		getPrefixKeyDisplay,
+		isModifierOnlyKey,
 		isPrefixKey,
 		lookupKeybinding,
 		type Keybinding
@@ -332,6 +333,11 @@
 
 		// If prefix is active, look up the keybinding
 		if (tmux.prefixActive) {
+			// Ignore standalone modifier keydowns while waiting for the real command key.
+			if (isModifierOnlyKey(event)) {
+				return;
+			}
+
 			event.preventDefault();
 
 			const binding = lookupKeybinding(event);
@@ -417,7 +423,7 @@
 				tmux.previousWindow();
 				break;
 			case CommandId.KILL_WINDOW:
-				tmux.closeWindow();
+				tmux.killWindow();
 				break;
 			case CommandId.LIST_WINDOWS:
 				// Output window list to history (same format as 'tmux lsw')
