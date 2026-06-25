@@ -136,7 +136,7 @@
 						{#each keybindingPreview as binding}
 							<li>
 								<code>{formatBinding(binding)}</code>
-								<span>{binding.commandName}</span>
+								<span>{binding.kind === 'command' ? binding.commandName : binding.action}</span>
 							</li>
 						{/each}
 					</ul>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createTmuxStore } from './tmux-state.svelte';
 import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
+import { createPane, createSession, createWindow, findPaneById } from '$lib/utils/pane-tree';
 
 describe('createTmuxStore session killing', () => {
 	it('allows killing the last remaining session', async () => {
@@ -194,5 +195,148 @@ describe('createTmuxStore reload config command', () => {
 		expect(commandNames).toContain('split-vertical');
 		expect(commandNames).not.toContain('split-horizontal');
 		expect(store.paneCount).toBe(2);
+	});
+});
+
+describe('createTmuxStore copy mode foundations', () => {
+	it('creates and clears copy mode state for the focused pane', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		const copyState = store.enterCopyMode({
+			initialState: {
+				cursor: { row: 3, column: 7 },
+				viewportTopRow: 2
+			}
+		});
+
+		expect(copyState.activeKeyTable).toBe('copy-mode');
+		expect(store.focusedPane?.copyState).toEqual({
+			activeKeyTable: 'copy-mode',
+			cursor: { row: 3, column: 7 },
+			viewportTopRow: 2,
+			selectionAnchor: null,
+			dragAnchor: null
+		});
+
+		store.exitCopyMode();
+
+		expect(store.focusedPane?.copyState).toBeNull();
+	});
+
+	it('uses copy-mode-vi when tmux.conf sets mode-keys to vi', () => {
+		tmuxConfigStore.resetForTesting();
+		tmuxConfigStore.setFileText('set -g mode-keys vi');
+		tmuxConfigStore.applySavedConfig();
+		const store = createTmuxStore();
+
+		store.enterCopyMode();
+
+		expect(store.focusedPane?.copyState?.activeKeyTable).toBe('copy-mode-vi');
+	});
+
+	it('clears copy selection while preserving cursor position', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.enterCopyMode({
+			initialState: {
+				cursor: { row: 5, column: 9 },
+				selectionAnchor: { row: 2, column: 1 },
+				dragAnchor: { row: 4, column: 3 }
+			}
+		});
+
+		store.clearCopySelection();
+
+		expect(store.focusedPane?.copyState).toEqual({
+			activeKeyTable: 'copy-mode',
+			cursor: { row: 5, column: 9 },
+			viewportTopRow: 0,
+			selectionAnchor: null,
+			dragAnchor: null
+		});
+	});
+
+	it('preserves copy mode state on the original pane across window switching', () => {
+		tmuxConfigStore.resetForTesting();
+		const firstSession = createSession('0');
+		const originalPane = firstSession.windows[0]?.paneTree;
+		if (!originalPane || originalPane.type !== 'pane') {
+			throw new Error('Expected first session to start with a pane');
+		}
+
+		originalPane.copyState = {
+			activeKeyTable: 'copy-mode-vi',
+			cursor: { row: 8, column: 2 },
+			viewportTopRow: 0,
+			selectionAnchor: null,
+			dragAnchor: null
+		};
+
+		const secondWindow = createWindow('notes');
+		const store = createTmuxStore({
+			initialState: {
+				sessions: [
+					{
+						...firstSession,
+						windows: [firstSession.windows[0], secondWindow]
+					}
+				],
+				attachedSessionIndex: 0,
+				shellPane: createPane('default'),
+				pasteBuffers: []
+			}
+		});
+		const originalPaneId = originalPane.id;
+
+		store.switchWindow(1);
+
+		expect(store.focusedPane?.copyState).toBeNull();
+
+		store.switchWindow(0);
+
+		const restoredPane = findPaneById(store.windows[0].paneTree, originalPaneId);
+
+		expect(restoredPane?.copyState).toEqual({
+			activeKeyTable: 'copy-mode-vi',
+			cursor: { row: 8, column: 2 },
+			viewportTopRow: 0,
+			selectionAnchor: null,
+			dragAnchor: null
+		});
+	});
+});
+
+describe('createTmuxStore paste buffer foundations', () => {
+	it('stores newest paste buffers first with generated names', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		const firstBuffer = store.pushPasteBuffer('alpha');
+		const secondBuffer = store.pushPasteBuffer('beta');
+
+		expect(firstBuffer?.name).toBe('buffer0001');
+		expect(secondBuffer?.name).toBe('buffer0002');
+		expect(store.latestPasteBuffer).toEqual(secondBuffer);
+		expect(store.pasteBuffers.map((buffer) => buffer.content)).toEqual(['beta', 'alpha']);
+	});
+
+	it('keeps paste buffers across session changes and clears them on reset', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.pushPasteBuffer('copied-text');
+		store.createSession('worktree', true);
+		store.detachSession();
+		store.attachSession('0');
+
+		expect(store.latestPasteBuffer?.content).toBe('copied-text');
+
+		store.reset();
+
+		expect(store.pasteBuffers).toEqual([]);
+		expect(store.latestPasteBuffer).toBeNull();
+		expect(store.focusedPane?.copyState).toBeNull();
 	});
 });

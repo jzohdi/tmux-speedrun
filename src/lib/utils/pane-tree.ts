@@ -19,6 +19,27 @@
  */
 export type PaneMode = 'default' | 'tmux' | 'man' | 'editor';
 
+export type CopyModeKeyTable = 'copy-mode' | 'copy-mode-vi';
+
+export type PaneCopyCursor = {
+	row: number;
+	column: number;
+};
+
+export type PaneCopyState = {
+	activeKeyTable: CopyModeKeyTable;
+	cursor: PaneCopyCursor;
+	viewportTopRow: number;
+	selectionAnchor: PaneCopyCursor | null;
+	dragAnchor: PaneCopyCursor | null;
+};
+
+export type TmuxPasteBuffer = {
+	name: string;
+	content: string;
+	createdAt: number;
+};
+
 /**
  * History entry types for pane output.
  */
@@ -46,6 +67,7 @@ export type Pane = {
 	/** The mode before entering man mode (for restoring when exiting man) */
 	previousMode?: PaneMode;
 	inputValue: string;
+	copyState: PaneCopyState | null;
 	editorState?: PaneEditorState;
 	/**
 	 * The order in which this pane was created within its window.
@@ -133,6 +155,7 @@ export type TmuxState = {
 	 * This represents the default shell outside of tmux.
 	 */
 	shellPane: Pane;
+	pasteBuffers: TmuxPasteBuffer[];
 };
 
 /**
@@ -141,6 +164,7 @@ export type TmuxState = {
 export type TmuxSignalType =
 	| 'command' // User executed an unrecognized command
 	| 'command-executed' // User executed a recognized command (for challenge tracking)
+	| 'practice-step' // Practice-only granular sequence step
 	| 'session-created' // New session created
 	| 'session-attached' // Attached to a session
 	| 'session-detached' // Detached from a session
@@ -194,6 +218,7 @@ let sessionIdCounter = 0;
  * Used by rotate-panes to determine rotation sequence.
  */
 let paneCreationIndexCounter = 0;
+let pasteBufferCounter = 0;
 
 /**
  * Generate a unique pane ID.
@@ -231,6 +256,12 @@ export function generateSessionId(): string {
 	return `session-${sessionIdCounter++}`;
 }
 
+export function generatePasteBufferName(): string {
+	const bufferId = String(pasteBufferCounter + 1).padStart(4, '0');
+	pasteBufferCounter++;
+	return `buffer${bufferId}`;
+}
+
 /**
  * Reset ID counters (useful for testing).
  */
@@ -240,6 +271,7 @@ export function resetIdCounters(): void {
 	splitIdCounter = 0;
 	sessionIdCounter = 0;
 	paneCreationIndexCounter = 0;
+	pasteBufferCounter = 0;
 }
 
 // ============================================================================
@@ -256,6 +288,7 @@ export function createPane(mode: PaneMode = 'default'): Pane {
 		history: [],
 		mode,
 		inputValue: '',
+		copyState: null,
 		creationIndex: getNextCreationIndex()
 	};
 }
@@ -304,7 +337,8 @@ export function createInitialState(): TmuxState {
 	return {
 		sessions: [session],
 		attachedSessionIndex: 0,
-		shellPane
+		shellPane,
+		pasteBuffers: []
 	};
 }
 
@@ -826,6 +860,7 @@ export type PaneContent = {
 	mode: PaneMode;
 	previousMode?: PaneMode;
 	inputValue: string;
+	copyState: PaneCopyState | null;
 	editorState?: PaneEditorState;
 };
 
@@ -838,6 +873,7 @@ function extractPaneContent(pane: Pane): PaneContent {
 		mode: pane.mode,
 		previousMode: pane.previousMode,
 		inputValue: pane.inputValue,
+		copyState: pane.copyState,
 		editorState: pane.editorState
 	};
 }
@@ -894,6 +930,7 @@ export function rotatePanes(root: PaneNode): PaneNode {
 					mode: newContent.mode,
 					previousMode: newContent.previousMode,
 					inputValue: newContent.inputValue,
+					copyState: newContent.copyState,
 					editorState: newContent.editorState
 				};
 			}
@@ -949,6 +986,7 @@ export function swapPaneContent(root: PaneNode, paneId1: string, paneId2: string
 					mode: newContent.mode,
 					previousMode: newContent.previousMode,
 					inputValue: newContent.inputValue,
+					copyState: newContent.copyState,
 					editorState: newContent.editorState
 				};
 			}

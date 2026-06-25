@@ -29,6 +29,10 @@ import {
 	getCommandsWithVariations,
 	PROMPT_VARIATIONS
 } from './prompt-variations';
+import {
+	COPY_PASTE_SEQUENCE_ACTION,
+	createCopyPasteSequenceAction
+} from '$lib/utils/tmux-copy-sequence';
 
 /**
  * Random String Generator Tests
@@ -240,6 +244,30 @@ describe('Instruction Generation', () => {
 			const minRequired = getMinInputCommands(challengeId);
 
 			expect(meetsInputRequirement(instructions, minRequired)).toBe(true);
+		}
+	});
+
+	it('adds the copy-paste sequence only in advanced challenges and never standalone copy or paste steps', () => {
+		const challengeThreeInstructions = generateInstructions(3);
+		expect(
+			challengeThreeInstructions.some((instruction) =>
+				instruction.expectedAction.startsWith(`${COPY_PASTE_SEQUENCE_ACTION}:`)
+			)
+		).toBe(false);
+
+		for (const challengeId of [4, 5]) {
+			const instructions = generateInstructions(challengeId);
+			const compositeInstructions = instructions.filter((instruction) =>
+				instruction.expectedAction.startsWith(`${COPY_PASTE_SEQUENCE_ACTION}:`)
+			);
+
+			expect(compositeInstructions).toHaveLength(1);
+			expect(instructions.some((instruction) => instruction.expectedAction === 'copy-mode')).toBe(false);
+			expect(instructions.some((instruction) => instruction.expectedAction === 'paste-buffer')).toBe(false);
+			expect(compositeInstructions[0].seedInput).toBeDefined();
+			expect(compositeInstructions[0].expectedAction).toBe(
+				createCopyPasteSequenceAction(compositeInstructions[0].seedInput!)
+			);
 		}
 	});
 

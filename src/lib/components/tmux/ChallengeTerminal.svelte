@@ -12,6 +12,13 @@
 	import { getCommandByName, type TmuxCommand } from '$lib/data/tmux-commands';
 	import { CommandId, type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';
 	import {
+		createCopySurface,
+		extractCopySurfaceText,
+		moveCopyCursor
+	} from '$lib/utils/tmux-copy-surface';
+	import { createCopyPasteSequenceAction } from '$lib/utils/tmux-copy-sequence';
+	import type { CopyModeAction } from '$lib/utils/tmux-conf';
+	import {
 		advanceOverlayDismissal,
 		createClockOverlay,
 		createDisplayPanesOverlay,
@@ -75,6 +82,7 @@
 	const isInTmuxMode = $derived(tmux.focusedPane?.mode === 'tmux');
 	const isInManMode = $derived(tmux.focusedPane?.mode === 'man');
 	const isInEditorMode = $derived(tmux.focusedPane?.mode === 'editor');
+	const isInCopyMode = $derived(tmux.focusedPane?.copyState !== null);
 	const prefixHint = $derived(getPrefixKeyDisplay());
 	// const isInDefaultMode = $derived(tmux.focusedPane?.mode === 'default');
 	const isInInputMode = $derived(inputModeCommand !== null);
@@ -272,6 +280,79 @@
 		}
 	}
 
+	function focusTerminalContainer(): void {
+		requestAnimationFrame(() => {
+			containerRef?.focus();
+		});
+	}
+
+	function exitCopyMode(options: { restoreFocus?: boolean } = {}): void {
+		const { restoreFocus = true } = options;
+
+		tmux.exitCopyMode();
+
+		if (!restoreFocus) {
+			return;
+		}
+
+		restoreFocusAfterInputMode();
+	}
+
+	function submitCopyModeCommandLine(): void {
+		const focusedPane = tmux.focusedPane;
+
+		if (!focusedPane) {
+			return;
+		}
+
+		exitCopyMode({ restoreFocus: false });
+		handlePaneSubmit(focusedPane.id, focusedPane.inputValue);
+	}
+
+	function getFocusedPaneInput(): HTMLInputElement | null {
+		return containerRef?.querySelector('.pane-view.focused .pane-input') ?? null;
+	}
+
+	function getFocusedPaneInputSelection(): { start: number; end: number } {
+		const input = getFocusedPaneInput();
+
+		if (!input) {
+			const inputLength = tmux.focusedPane?.inputValue.length ?? 0;
+
+			return {
+				start: inputLength,
+				end: inputLength
+			};
+		}
+
+		return {
+			start: input.selectionStart ?? input.value.length,
+			end: input.selectionEnd ?? input.value.length
+		};
+	}
+
+	function restoreFocusedPaneInputSelection(position: number): void {
+		requestAnimationFrame(() => {
+			const input = getFocusedPaneInput();
+			input?.focus();
+			input?.setSelectionRange(position, position);
+		});
+	}
+
+	function emitCompositeSequenceSignal(command: string): void {
+		onSignal?.({
+			type: 'command-executed',
+			command
+		});
+	}
+
+	function emitPracticeStepSignal(command: string): void {
+		onSignal?.({
+			type: 'practice-step',
+			command
+		});
+	}
+
 	/**
 	 * Handle keydown in input mode (for commands like rename-window).
 	 * @deprecated Use StatusBar inline input instead - this is kept for legacy overlay support
@@ -305,6 +386,132 @@
 			event.preventDefault();
 			handleConfirmReject();
 			return;
+		}
+	}
+
+	function handleCopyModeKeyDown(event: KeyboardEvent): void {
+		const isPlainShortcut = !event.ctrlKey && !event.altKey && !event.metaKey;
+
+		if (isPlainShortcut && event.key.toLowerCase() === 'q') {
+			event.preventDefault();
+			exitCopyMode();
+			return;
+		}
+
+		if (isPlainShortcut && event.key === 'Enter') {
+			event.preventDefault();
+			submitCopyModeCommandLine();
+			return;
+		}
+
+		const activeKeyTable = tmux.focusedPane?.copyState?.activeKeyTable;
+
+		if (!activeKeyTable) {
+			return;
+		}
+
+		const binding = lookupKeybinding(event, activeKeyTable);
+
+		if (!binding || binding.kind !== 'copy-mode-action') {
+			if (!isModifierOnlyKey(event)) {
+				event.preventDefault();
+			}
+			return;
+		}
+
+		event.preventDefault();
+		executeCopyModeAction(binding.action);
+	}
+
+	function executeCopyModeAction(action: CopyModeAction): void {
+		const focusedPane = tmux.focusedPane;
+		const copyState = focusedPane?.copyState;
+
+		if (!focusedPane || !copyState) {
+			return;
+		}
+
+		const copySurface = createCopySurface(focusedPane);
+
+		switch (action) {
+			case 'cancel':
+				exitCopyMode();
+				return;
+			case 'clear-selection':
+				tmux.clearCopySelection();
+				emitPracticeStepSignal(action);
+				return;
+			case 'begin-selection':
+				tmux.setPaneCopyState({
+					...copyState,
+					selectionAnchor: copyState.cursor,
+					dragAnchor: null
+				});
+				emitPracticeStepSignal(action);
+				return;
+			case 'copy-selection-and-cancel': {
+				if (!copyState.selectionAnchor) {
+					showFeedback('Start selection first', 1200);
+					return;
+				}
+
+				const copiedText = extractCopySurfaceText(
+					copySurface,
+					copyState.selectionAnchor,
+					copyState.cursor
+				);
+				const buffer = tmux.pushPasteBuffer(copiedText);
+
+				exitCopyMode();
+
+				if (buffer) {
+					showFeedback(`Copied to ${buffer.name}`, 1200);
+				}
+				emitPracticeStepSignal(action);
+				return;
+			}
+			case 'cursor-left':
+				tmux.setPaneCopyState({
+					...copyState,
+					cursor: moveCopyCursor(copySurface, copyState.cursor, 'left')
+				});
+				emitPracticeStepSignal(action);
+				return;
+			case 'cursor-right':
+				tmux.setPaneCopyState({
+					...copyState,
+					cursor: moveCopyCursor(copySurface, copyState.cursor, 'right')
+				});
+				emitPracticeStepSignal(action);
+				return;
+			case 'cursor-up':
+				tmux.setPaneCopyState({
+					...copyState,
+					cursor: moveCopyCursor(copySurface, copyState.cursor, 'up')
+				});
+				emitPracticeStepSignal(action);
+				return;
+			case 'cursor-down':
+				tmux.setPaneCopyState({
+					...copyState,
+					cursor: moveCopyCursor(copySurface, copyState.cursor, 'down')
+				});
+				emitPracticeStepSignal(action);
+				return;
+			case 'start-of-line':
+				tmux.setPaneCopyState({
+					...copyState,
+					cursor: moveCopyCursor(copySurface, copyState.cursor, 'home')
+				});
+				emitPracticeStepSignal(action);
+				return;
+			case 'end-of-line':
+				tmux.setPaneCopyState({
+					...copyState,
+					cursor: moveCopyCursor(copySurface, copyState.cursor, 'end')
+				});
+				emitPracticeStepSignal(action);
+				return;
 		}
 	}
 
@@ -365,6 +572,10 @@
 			return;
 		}
 
+		if (binding.kind !== 'command') {
+			return;
+		}
+
 		const commandName = binding.commandName;
 		const cmd = getCommandByName(commandName);
 		if (!cmd) {
@@ -393,6 +604,11 @@
 		// Check if command requires confirmation (kill-pane)
 		// Don't emit signal yet - will emit when user confirms
 		if (commandName === CommandId.KILL_PANE) {
+			executeLocalCommand(commandName);
+			return;
+		}
+
+		if (commandName === CommandId.COPY_MODE || commandName === CommandId.PASTE_BUFFER) {
 			executeLocalCommand(commandName);
 			return;
 		}
@@ -488,6 +704,56 @@
 				clearPaneOverlay();
 				showCurrentTime();
 				break;
+			case CommandId.COPY_MODE: {
+				if (!tmux.focusedPane) {
+					break;
+				}
+
+				const copySurface = createCopySurface(tmux.focusedPane);
+				const lastRow = copySurface.rows.at(-1);
+				const lastRowIndex = Math.max(copySurface.rows.length - 1, 0);
+				const lastColumn = lastRow ? Math.max(lastRow.text.length - 1, 0) : 0;
+
+				tmux.enterCopyMode({
+					initialState: {
+						cursor: {
+							row: lastRowIndex,
+							column: lastColumn
+						},
+						viewportTopRow: Math.max(lastRowIndex - 1, 0)
+					}
+				});
+				focusTerminalContainer();
+				emitPracticeStepSignal(CommandId.COPY_MODE);
+				break;
+			}
+			case CommandId.PASTE_BUFFER: {
+				const latestPasteBuffer = tmux.latestPasteBuffer;
+				const focusedPane = tmux.focusedPane;
+
+				if (!latestPasteBuffer) {
+					showFeedback('Paste buffer empty', 1200);
+					break;
+				}
+
+				if (!focusedPane) {
+					break;
+				}
+
+				const selection = getFocusedPaneInputSelection();
+				const currentValue = focusedPane.inputValue;
+				const nextValue =
+					currentValue.slice(0, selection.start) +
+					latestPasteBuffer.content +
+					currentValue.slice(selection.end);
+				const nextCaretPosition = selection.start + latestPasteBuffer.content.length;
+
+				tmux.setInput(nextValue);
+				restoreFocusedPaneInputSelection(nextCaretPosition);
+				emitCompositeSequenceSignal(createCopyPasteSequenceAction(latestPasteBuffer.content));
+				emitPracticeStepSignal(CommandId.PASTE_BUFFER);
+				break;
+			}
 			// Session commands
 			case CommandId.DETACH: {
 				// Detach from the current session (session is preserved in background)
@@ -572,6 +838,11 @@
 			return;
 		}
 
+		if (isInCopyMode) {
+			handleCopyModeKeyDown(event);
+			return;
+		}
+
 		// In tmux mode, handle prefix key
 		if (isInTmuxMode) {
 			handleTmuxModeKeyDown(event);
@@ -609,6 +880,62 @@
 	 */
 	function handlePaneFocus(paneId: string): void {
 		tmux.focusPane(paneId);
+	}
+
+	function handleCopyMouseDown(paneId: string, row: number, column: number): void {
+		if (paneId !== tmux.focusedPaneId) {
+			return;
+		}
+
+		const copyState = tmux.focusedPane?.copyState;
+
+		if (!copyState) {
+			return;
+		}
+
+		tmux.setPaneCopyState({
+			...copyState,
+			cursor: { row, column },
+			selectionAnchor: { row, column },
+			dragAnchor: { row, column }
+		});
+		focusTerminalContainer();
+	}
+
+	function handleCopyMouseEnter(paneId: string, row: number, column: number): void {
+		if (paneId !== tmux.focusedPaneId) {
+			return;
+		}
+
+		const copyState = tmux.focusedPane?.copyState;
+
+		if (!copyState?.dragAnchor) {
+			return;
+		}
+
+		tmux.setPaneCopyState({
+			...copyState,
+			cursor: { row, column }
+		});
+	}
+
+	function handleCopyMouseUp(paneId: string, row: number, column: number): void {
+		if (paneId !== tmux.focusedPaneId) {
+			return;
+		}
+
+		const copyState = tmux.focusedPane?.copyState;
+
+		if (!copyState) {
+			return;
+		}
+
+		tmux.setPaneCopyState({
+			...copyState,
+			cursor: { row, column },
+			dragAnchor: null
+		});
+		focusTerminalContainer();
 	}
 
 	function handleEditorInputChange(paneId: string, value: string): void {
@@ -770,6 +1097,8 @@
 				man tmux
 			{:else if isInEditorMode}
 				vi {tmux.focusedPane?.editorState?.filePath ?? '~/.tmux.conf'}
+			{:else if isInCopyMode}
+				tmux: copy mode
 			{:else if isInTmuxMode}
 				tmux: {tmux.activeWindow?.name ?? 'main'}
 			{:else}
@@ -819,6 +1148,9 @@
 				onEditorResumeInsert={handleEditorResumeInsert}
 				onEditorCommandChange={handleEditorCommandChange}
 				onEditorCommandSubmit={handleEditorCommandSubmit}
+				onCopyMouseDown={handleCopyMouseDown}
+				onCopyMouseEnter={handleCopyMouseEnter}
+				onCopyMouseUp={handleCopyMouseUp}
 				onKeyDown={handleKeyDown}
 			/>
 		{:else if tmux.focusedPane}
@@ -837,6 +1169,9 @@
 				onEditorResumeInsert={handleEditorResumeInsert}
 				onEditorCommandChange={handleEditorCommandChange}
 				onEditorCommandSubmit={handleEditorCommandSubmit}
+				onCopyMouseDown={handleCopyMouseDown}
+				onCopyMouseEnter={handleCopyMouseEnter}
+				onCopyMouseUp={handleCopyMouseUp}
 				onKeyDown={handleKeyDown}
 			/>
 		{/if}
@@ -851,6 +1186,7 @@
 			focusedPane={tmux.focusedPane}
 			prefixActive={tmux.prefixActive}
 			isZoomed={tmux.isZoomed}
+			copyModeActive={isInCopyMode}
 			inputMode={statusBarInputMode}
 			confirmMode={statusBarConfirmMode}
 			onInputChange={handleStatusBarInputChange}

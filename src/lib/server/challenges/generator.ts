@@ -23,6 +23,13 @@ import {
 } from './pools';
 import { getRandomPrompt, getRandomPromptWithInput } from './prompt-variations';
 import { generateMeaningfulString } from './random-string';
+import { createCopyPasteSequenceAction } from '$lib/utils/tmux-copy-sequence';
+
+const COPY_SEQUENCE_CHALLENGE_START = 4;
+
+function isStandaloneCopyPasteCommand(command: TmuxCommand): boolean {
+	return command.name === 'copy-mode' || command.name === 'paste-buffer';
+}
 
 /**
  * Generate a randomized instruction sequence for a challenge.
@@ -47,8 +54,12 @@ export function generateInstructions(challengeId: number): Instruction[] {
 	const targetCount = getInstructionCount(challengeId);
 	const minInputCommands = getMinInputCommands(challengeId);
 	const inputCommands = getInputCommandsForChallenge(challengeId);
-	const simpleCommands = getSimpleCommandsForChallenge(challengeId);
+	const simpleCommands = getSimpleCommandsForChallenge(challengeId).filter(
+		(command) => !isStandaloneCopyPasteCommand(command)
+	);
 	const allCommands = getPoolForChallenge(challengeId);
+	const includeCopyPasteSequence = challengeId >= COPY_SEQUENCE_CHALLENGE_START;
+	const maxStandardInstructions = targetCount - (includeCopyPasteSequence ? 1 : 0);
 
 	if (allCommands.length === 0) {
 		throw new Error(`Empty command pool for challenge ${challengeId}`);
@@ -72,7 +83,7 @@ export function generateInstructions(challengeId: number): Instruction[] {
 	// Step 2: Ensure every simple command appears at least once
 	const shuffledSimpleCommands = shuffleArray([...simpleCommands]);
 	for (const cmd of shuffledSimpleCommands) {
-		if (instructions.length >= targetCount) {
+		if (instructions.length >= maxStandardInstructions) {
 			break;
 		}
 		instructions.push(createSimpleInstruction(cmd));
@@ -88,7 +99,7 @@ export function generateInstructions(challengeId: number): Instruction[] {
 		).length;
 		const additionalInputNeeded = minInputCommands - currentInputCount;
 
-		for (let i = 0; i < additionalInputNeeded && instructions.length < targetCount; i++) {
+		for (let i = 0; i < additionalInputNeeded && instructions.length < maxStandardInstructions; i++) {
 			// Reuse input commands with new random strings
 			const cmd = inputCommands[i % inputCommands.length];
 			instructions.push(createInputInstruction(cmd));
@@ -97,7 +108,7 @@ export function generateInstructions(challengeId: number): Instruction[] {
 
 	// Step 4: Fill remaining slots with random picks
 	// Prefer input commands for added security, but mix in simple commands
-	while (instructions.length < targetCount) {
+	while (instructions.length < maxStandardInstructions) {
 		// 30% chance to add another input command if available
 		const useInput = inputCommands.length > 0 && Math.random() < 0.3;
 
@@ -108,6 +119,10 @@ export function generateInstructions(challengeId: number): Instruction[] {
 			const cmd = simpleCommands[getRandomInt(simpleCommands.length)];
 			instructions.push(createSimpleInstruction(cmd));
 		}
+	}
+
+	if (includeCopyPasteSequence) {
+		instructions.push(createCopyPasteInstruction());
 	}
 
 	// Step 5: Shuffle final order for unpredictability
@@ -148,6 +163,17 @@ function createInputInstruction(cmd: TmuxCommand): Instruction {
 		prompt: getRandomPromptWithInput(cmd.name, randomInput),
 		expectedAction: `${cmd.name}:${randomInput}`,
 		requiredInput: randomInput
+	};
+}
+
+function createCopyPasteInstruction(): Instruction {
+	const copyText = generateMeaningfulString();
+
+	return {
+		index: 0,
+		prompt: `Use tmux copy mode to copy "${copyText}" from the command line, then paste it back into the prompt.`,
+		expectedAction: createCopyPasteSequenceAction(copyText),
+		seedInput: copyText
 	};
 }
 

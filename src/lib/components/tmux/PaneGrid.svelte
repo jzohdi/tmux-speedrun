@@ -29,6 +29,9 @@
 		onEditorResumeInsert?: (paneId: string) => void;
 		onEditorCommandChange?: (paneId: string, value: string) => void;
 		onEditorCommandSubmit?: (paneId: string, value: string) => void;
+		onCopyMouseDown?: (paneId: string, row: number, column: number) => void;
+		onCopyMouseEnter?: (paneId: string, row: number, column: number) => void;
+		onCopyMouseUp?: (paneId: string, row: number, column: number) => void;
 		/** Callback for key events to be handled at the top level */
 		onKeyDown?: (event: KeyboardEvent) => void;
 	};
@@ -48,6 +51,9 @@
 		onEditorResumeInsert,
 		onEditorCommandChange,
 		onEditorCommandSubmit,
+		onCopyMouseDown,
+		onCopyMouseEnter,
+		onCopyMouseUp,
 		onKeyDown
 	}: PaneGridProps = $props();
 
@@ -146,6 +152,9 @@
 			onEditorResumeInsert={handleEditorResumeInsertForPane(zoomedPane.id)}
 			onEditorCommandChange={handleEditorCommandChangeForPane(zoomedPane.id)}
 			onEditorCommandSubmit={handleEditorCommandSubmitForPane(zoomedPane.id)}
+			{onCopyMouseDown}
+			{onCopyMouseEnter}
+			{onCopyMouseUp}
 			{onKeyDown}
 		/>
 	</div>
@@ -166,6 +175,9 @@
 			onEditorResumeInsert={handleEditorResumeInsertForPane(node.id)}
 			onEditorCommandChange={handleEditorCommandChangeForPane(node.id)}
 			onEditorCommandSubmit={handleEditorCommandSubmitForPane(node.id)}
+			{onCopyMouseDown}
+			{onCopyMouseEnter}
+			{onCopyMouseUp}
 			{onKeyDown}
 		/>
 	</div>
@@ -192,6 +204,9 @@
 				{onEditorResumeInsert}
 				{onEditorCommandChange}
 				{onEditorCommandSubmit}
+				{onCopyMouseDown}
+				{onCopyMouseEnter}
+				{onCopyMouseUp}
 				{onKeyDown}
 			/>
 		</div>
@@ -212,6 +227,9 @@
 				{onEditorResumeInsert}
 				{onEditorCommandChange}
 				{onEditorCommandSubmit}
+				{onCopyMouseDown}
+				{onCopyMouseEnter}
+				{onCopyMouseUp}
 				{onKeyDown}
 			/>
 		</div>

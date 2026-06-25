@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import type { Pane, HistoryEntry } from '$lib/utils/pane-tree';
 	import { isPrefixKey } from '$lib/data/keybindings';
+	import { createCopySurface, getCopySurfaceSelectionRows } from '$lib/utils/tmux-copy-surface';
 	import { getPaneOverlayText, type PaneOverlay } from '$lib/utils/tmux-overlay';
 	import Manpage from '../Manpage.svelte';
 
@@ -28,6 +29,9 @@
 		onEditorResumeInsert?: () => void;
 		onEditorCommandChange?: (value: string) => void;
 		onEditorCommandSubmit?: (value: string) => void;
+		onCopyMouseDown?: (paneId: string, row: number, column: number) => void;
+		onCopyMouseEnter?: (paneId: string, row: number, column: number) => void;
+		onCopyMouseUp?: (paneId: string, row: number, column: number) => void;
 		/**
 		 * Callback for key events that should be handled by the parent.
 		 * Used for prefix key in tmux mode.
@@ -49,6 +53,9 @@
 		onEditorResumeInsert,
 		onEditorCommandChange,
 		onEditorCommandSubmit,
+		onCopyMouseDown,
+		onCopyMouseEnter,
+		onCopyMouseUp,
 		onKeyDown
 	}: PaneViewProps = $props();
 
@@ -61,10 +68,25 @@
 
 	// Derived
 	const prompt = $derived(pane.mode === 'tmux' ? '%' : '$');
-	const showInput = $derived(pane.mode !== 'man' && pane.mode !== 'editor');
-	const showHistory = $derived(pane.mode !== 'man' && pane.mode !== 'editor');
+	const showCopySurface = $derived(pane.copyState !== null && pane.mode === 'tmux');
+	const showInput = $derived(pane.mode !== 'man' && pane.mode !== 'editor' && pane.copyState === null);
+	const showHistory = $derived(pane.mode !== 'man' && pane.mode !== 'editor' && pane.copyState === null);
 	const isEditorMode = $derived(pane.mode === 'editor');
 	const editorState = $derived(pane.editorState);
+	const copySurface = $derived(showCopySurface ? createCopySurface(pane) : null);
+	const copySelectionRows = $derived.by(() => {
+		if (!copySurface || !pane.copyState?.selectionAnchor) {
+			return new Map();
+		}
+
+		return new Map(
+			getCopySurfaceSelectionRows(
+				copySurface,
+				pane.copyState.selectionAnchor,
+				pane.copyState.cursor
+			).map((row) => [row.row, row])
+		);
+	});
 	const overlayText = $derived(getPaneOverlayText(paneOverlay, pane.id));
 	const showPaneOverlay = $derived(overlayText !== null);
 	const overlayClassName = $derived(
@@ -135,6 +157,8 @@
 		// Also directly focus the input
 		if (pane.mode === 'editor') {
 			editorRef?.focus();
+		} else if (pane.copyState) {
+			historyRef?.focus();
 		} else if (pane.mode !== 'man') {
 			inputRef?.focus();
 		} else {
@@ -226,6 +250,70 @@
 		return entry.content;
 	}
 
+	function getCopyRowCells(text: string): Array<{ char: string; column: number }> {
+		if (text.length === 0) {
+			return [
+				{
+					char: ' ',
+					column: 0
+				}
+			];
+		}
+
+		return Array.from(text).map((char, column) => ({
+			char,
+			column
+		}));
+	}
+
+	function getCopyPointerPosition(event: MouseEvent): { row: number; column: number } | null {
+		const rowElement = event.currentTarget as HTMLElement;
+		const cellElement =
+			event.target instanceof HTMLElement
+				? event.target.closest<HTMLElement>('[data-copy-column]')
+				: null;
+		const row = Number(rowElement.dataset.copyRow);
+		const column = Number(cellElement?.dataset.copyColumn);
+
+		if (Number.isNaN(row) || Number.isNaN(column)) {
+			return null;
+		}
+
+		return { row, column };
+	}
+
+	function handleCopyRowMouseDown(event: MouseEvent): void {
+		event.preventDefault();
+		const position = getCopyPointerPosition(event);
+
+		if (!position) {
+			return;
+		}
+
+		onCopyMouseDown?.(pane.id, position.row, position.column);
+	}
+
+	function handleCopyRowMouseMove(event: MouseEvent): void {
+		const position = getCopyPointerPosition(event);
+
+		if (!position) {
+			return;
+		}
+
+		onCopyMouseEnter?.(pane.id, position.row, position.column);
+	}
+
+	function handleCopyRowMouseUp(event: MouseEvent): void {
+		event.preventDefault();
+		const position = getCopyPointerPosition(event);
+
+		if (!position) {
+			return;
+		}
+
+		onCopyMouseUp?.(pane.id, position.row, position.column);
+	}
+
 	// Focus input when pane becomes focused or when focusTrigger changes
 	// The focusTrigger is used to re-focus after commands that output info/errors
 	// Uses tick() to ensure DOM is updated, then focuses the appropriate element
@@ -249,7 +337,11 @@
 			paneMode
 		);
 
-		if (shouldFocus && paneMode !== 'man' && paneMode !== 'editor') {
+		if (shouldFocus && pane.copyState) {
+			tick().then(() => {
+				historyRef?.focus();
+			});
+		} else if (shouldFocus && paneMode !== 'man' && paneMode !== 'editor') {
 			// Use tick() to wait for Svelte DOM updates, then focus
 			tick().then(() => {
 				console.debug(
@@ -287,6 +379,21 @@
 		if (pane.history.length > 0) {
 			scrollToBottom();
 		}
+	});
+
+	$effect(() => {
+		const cursorRow = pane.copyState?.cursor.row;
+
+		if (cursorRow === undefined || !historyRef) {
+			return;
+		}
+
+		tick().then(() => {
+			const targetRow = historyRef?.querySelector<HTMLElement>(`[data-copy-row="${cursorRow}"]`);
+			targetRow?.scrollIntoView({
+				block: 'nearest'
+			});
+		});
 	});
 
 	/**
@@ -357,6 +464,36 @@
 			</div>
 		</div>
 	{:else}
+		{#if showCopySurface && copySurface && pane.copyState}
+			<div class="copy-surface" bind:this={historyRef} tabindex="-1">
+				{#each copySurface.rows as row (`copy-${row.index}`)}
+					{@const isCursorRow = row.index === pane.copyState.cursor.row}
+					{@const selectionRow = copySelectionRows.get(row.index)}
+					<div
+						class="copy-row"
+						class:cursor-row={isCursorRow}
+						data-copy-row={row.index}
+						onmousedown={handleCopyRowMouseDown}
+						onmousemove={handleCopyRowMouseMove}
+						onmouseup={handleCopyRowMouseUp}
+					>
+						{#each getCopyRowCells(row.text) as cell (`${row.index}-${cell.column}`)}
+							<span
+								class="copy-cell"
+								class:copy-selected={selectionRow !== undefined &&
+									cell.column >= selectionRow.startColumn &&
+									cell.column < selectionRow.endColumn}
+								class:copy-cursor={isCursorRow && cell.column === pane.copyState.cursor.column}
+								data-copy-column={cell.column}
+							>
+								{cell.char}
+							</span>
+						{/each}
+					</div>
+				{/each}
+			</div>
+		{/if}
+
 		<!-- History -->
 		{#if showHistory}
 			<div class="pane-history" bind:this={historyRef}>
@@ -453,6 +590,37 @@
 	.pane-history::-webkit-scrollbar-thumb {
 		background: #3d3d3d;
 		border-radius: 3px;
+	}
+
+	.copy-surface {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 8px 12px;
+		font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Menlo', monospace;
+		font-size: 13px;
+		line-height: 1.5;
+		outline: none;
+	}
+
+	.copy-row {
+		white-space: pre-wrap;
+		word-break: break-word;
+		color: #e0e0e0;
+		min-height: 1.5em;
+	}
+
+	.copy-cell {
+		white-space: pre;
+	}
+
+	.copy-selected {
+		background: rgba(139, 233, 253, 0.25);
+	}
+
+	.copy-cursor {
+		background: #f8f8f2;
+		color: #1c1c1c;
 	}
 
 	.history-entry {

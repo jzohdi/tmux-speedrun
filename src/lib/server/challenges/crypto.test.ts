@@ -287,6 +287,27 @@ describe('Encrypt All Steps', () => {
 		expect(decrypted.requiredInput).toBe('test');
 	});
 
+	it('includes seedInput in payload when present', async () => {
+		const k0 = randomBytes(32);
+		const instructions: Instruction[] = [
+			{
+				index: 0,
+				prompt: 'Copy and paste test-seed',
+				expectedAction: 'copy-paste-sequence:test-seed',
+				seedInput: 'test-seed'
+			}
+		];
+
+		const keys = await deriveKeyChain(
+			k0,
+			instructions.map((instruction) => instruction.expectedAction)
+		);
+		const encryptedSteps = await encryptAllSteps(keys, instructions);
+		const decrypted = await decryptStep(keys[0], encryptedSteps[0]);
+
+		expect(decrypted.seedInput).toBe('test-seed');
+	});
+
 	it('throws if not enough keys', async () => {
 		const instructions: Instruction[] = [
 			{ index: 0, prompt: 'Prompt 0', expectedAction: 'action-0' },

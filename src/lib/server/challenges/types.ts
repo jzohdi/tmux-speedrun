@@ -29,6 +29,11 @@ export type Instruction = {
 	 * Undefined for simple commands.
 	 */
 	requiredInput?: string;
+	/**
+	 * Optional text that should be preloaded into the terminal input before the user acts.
+	 * Used for composite steps like copy-then-paste where the text must exist in the pane.
+	 */
+	seedInput?: string;
 };
 
 /**
@@ -46,6 +51,8 @@ export type StepPayload = {
 	 * The client needs this to know what to validate.
 	 */
 	requiredInput?: string;
+	/** Optional text to preload into the terminal input for the step */
+	seedInput?: string;
 };
 
 /**

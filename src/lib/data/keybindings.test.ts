@@ -5,6 +5,7 @@ import {
 	isModifierOnlyKey,
 	lookupKeybinding,
 	getKeybindingsForCommand,
+	getKeybindingsForCopyModeAction,
 	hasPrefixKeybinding,
 	eventToBindingKey,
 	getPrefixKeybindings,
@@ -16,10 +17,17 @@ import {
  */
 function createKeyEvent(
 	key: string,
-	options: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean; metaKey?: boolean } = {}
+	options: {
+		code?: string;
+		ctrlKey?: boolean;
+		shiftKey?: boolean;
+		altKey?: boolean;
+		metaKey?: boolean;
+	} = {}
 ): KeyboardEvent {
 	return {
 		key,
+		code: options.code ?? key,
 		ctrlKey: options.ctrlKey ?? false,
 		shiftKey: options.shiftKey ?? false,
 		altKey: options.altKey ?? false,
@@ -112,6 +120,21 @@ describe('Keybindings', () => {
 			const event = createKeyEvent('ArrowLeft', { ctrlKey: true });
 			expect(eventToBindingKey(event)).toBe('Ctrl+ArrowLeft');
 		});
+
+		it('normalizes Alt and Meta bindings to Meta', () => {
+			expect(eventToBindingKey(createKeyEvent('w', { altKey: true }))).toBe('Meta+w');
+			expect(eventToBindingKey(createKeyEvent('w', { metaKey: true }))).toBe('Meta+w');
+		});
+
+		it('uses the physical key for mac Option-modified letters', () => {
+			const event = createKeyEvent('∑', { code: 'KeyW', altKey: true });
+			expect(eventToBindingKey(event)).toBe('Meta+w');
+		});
+
+		it('normalizes Space using the event code', () => {
+			const event = createKeyEvent(' ', { code: 'Space', ctrlKey: true });
+			expect(eventToBindingKey(event)).toBe('Ctrl+Space');
+		});
 	});
 
 	describe('isModifierOnlyKey', () => {
@@ -173,6 +196,56 @@ describe('Keybindings', () => {
 			expect(lookupKeybinding(createKeyEvent('d'))).toBeUndefined();
 			expect(lookupKeybinding(createKeyEvent('y'))?.commandName).toBe('kill-session');
 		});
+
+		it('looks up default emacs copy-mode bindings', () => {
+			expect(
+				lookupKeybinding(createKeyEvent(' ', { code: 'Space', ctrlKey: true }), 'copy-mode')?.kind
+			).toBe('copy-mode-action');
+			expect(
+				lookupKeybinding(createKeyEvent('w', { altKey: true }), 'copy-mode')
+			).toMatchObject({
+				kind: 'copy-mode-action',
+				action: 'copy-selection-and-cancel'
+			});
+		});
+
+		it('looks up copy-mode Alt bindings when mac Option changes the key value', () => {
+			expect(
+				lookupKeybinding(createKeyEvent('∑', { code: 'KeyW', altKey: true }), 'copy-mode')
+			).toMatchObject({
+				kind: 'copy-mode-action',
+				action: 'copy-selection-and-cancel'
+			});
+		});
+
+		it('looks up vi copy-mode bindings after applying mode-keys vi', () => {
+			tmuxConfigStore.setFileText('set -g mode-keys vi');
+			tmuxConfigStore.applySavedConfig();
+
+			expect(lookupKeybinding(createKeyEvent(' ', { code: 'Space' }), 'copy-mode-vi')).toMatchObject({
+				kind: 'copy-mode-action',
+				action: 'begin-selection'
+			});
+			expect(lookupKeybinding(createKeyEvent('Enter'), 'copy-mode-vi')).toMatchObject({
+				kind: 'copy-mode-action',
+				action: 'copy-selection-and-cancel'
+			});
+		});
+
+		it('applies config overrides inside copy-mode tables', () => {
+			tmuxConfigStore.setFileText(`
+set -g mode-keys vi
+unbind-key -T copy-mode-vi Space
+bind-key -T copy-mode-vi y send -X copy-pipe-and-cancel
+			`.trim());
+			tmuxConfigStore.applySavedConfig();
+
+			expect(lookupKeybinding(createKeyEvent(' ', { code: 'Space' }), 'copy-mode-vi')).toBeUndefined();
+			expect(lookupKeybinding(createKeyEvent('y'), 'copy-mode-vi')).toMatchObject({
+				kind: 'copy-mode-action',
+				action: 'copy-selection-and-cancel'
+			});
+		});
 	});
 
 	describe('getKeybindingsForCommand', () => {
@@ -207,6 +280,30 @@ describe('Keybindings', () => {
 
 			const bindings = getKeybindingsForCommand('kill-session');
 			expect(bindings.some((binding) => binding.key === 'y')).toBe(true);
+		});
+	});
+
+	describe('getKeybindingsForCopyModeAction', () => {
+		it('returns active copy-mode bindings for default mode-keys', () => {
+			expect(getKeybindingsForCopyModeAction('begin-selection')).toContainEqual(
+				expect.objectContaining({
+					kind: 'copy-mode-action',
+					action: 'begin-selection'
+				})
+			);
+		});
+
+		it('returns vi-table bindings when mode-keys is vi', () => {
+			tmuxConfigStore.setFileText('set -g mode-keys vi');
+			tmuxConfigStore.applySavedConfig();
+
+			expect(getKeybindingsForCopyModeAction('copy-selection-and-cancel')).toContainEqual(
+				expect.objectContaining({
+					table: 'copy-mode-vi',
+					kind: 'copy-mode-action',
+					action: 'copy-selection-and-cancel'
+				})
+			);
 		});
 	});
 

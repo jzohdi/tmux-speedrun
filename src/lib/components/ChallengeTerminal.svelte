@@ -103,6 +103,10 @@
 	async function handleKeybinding(binding: Keybinding) {
 		exitPrefixMode();
 
+		if (binding.kind !== 'command') {
+			return;
+		}
+
 		const cmd = getCommandByName(binding.commandName);
 		if (!cmd) {
 			return;

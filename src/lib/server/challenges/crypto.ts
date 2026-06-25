@@ -203,6 +203,9 @@ export async function encryptAllSteps(
 		if (instruction.requiredInput !== undefined) {
 			payload.requiredInput = instruction.requiredInput;
 		}
+		if (instruction.seedInput !== undefined) {
+			payload.seedInput = instruction.seedInput;
+		}
 
 		const encrypted = await encryptStep(key, payload);
 		encrypted.index = i;

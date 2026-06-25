@@ -9,6 +9,7 @@ import {
 	createInitialState,
 	createSession,
 	createWindow,
+	generatePasteBufferName,
 	findPaneById,
 	collectAllPanes,
 	countPanes,
@@ -33,8 +34,10 @@ import {
 	type PaneNode,
 	type Pane,
 	type PaneMode,
+	type PaneCopyState,
 	type SplitDirection,
-	type HistoryEntry
+	type HistoryEntry,
+	type TmuxPasteBuffer
 } from '$lib/utils/pane-tree';
 
 import {
@@ -171,6 +174,11 @@ export type TmuxStoreOptions = {
 	 * Initial state override (for testing or resuming).
 	 */
 	initialState?: TmuxState;
+};
+
+export type EnterCopyModeOptions = {
+	paneId?: string;
+	initialState?: Partial<PaneCopyState>;
 };
 
 // ============================================================================
@@ -374,6 +382,110 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			...state,
 			shellPane: { ...state.shellPane, ...updates }
 		};
+	}
+
+	function createDefaultCopyState(overrides: Partial<PaneCopyState> = {}): PaneCopyState {
+		const defaultCopyModeTable =
+			tmuxConfigStore.activeConfig.modeKeys === 'vi' ? 'copy-mode-vi' : 'copy-mode';
+
+		return {
+			activeKeyTable: overrides.activeKeyTable ?? defaultCopyModeTable,
+			cursor: overrides.cursor ?? { row: 0, column: 0 },
+			viewportTopRow: overrides.viewportTopRow ?? 0,
+			selectionAnchor: overrides.selectionAnchor ?? null,
+			dragAnchor: overrides.dragAnchor ?? null
+		};
+	}
+
+	function getPaneCopyState(paneId?: string): PaneCopyState | null {
+		if (isDetachedState()) {
+			return state.shellPane.copyState;
+		}
+
+		const currentActiveWindow = getActiveWindowState();
+		if (!currentActiveWindow) {
+			return null;
+		}
+
+		const targetPaneId = paneId ?? getFocusedPaneState()?.id;
+		if (!targetPaneId) {
+			return null;
+		}
+
+		return findPaneById(currentActiveWindow.paneTree, targetPaneId)?.copyState ?? null;
+	}
+
+	function setPaneCopyState(copyState: PaneCopyState | null, paneId?: string): void {
+		if (isDetachedState()) {
+			updateShellPane({ copyState });
+			return;
+		}
+
+		const currentActiveWindow = getActiveWindowState();
+		if (!currentActiveWindow) {
+			return;
+		}
+
+		const targetPaneId = paneId ?? getFocusedPaneState()?.id;
+		if (!targetPaneId) {
+			return;
+		}
+
+		const newTree = updatePane(currentActiveWindow.paneTree, targetPaneId, { copyState });
+
+		updateActiveWindowTree(newTree);
+	}
+
+	function enterCopyMode(options: EnterCopyModeOptions = {}): PaneCopyState {
+		const copyState = createDefaultCopyState(options.initialState);
+
+		setPaneCopyState(copyState, options.paneId);
+
+		return copyState;
+	}
+
+	function exitCopyMode(paneId?: string): void {
+		setPaneCopyState(null, paneId);
+	}
+
+	function clearCopySelection(paneId?: string): void {
+		const currentCopyState = getPaneCopyState(paneId);
+
+		if (!currentCopyState) {
+			return;
+		}
+
+		setPaneCopyState(
+			{
+				...currentCopyState,
+				selectionAnchor: null,
+				dragAnchor: null
+			},
+			paneId
+		);
+	}
+
+	function getLatestPasteBufferState(): TmuxPasteBuffer | null {
+		return state.pasteBuffers[0] ?? null;
+	}
+
+	function pushPasteBuffer(content: string, name?: string): TmuxPasteBuffer | null {
+		if (!content) {
+			return null;
+		}
+
+		const buffer: TmuxPasteBuffer = {
+			name: name ?? generatePasteBufferName(),
+			content,
+			createdAt: Date.now()
+		};
+
+		state = {
+			...state,
+			pasteBuffers: [buffer, ...state.pasteBuffers]
+		};
+
+		return buffer;
 	}
 
 	function setFocusedPane(paneId: string): void {
@@ -2324,6 +2436,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		get isDetached() {
 			return isDetachedState();
 		},
+		get pasteBuffers() {
+			return state.pasteBuffers;
+		},
+		get latestPasteBuffer() {
+			return getLatestPasteBufferState();
+		},
 
 		// Window/Pane state (scoped to attached session, or shell pane when detached)
 		get windows() {
@@ -2425,6 +2543,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		setConfigEditorBuffer,
 		setConfigEditorInsertMode,
 		setConfigEditorCommandLine,
+		setPaneCopyState,
+		enterCopyMode,
+		exitCopyMode,
+		clearCopySelection,
+		pushPasteBuffer,
 
 		// Prefix mode
 		togglePrefix,

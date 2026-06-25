@@ -4,31 +4,37 @@
 	import {
 		getCommandsWithPrefixKeybindings,
 		getKeybindingsForCommand,
+		getKeybindingsForCopyModeAction,
 		getPrefixKeyDisplay,
 		type Keybinding
 	} from '$lib/data/keybindings';
+	import {
+		createPracticeItems,
+		shouldPreserveTerminalInputOnStepCompletion,
+		type PracticeItem
+	} from '$lib/data/practice-flow';
 	import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
-	import type { TmuxCommand } from '$lib/data/tmux-commands';
-	import { isValidCommandId, type CommandIdType } from '$lib/utils/tmux-commands';
 
 	// Component ref
 	let terminalRef = $state<ReturnType<typeof ChallengeTerminal> | null>(null);
 
 	const configRevision = $derived(tmuxConfigStore.revision);
-	const practiceCommands = $derived.by(() => {
+	const practiceItems = $derived.by(() => {
 		configRevision;
 
-		return getCommandsWithPrefixKeybindings();
+		return createPracticeItems(getCommandsWithPrefixKeybindings());
 	});
 
 	// Mode: sequential or random
 	let isRandomMode = $state(false);
 
-	// Current command queue
-	let commandQueue = $state<TmuxCommand[]>([]);
+	// Current practice queue
+	let practiceQueue = $state<PracticeItem[]>([]);
 	let currentIndex = $state(0);
+	let currentStepIndex = $state(0);
 	let completedCount = $state(0);
 	let skippedCount = $state(0);
+	let lastSeededItemKey = $state<string | null>(null);
 
 	// Feedback state
 	let feedbackState = $state<{ type: 'correct' | 'incorrect' | 'skipped'; message: string } | null>(
@@ -37,25 +43,33 @@
 	let feedbackTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// Derived state
-	const currentCommand = $derived(commandQueue[currentIndex] ?? null);
+	const currentItem = $derived(practiceQueue[currentIndex] ?? null);
+	const currentStep = $derived(currentItem?.steps[currentStepIndex] ?? null);
 	const currentKeybindings = $derived.by(() => {
 		configRevision;
-		if (!currentCommand || !isValidCommandId(currentCommand.name)) {
+		if (!currentStep) {
 			return [];
 		}
 
-		return getKeybindingsForCommand(currentCommand.name as CommandIdType);
+		if (currentStep.kind === 'command') {
+			return getKeybindingsForCommand(currentStep.commandName);
+		}
+
+		return getKeybindingsForCopyModeAction(currentStep.action);
 	});
+	const currentStepContextLabel = $derived(
+		currentStep?.kind === 'copy-mode-action' ? 'copy mode' : 'prefix'
+	);
 	const prefixKey = $derived.by(() => {
 		configRevision;
 
 		return getPrefixKeyDisplay();
 	});
 	const isComplete = $derived(
-		!isRandomMode && currentIndex >= commandQueue.length && commandQueue.length > 0
+		!isRandomMode && currentIndex >= practiceQueue.length && practiceQueue.length > 0
 	);
 	const progressPercent = $derived(
-		commandQueue.length > 0 ? (completedCount / commandQueue.length) * 100 : 0
+		practiceQueue.length > 0 ? (completedCount / practiceQueue.length) * 100 : 0
 	);
 
 	/**
@@ -63,17 +77,17 @@
 	 */
 	function initializeQueue(): void {
 		if (isRandomMode) {
-			// In random mode, we just pick one at a time
-			commandQueue = [...practiceCommands];
-			currentIndex = getRandomIndex(commandQueue.length);
+			practiceQueue = [...practiceItems];
+			currentIndex = getRandomIndex(practiceQueue.length);
 		} else {
-			// Sequential mode: shuffle the commands once
-			commandQueue = shuffleArray([...practiceCommands]);
+			practiceQueue = shuffleArray([...practiceItems]);
 			currentIndex = 0;
 		}
+		currentStepIndex = 0;
 		completedCount = 0;
 		skippedCount = 0;
 		feedbackState = null;
+		lastSeededItemKey = null;
 	}
 
 	/**
@@ -96,12 +110,14 @@
 	}
 
 	/**
-	 * Move to the next command.
+	 * Move to the next practice item.
 	 */
-	function nextCommand(): void {
+	function nextItem(): void {
+		currentStepIndex = 0;
+		lastSeededItemKey = null;
+
 		if (isRandomMode) {
-			// Pick a new random command
-			currentIndex = getRandomIndex(commandQueue.length);
+			currentIndex = getRandomIndex(practiceQueue.length);
 		} else {
 			currentIndex++;
 		}
@@ -121,49 +137,95 @@
 	}
 
 	/**
-	 * Skip the current command.
+	 * Clean up terminal state after completing or skipping an item.
 	 */
-	function skipCommand(): void {
-		if (!currentCommand || isComplete) {
+	function cleanupCurrentItem(options: { clearInput?: boolean } = {}): void {
+		const { clearInput = true } = options;
+		terminalRef?.getStore().exitCopyMode();
+		if (clearInput) {
+			terminalRef?.clearInput();
+		}
+		terminalRef?.focus();
+	}
+
+	function advanceCurrentItem(): void {
+		if (!currentItem || !currentStep) {
 			return;
 		}
+
+		if (currentStepIndex + 1 < currentItem.steps.length) {
+			currentStepIndex++;
+			showFeedback('correct', 'Correct!');
+			terminalRef?.focus();
+			return;
+		}
+
+		completedCount++;
+		showFeedback('correct', 'Correct!');
+		cleanupCurrentItem({
+			clearInput: !shouldPreserveTerminalInputOnStepCompletion(currentItem, currentStep)
+		});
+		nextItem();
+	}
+
+	/**
+	 * Skip the current practice item.
+	 */
+	function skipCommand(): void {
+		if (!currentItem || isComplete) {
+			return;
+		}
+
 		skippedCount++;
-		showFeedback('skipped', `Skipped: ${currentCommand.name}`);
-		nextCommand();
+		showFeedback('skipped', `Skipped: ${currentItem.title}`);
+		cleanupCurrentItem();
+		nextItem();
+	}
+
+	function isCurrentStepMatch(signal: TmuxSignal): boolean {
+		if (!currentStep) {
+			return false;
+		}
+
+		if (currentStep.kind === 'command') {
+			if (signal.type === 'command-executed' && signal.commandName === currentStep.commandName) {
+				return true;
+			}
+
+			return signal.type === 'practice-step' && signal.command === currentStep.commandName;
+		}
+
+		return signal.type === 'practice-step' && signal.command === currentStep.action;
 	}
 
 	/**
 	 * Handle signals from the terminal.
 	 */
 	function handleSignal(signal: TmuxSignal): void {
-		// We're interested in command-executed signals
-		if (signal.type !== 'command-executed') {
+		if (!currentItem || !currentStep) {
 			return;
 		}
 
-		const commandName = signal.commandName;
-		if (!commandName || !currentCommand) {
+		if (signal.type !== 'command-executed' && signal.type !== 'practice-step') {
 			return;
 		}
 
-		// Check if the executed command matches the expected command
-		if (commandName === currentCommand.name) {
-			completedCount++;
-			showFeedback('correct', 'Correct!');
-			nextCommand();
-		} else {
-			showFeedback('incorrect', `Expected: ${currentCommand.name}`);
+		if (isCurrentStepMatch(signal)) {
+			advanceCurrentItem();
+			return;
 		}
 
-		// Clear input after any command
-		terminalRef?.clearInput();
+		showFeedback('incorrect', `Expected: ${currentStep.prompt}`);
 	}
 
 	/**
 	 * Handle keyboard shortcuts for the practice page.
 	 */
 	function handleKeydown(event: KeyboardEvent): void {
-		// Skip with Escape key (only when not focused on the terminal input)
+		if (terminalRef?.getStore().focusedPane?.copyState) {
+			return;
+		}
+
 		if (event.key === 'Escape' && !isComplete) {
 			skipCommand();
 		}
@@ -189,10 +251,17 @@
 	 * Format keybinding for display.
 	 */
 	function formatKeybinding(binding: Keybinding): string {
+		if (binding.keyDisplay.includes('+')) {
+			return binding.keyDisplay;
+		}
+
 		const parts: string[] = [];
 
 		if (binding.withCtrl) {
 			parts.push('Ctrl');
+		}
+		if (binding.withAltOrMeta) {
+			parts.push('Meta');
 		}
 		if (binding.withShift) {
 			parts.push('Shift');
@@ -211,7 +280,11 @@
 		for (const binding of bindings) {
 			// For arrow-based commands, just show one representative
 			if (binding.key.startsWith('Arrow')) {
-				const baseKey = binding.withCtrl ? 'Ctrl+Arrow' : 'Arrow';
+				const baseKey = binding.withCtrl
+					? 'Ctrl+Arrow'
+					: binding.withAltOrMeta
+						? 'Alt+Arrow'
+						: 'Arrow';
 				if (!uniqueBindings.has(baseKey)) {
 					uniqueBindings.set(baseKey, binding);
 				}
@@ -228,7 +301,13 @@
 		return Array.from(uniqueBindings.values()).map((b) => {
 			// Handle special display cases
 			if (b.key.startsWith('Arrow')) {
-				return b.withCtrl ? 'Ctrl+↑↓←→' : '↑↓←→';
+				if (b.withCtrl) {
+					return 'Ctrl+↑↓←→';
+				}
+				if (b.withAltOrMeta) {
+					return 'Alt+↑↓←→';
+				}
+				return '↑↓←→';
 			}
 			if (/^[0-9]$/.exec(b.key)) {
 				return '0-9';
@@ -236,6 +315,27 @@
 			return formatKeybinding(b);
 		});
 	}
+
+	$effect(() => {
+		const item = currentItem;
+		const step = currentStep;
+		const terminal = terminalRef;
+
+		if (!item?.seedInput || !step || step.kind !== 'command' || step.commandName !== 'copy-mode' || !terminal) {
+			return;
+		}
+
+		const seedKey = `${currentIndex}:${item.id}`;
+		if (lastSeededItemKey === seedKey) {
+			return;
+		}
+
+		lastSeededItemKey = seedKey;
+		requestAnimationFrame(() => {
+			terminal.getStore().setInput(item.seedInput ?? '');
+			terminal.focus();
+		});
+	});
 
 	// Initialize on mount
 	onMount(async () => {
@@ -333,7 +433,7 @@
 			<div class="progress-container">
 				<div class="progress-bar" style="width: {progressPercent}%"></div>
 				<span class="progress-text">
-					{completedCount} / {commandQueue.length}
+					{completedCount} / {practiceQueue.length}
 					{#if skippedCount > 0}
 						<span class="skipped-indicator">· {skippedCount} skipped</span>
 					{/if}
@@ -342,25 +442,39 @@
 		{/if}
 
 		<!-- Command Card -->
-		{#if currentCommand && !isComplete}
+		{#if currentItem && currentStep && !isComplete}
 			<section class="command-card">
 				<div class="command-row">
 					<div class="command-info">
-						<span class="command-category">{currentCommand.category}</span>
-						<h2 class="command-name">{currentCommand.name}</h2>
+						<span class="command-category">{currentItem.category}</span>
+						<h2 class="command-name">{currentItem.title}</h2>
 						<p class="command-description">
-							{currentCommand.description}{#if currentCommand.requiresInput}<span
+							{currentItem.description}{#if currentItem.requiresInput}<span
 									class="input-badge">+ input</span
 								>{/if}
 						</p>
+						{#if currentItem.steps.length > 1}
+							<div class="step-guide">
+								<span class="step-counter">
+									step {currentStepIndex + 1} / {currentItem.steps.length}
+								</span>
+								<p class="step-prompt">{currentStep.prompt}</p>
+							</div>
+						{/if}
 					</div>
 					<div class="keybinding-area">
 						<div class="keys-row">
-							<div class="key-group">
-								<kbd class="key prefix-key">{prefixKey}</kbd>
-								<span class="key-label">prefix</span>
-							</div>
-							<span class="key-arrow">→</span>
+							{#if currentStep.kind === 'command'}
+								<div class="key-group">
+									<kbd class="key prefix-key">{prefixKey}</kbd>
+									<span class="key-label">prefix</span>
+								</div>
+								<span class="key-arrow">→</span>
+							{:else}
+								<div class="key-group">
+									<span class="key-mode-label">{currentStepContextLabel}</span>
+								</div>
+							{/if}
 							{#each getKeybindingsDisplay(currentKeybindings) as keyDisplay, i}
 								{#if i > 0}<span class="key-divider">/</span>{/if}
 								<kbd class="key command-key">{keyDisplay}</kbd>
@@ -377,7 +491,7 @@
 				<div class="completion-icon">🎉</div>
 				<h2 class="completion-title">Practice Complete!</h2>
 				<p class="completion-message">
-					You've practiced all {practiceCommands.length} tmux keybindings.
+					You've practiced all {practiceItems.length} practice lessons.
 				</p>
 				<button class="action-btn" onclick={resetPractice}>Practice Again</button>
 			</section>
@@ -692,6 +806,29 @@
 		vertical-align: middle;
 	}
 
+	.step-guide {
+		margin-top: 14px;
+		padding-top: 12px;
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
+	}
+
+	.step-counter {
+		display: inline-block;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		font-weight: 600;
+		color: #8be9fd;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
+	.step-prompt {
+		margin: 8px 0 0;
+		font-size: 14px;
+		line-height: 1.45;
+		color: #d8d8d8;
+	}
+
 	.keybinding-area {
 		display: flex;
 		flex-direction: column;
@@ -746,6 +883,15 @@
 		opacity: 0.7;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
+		white-space: nowrap;
+	}
+
+	.key-mode-label {
+		font-size: 10px;
+		color: #8be9fd;
+		opacity: 0.8;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
 		white-space: nowrap;
 	}
 

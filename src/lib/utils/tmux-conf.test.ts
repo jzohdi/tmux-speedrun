@@ -11,9 +11,18 @@ bind-key Left select-pane -L
 		`.trim());
 
 		expect(parsed.prefixKey?.key).toBe('a');
+		expect(parsed.modeKeys).toBeNull();
 		expect(parsed.unboundKeys.map((binding) => binding.key)).toContain('d');
-		expect(parsed.bindings.map((binding) => binding.commandName)).toContain('kill-session');
-		expect(parsed.bindings.map((binding) => binding.commandName)).toContain('select-pane');
+		expect(
+			parsed.bindings
+				.filter((binding) => binding.kind === 'command')
+				.map((binding) => binding.commandName)
+		).toContain('kill-session');
+		expect(
+			parsed.bindings
+				.filter((binding) => binding.kind === 'command')
+				.map((binding) => binding.commandName)
+		).toContain('select-pane');
 		expect(parsed.warnings).toHaveLength(0);
 	});
 
@@ -38,6 +47,30 @@ bind-key C-a send-prefix
 
 		expect(parsed.prefixKey?.key).toBe('a');
 		expect(parsed.bindings).toHaveLength(0);
+		expect(parsed.warnings).toHaveLength(0);
+	});
+
+	it('parses mode-keys and copy-mode table bindings', () => {
+		const parsed = parseTmuxConf(`
+set -g mode-keys vi
+unbind-key -T copy-mode-vi Space
+bind-key -T copy-mode-vi y send -X copy-pipe-and-cancel
+		`.trim());
+
+		expect(parsed.modeKeys).toBe('vi');
+		expect(parsed.unboundKeys).toContainEqual(
+			expect.objectContaining({
+				table: 'copy-mode-vi',
+				eventCode: 'Space'
+			})
+		);
+		expect(parsed.bindings).toContainEqual(
+			expect.objectContaining({
+				table: 'copy-mode-vi',
+				kind: 'copy-mode-action',
+				action: 'copy-selection-and-cancel'
+			})
+		);
 		expect(parsed.warnings).toHaveLength(0);
 	});
 });

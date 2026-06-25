@@ -30,6 +30,8 @@
 		prefixActive: boolean;
 		/** Whether the current pane is zoomed */
 		isZoomed?: boolean;
+		/** Whether tmux copy mode is active */
+		copyModeActive?: boolean;
 		/** Input mode state for rename-style commands */
 		inputMode?: InputModeState;
 		/** Confirmation mode state for y/n prompts (e.g., kill-pane) */
@@ -53,6 +55,7 @@
 		focusedPane,
 		prefixActive,
 		isZoomed = false,
+		copyModeActive = false,
 		inputMode,
 		confirmMode,
 		onInputChange,
@@ -141,6 +144,9 @@
 	function getModeText(): string {
 		if (prefixActive) {
 			return 'prefix';
+		}
+		if (copyModeActive) {
+			return 'copy';
 		}
 		if (!focusedPane) {
 			return '';
@@ -255,6 +261,8 @@
 		<div class="status-center">
 			{#if prefixActive}
 				<span class="status-prefix">-- PREFIX --</span>
+			{:else if copyModeActive}
+				<span class="status-copy-mode">-- COPY MODE --</span>
 			{:else if isZoomed}
 				<span class="status-zoomed">-- ZOOMED --</span>
 			{/if}
@@ -364,6 +372,14 @@
 		border-radius: 2px;
 		font-weight: 600;
 		animation: pulse 1s ease-in-out infinite;
+	}
+
+	.status-copy-mode {
+		background: #8be9fd;
+		color: #1c1c1c;
+		padding: 0 8px;
+		border-radius: 2px;
+		font-weight: 600;
 	}
 
 	.status-zoomed {

@@ -54,6 +54,7 @@ export function createChallengeStore() {
 	let totalSteps = $state(0);
 	let currentPrompt = $state<string | null>(null);
 	let currentRequiredInput = $state<string | null>(null);
+	let currentSeedInput = $state<string | null>(null);
 	let lastFeedback = $state<AnswerFeedback | null>(null);
 	let result = $state<ChallengeResult | null>(null);
 	let error = $state<string | null>(null);
@@ -104,6 +105,7 @@ export function createChallengeStore() {
 		totalSteps = 0;
 		currentPrompt = null;
 		currentRequiredInput = null;
+		currentSeedInput = null;
 		lastFeedback = null;
 		result = null;
 		error = null;
@@ -118,6 +120,7 @@ export function createChallengeStore() {
 			const step = await session.decryptCurrentStep();
 			currentPrompt = step.prompt;
 			currentRequiredInput = step.requiredInput ?? null;
+			currentSeedInput = step.seedInput ?? null;
 
 			// Start timer and set active
 			startTimer();
@@ -171,6 +174,7 @@ export function createChallengeStore() {
 				const step = await session.decryptCurrentStep();
 				currentPrompt = step.prompt;
 				currentRequiredInput = step.requiredInput ?? null;
+				currentSeedInput = step.seedInput ?? null;
 				console.debug('[Challenge] Next prompt:', currentPrompt);
 			}
 		} else {
@@ -212,6 +216,7 @@ export function createChallengeStore() {
 		totalSteps = 0;
 		currentPrompt = null;
 		currentRequiredInput = null;
+		currentSeedInput = null;
 		lastFeedback = null;
 		result = null;
 		error = null;
@@ -246,6 +251,9 @@ export function createChallengeStore() {
 		},
 		get currentRequiredInput() {
 			return currentRequiredInput;
+		},
+		get currentSeedInput() {
+			return currentSeedInput;
 		},
 		get lastFeedback() {
 			return lastFeedback;

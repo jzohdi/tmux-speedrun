@@ -26,6 +26,7 @@ import { bytesToString } from '$lib/crypto/utils';
 export type DecryptedStep = {
 	prompt: string;
 	requiredInput?: string;
+	seedInput?: string;
 };
 
 /**
@@ -46,6 +47,7 @@ export type ChallengeState = {
 	totalSteps: number;
 	currentPrompt: string | null;
 	currentRequiredInput: string | null;
+	currentSeedInput: string | null;
 	isComplete: boolean;
 	startTime: number;
 };
@@ -139,6 +141,7 @@ export class ChallengeSession {
 			totalSteps: this.totalSteps,
 			currentPrompt: null, // Will be set after decryption
 			currentRequiredInput: null,
+			currentSeedInput: null,
 			isComplete: this.currentStepIndex >= this.totalSteps,
 			startTime: this.startTime
 		};

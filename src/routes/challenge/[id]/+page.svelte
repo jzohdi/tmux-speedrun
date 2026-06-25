@@ -25,6 +25,20 @@
 		challenge.totalSteps > 0 && challenge.currentStepIndex === challenge.totalSteps - 1
 	);
 
+	$effect(() => {
+		const seedInput = challenge.currentSeedInput;
+		const isActive = challenge.status === 'active';
+		const terminal = terminalRef;
+
+		if (!seedInput || !isActive || !terminal) {
+			return;
+		}
+
+		requestAnimationFrame(() => {
+			terminal.getStore().setInput(seedInput);
+		});
+	});
+
 	function getStatusMessage(status: string): string {
 		switch (status) {
 			case 'loading':
