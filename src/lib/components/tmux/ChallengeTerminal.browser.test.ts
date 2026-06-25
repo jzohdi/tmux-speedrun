@@ -175,6 +175,17 @@ describe('ChallengeTerminal browser', () => {
 		await expect.element(screen.getByText('[beta]')).toBeVisible();
 	});
 
+	it('kill-server destroys all sessions and drops back to the shell', async () => {
+		const screen = await render(ChallengeTerminal);
+		const input = screen.getByRole('textbox');
+
+		await userEvent.click(input);
+		await userEvent.keyboard('kill-server{Enter}');
+
+		// The shell pane (post-detach) shows the kill-server confirmation.
+		await expect.element(screen.getByText('[killed server]')).toBeVisible();
+	});
+
 	it('supports mouse drag selection in copy mode', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

@@ -64,6 +64,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Cycle backward to the previous session',
 		'Return to the prior session'
 	],
+	'kill-server': [
+		'Kill the tmux server and every session',
+		'Destroy all sessions and the tmux server',
+		'Shut down the entire tmux server',
+		'Terminate the tmux server and all its sessions',
+		'Stop the tmux server, killing all sessions'
+	],
 
 	// Window Management
 	'new-window': [
