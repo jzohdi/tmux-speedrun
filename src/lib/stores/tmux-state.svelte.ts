@@ -879,6 +879,24 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				switchSessionRelative(operation.direction);
 				break;
 			}
+			case 'kill-server': {
+				const killed = killServer();
+				if (killed) {
+					setMode('default');
+					addHistory({
+						type: 'system',
+						content: '[killed server]',
+						timestamp: Date.now()
+					});
+				} else {
+					addHistory({
+						type: 'error',
+						content: 'no server running',
+						timestamp: Date.now()
+					});
+				}
+				break;
+			}
 		}
 	}
 
@@ -1131,6 +1149,40 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		triggerInputFocus();
 
 		return killedSession.name;
+	}
+
+	/**
+	 * Kill the tmux server: destroy every session and detach to the shell.
+	 *
+	 * No-op when no sessions exist (no server running). Emits a session-killed
+	 * signal for each destroyed session so challenge tracking and listeners stay
+	 * consistent with single-session kills.
+	 *
+	 * @returns true if any sessions were destroyed
+	 */
+	function killServer(): boolean {
+		if (state.sessions.length === 0) {
+			return false;
+		}
+
+		const killedSessions = state.sessions;
+
+		state = {
+			...state,
+			sessions: [],
+			attachedSessionIndex: null
+		};
+
+		for (const session of killedSessions) {
+			emitSignal('session-killed', {
+				sessionId: session.id,
+				sessionName: session.name
+			});
+		}
+
+		triggerInputFocus();
+
+		return true;
 	}
 
 	/**
@@ -2312,6 +2364,16 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 								addHistory({
 									type: 'system',
 									content: `[new session created: ${attachedSession?.name ?? '0'}]`,
+									timestamp: Date.now()
+								});
+								break;
+							}
+							case 'kill-server': {
+								// Kill background sessions from the shell; stay in default mode.
+								const killed = killServer();
+								addHistory({
+									type: killed ? 'system' : 'error',
+									content: killed ? '[killed server]' : 'no server running',
 									timestamp: Date.now()
 								});
 								break;

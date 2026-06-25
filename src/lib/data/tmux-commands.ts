@@ -77,6 +77,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		difficulty: 'intermediate',
 		category: 'session'
 	},
+	{
+		name: 'kill-server',
+		shortcut: 'tmux kill-server',
+		description: 'Kill the tmux server and all sessions',
+		difficulty: 'intermediate',
+		category: 'session'
+	},
 
 	// Window Management - Beginner/Intermediate
 	{

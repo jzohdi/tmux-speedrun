@@ -420,3 +420,74 @@ describe('createTmuxStore session navigation', () => {
 		expect(signals).toContain('session-attached');
 	});
 });
+
+describe('createTmuxStore kill-server command', () => {
+	it('destroys every session and returns to the shell (tmux mode)', () => {
+		tmuxConfigStore.resetForTesting();
+		const signals: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					signals.push(`cmd:${signal.commandName}`);
+				}
+				if (signal.type === 'session-killed') {
+					signals.push('session-killed');
+				}
+			}
+		});
+		store.createSession('alpha', true);
+		store.createSession('beta', true);
+		expect(store.sessionCount).toBe(3);
+
+		const handled = store.executeRegisteredTmuxCommand('kill-server');
+
+		expect(handled).toBe(true);
+		expect(store.sessionCount).toBe(0);
+		expect(store.attachedSessionIndex).toBeNull();
+		expect(store.isDetached).toBe(true);
+		expect(store.focusedPane?.mode).toBe('default');
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[killed server]');
+		expect(signals).toContain('cmd:kill-server');
+		// One session-killed signal per destroyed session.
+		expect(signals.filter((s) => s === 'session-killed')).toHaveLength(3);
+	});
+
+	it('kills background sessions when run from the shell', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.createSession('bg', false); // exists in background; still attached to session 0
+		store.detachSession();
+		expect(store.isDetached).toBe(true);
+		expect(store.sessionCount).toBe(2);
+
+		store.processCommand('tmux kill-server');
+
+		expect(store.sessionCount).toBe(0);
+		expect(store.focusedPane?.mode).toBe('default');
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[killed server]');
+	});
+
+	it('reports no server running when there are no sessions', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.executeRegisteredTmuxCommand('kill-server'); // kills the only session
+		expect(store.sessionCount).toBe(0);
+
+		store.processCommand('tmux kill-server'); // nothing left to kill
+
+		expect(store.sessionCount).toBe(0);
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('no server running');
+	});
+
+	it('reports no server running via the registered-command path when no sessions exist', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.executeRegisteredTmuxCommand('kill-server'); // kills the only session
+		expect(store.sessionCount).toBe(0);
+
+		store.executeRegisteredTmuxCommand('kill-server'); // nothing left to kill
+
+		expect(store.sessionCount).toBe(0);
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('no server running');
+	});
+});

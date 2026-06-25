@@ -56,6 +56,7 @@ export const CommandId = {
 	RENAME_SESSION: 'rename-session',
 	NEXT_SESSION: 'next-session',
 	PREVIOUS_SESSION: 'previous-session',
+	KILL_SERVER: 'kill-server',
 
 	// Window Management
 	NEW_WINDOW: 'new-window',
@@ -129,7 +130,8 @@ export type SessionOperation =
 	| { type: 'detach' }
 	| { type: 'kill'; target?: string | number }
 	| { type: 'rename'; name: string; target?: string | number }
-	| { type: 'switch'; direction: 'next' | 'previous' };
+	| { type: 'switch'; direction: 'next' | 'previous' }
+	| { type: 'kill-server' };
 
 /**
  * Pane operation types for command results.
@@ -716,6 +718,20 @@ registerCommand({
 	handler: () => ({
 		handled: true,
 		sessionOperation: { type: 'switch', direction: 'previous' }
+	})
+});
+
+/**
+ * Kill the tmux server: destroy every session and return to the shell.
+ * tmux: `tmux kill-server` (CLI only; no default keybinding).
+ */
+registerCommand({
+	name: CommandId.KILL_SERVER,
+	matchPatterns: ['tmux kill-server', 'kill-server'],
+	description: 'Kill the tmux server and all sessions',
+	handler: () => ({
+		handled: true,
+		sessionOperation: { type: 'kill-server' }
 	})
 });
 
