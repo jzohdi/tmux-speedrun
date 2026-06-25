@@ -13,17 +13,13 @@
 		shouldPreserveTerminalInputOnStepCompletion,
 		type PracticeItem
 	} from '$lib/data/practice-flow';
-	import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
 
 	// Component ref
 	let terminalRef = $state<ReturnType<typeof ChallengeTerminal> | null>(null);
 
-	const configRevision = $derived(tmuxConfigStore.revision);
-	const practiceItems = $derived.by(() => {
-		configRevision;
-
-		return createPracticeItems(getCommandsWithPrefixKeybindings());
-	});
+	// Reads tmuxConfigStore.activeConfig (via the keybinding helpers), so this
+	// re-derives automatically when the applied tmux.conf changes.
+	const practiceItems = $derived.by(() => createPracticeItems(getCommandsWithPrefixKeybindings()));
 
 	// Mode: sequential or random
 	let isRandomMode = $state(false);
@@ -46,7 +42,6 @@
 	const currentItem = $derived(practiceQueue[currentIndex] ?? null);
 	const currentStep = $derived(currentItem?.steps[currentStepIndex] ?? null);
 	const currentKeybindings = $derived.by(() => {
-		configRevision;
 		if (!currentStep) {
 			return [];
 		}
@@ -60,11 +55,7 @@
 	const currentStepContextLabel = $derived(
 		currentStep?.kind === 'copy-mode-action' ? 'copy mode' : 'prefix'
 	);
-	const prefixKey = $derived.by(() => {
-		configRevision;
-
-		return getPrefixKeyDisplay();
-	});
+	const prefixKey = $derived(getPrefixKeyDisplay());
 	const isComplete = $derived(
 		!isRandomMode && currentIndex >= practiceQueue.length && practiceQueue.length > 0
 	);
@@ -276,6 +267,8 @@
 	 */
 	function getKeybindingsDisplay(bindings: Keybinding[]): string[] {
 		// Deduplicate similar keybindings (e.g., all arrow keys for select-pane)
+		// Transient local for deduplication, not reactive state — a plain Map is correct here.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const uniqueBindings = new Map<string, Keybinding>();
 		for (const binding of bindings) {
 			// For arrow-based commands, just show one representative
@@ -321,7 +314,13 @@
 		const step = currentStep;
 		const terminal = terminalRef;
 
-		if (!item?.seedInput || !step || step.kind !== 'command' || step.commandName !== 'copy-mode' || !terminal) {
+		if (
+			!item?.seedInput ||
+			!step ||
+			step.kind !== 'command' ||
+			step.commandName !== 'copy-mode' ||
+			!terminal
+		) {
 			return;
 		}
 
@@ -449,8 +448,8 @@
 						<span class="command-category">{currentItem.category}</span>
 						<h2 class="command-name">{currentItem.title}</h2>
 						<p class="command-description">
-							{currentItem.description}{#if currentItem.requiresInput}<span
-									class="input-badge">+ input</span
+							{currentItem.description}{#if currentItem.requiresInput}<span class="input-badge"
+									>+ input</span
 								>{/if}
 						</p>
 						{#if currentItem.steps.length > 1}

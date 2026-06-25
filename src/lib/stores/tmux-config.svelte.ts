@@ -36,33 +36,48 @@ function writeStoredConfigText(text: string): void {
 	window.localStorage.setItem(TMUX_CONFIG_STORAGE_KEY, text);
 }
 
+/**
+ * Wrap parseTmuxConf with a single-entry cache keyed on the input text, so the
+ * config is only re-parsed when its text actually changes. The getters still read
+ * the underlying `$state` directly, so reactivity (and freshness in tests) is
+ * preserved — this just avoids re-parsing on every access, which happens on every
+ * keystroke via the keybinding lookup path.
+ */
+function createCachedParser(): (text: string) => ActiveConfigSnapshot {
+	let cachedText: string | null = null;
+	let cached: ActiveConfigSnapshot | null = null;
+
+	return (text: string) => {
+		if (cachedText !== text || cached === null) {
+			cachedText = text;
+			cached = parseTmuxConf(text);
+		}
+
+		return cached;
+	};
+}
+
 function createTmuxConfigStore() {
+	const parseFile = createCachedParser();
+	const parseApplied = createCachedParser();
 	const initialText = readStoredConfigText();
 	let fileText = $state(initialText);
 	let appliedText = $state(initialText);
-	let revision = $state(0);
-
-	function bumpRevision(): void {
-		revision += 1;
-	}
 
 	function setFileText(nextText: string): void {
 		fileText = nextText;
 		writeStoredConfigText(nextText);
-		bumpRevision();
 	}
 
 	function applySavedConfig(): ActiveConfigSnapshot {
 		appliedText = fileText;
-		bumpRevision();
 
-		return parseTmuxConf(appliedText);
+		return parseApplied(appliedText);
 	}
 
 	function resetForTesting(): void {
 		fileText = DEFAULT_TMUX_CONF_TEXT;
 		appliedText = DEFAULT_TMUX_CONF_TEXT;
-		revision = 0;
 
 		if (canUseLocalStorage()) {
 			window.localStorage.removeItem(TMUX_CONFIG_STORAGE_KEY);
@@ -94,12 +109,11 @@ function createTmuxConfigStore() {
 		}
 
 		appliedText = targetText;
-		bumpRevision();
 
 		return {
 			ok: true,
 			path,
-			warnings: cloneWarnings(parseTmuxConf(appliedText).warnings)
+			warnings: cloneWarnings(parseApplied(appliedText).warnings)
 		};
 	}
 
@@ -114,19 +128,16 @@ function createTmuxConfigStore() {
 			return fileText !== appliedText;
 		},
 		get fileConfig() {
-			return parseTmuxConf(fileText);
+			return parseFile(fileText);
 		},
 		get activeConfig() {
-			return parseTmuxConf(appliedText);
+			return parseApplied(appliedText);
 		},
 		get fileWarnings() {
-			return cloneWarnings(parseTmuxConf(fileText).warnings);
+			return cloneWarnings(parseFile(fileText).warnings);
 		},
 		get activeWarnings() {
-			return cloneWarnings(parseTmuxConf(appliedText).warnings);
-		},
-		get revision() {
-			return revision;
+			return cloneWarnings(parseApplied(appliedText).warnings);
 		},
 		setFileText,
 		applySavedConfig,

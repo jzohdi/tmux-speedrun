@@ -6,7 +6,11 @@
  * keybinding/runtime-config layer instead of exposing compile-time constants.
  */
 
-import { getCurrentPrefixKey, getPrefixKeyDisplay as getDisplay, isPrefixKey as matchesPrefix } from './keybindings';
+import {
+	getCurrentPrefixKey,
+	getPrefixKeyDisplay as getDisplay,
+	isPrefixKey as matchesPrefix
+} from './keybindings';
 
 export const TMUX_PREFIX_KEY = {
 	get key() {

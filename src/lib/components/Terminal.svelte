@@ -6,11 +6,7 @@
 		getChallengePoolCount,
 		isValidChallengeId
 	} from '$lib/data/challenges';
-	import {
-		createLeaderboardQuery,
-		getEntriesForChallenge,
-		type LeaderboardEntry
-	} from '$lib/queries/leaderboard';
+	import { createLeaderboardQuery, getEntriesForChallenge } from '$lib/queries/leaderboard';
 	import Manpage from './Manpage.svelte';
 
 	type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man';
@@ -32,7 +28,6 @@
 	let mode = $state<TerminalMode>('default');
 	let selectedIndex = $state(0);
 	let listData = $state<Array<{ id: string; display: string }>>([]);
-	let leaderboardData = $state<{ challengeId: string; entries: LeaderboardEntry[] } | null>(null);
 
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let terminalRef = $state<HTMLDivElement | null>(null);
@@ -64,7 +59,6 @@
 		mode = 'default';
 		selectedIndex = 0;
 		listData = [];
-		leaderboardData = null;
 		historyLengthBeforeMode = 0;
 		// Wait for Svelte to update the DOM, then focus the input
 		await tick();
@@ -126,14 +120,11 @@
 		// Note: In TanStack Query v6 for Svelte 5, the query result is reactive but not a store
 		if (leaderboardQuery.isPending) {
 			addOutput('  Loading leaderboard...');
-			leaderboardData = { challengeId: String(numericIndex), entries: [] };
 		} else if (leaderboardQuery.isError) {
 			addOutput('  Unable to load leaderboard. Try again later.', 'error');
-			leaderboardData = { challengeId: String(numericIndex), entries: [] };
 		} else {
 			// Get entries from query data
 			const entries = getEntriesForChallenge(leaderboardQuery.data, numericIndex);
-			leaderboardData = { challengeId: String(numericIndex), entries };
 
 			if (entries.length === 0) {
 				addOutput('  No entries yet. Be the first to complete this challenge!');

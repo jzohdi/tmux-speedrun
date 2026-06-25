@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { randomBytes, bytesToBase64, base64ToBytes } from '$lib/crypto';
+import { randomBytes, bytesToBase64 } from '$lib/crypto';
 import {
 	SESSION_SALT_SIZE,
 	generateSessionSalt,

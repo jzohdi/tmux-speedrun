@@ -18,6 +18,9 @@
 	const keybindingPreview = $derived(getPrefixKeybindings().slice(0, 8));
 	const draftWarningCount = $derived(parsedDraft.warnings.length);
 	const appliedWarningCount = $derived(activeWarnings.length);
+	const gutterLineNumbers = $derived(
+		Array.from({ length: draftText.split('\n').length }, (_, index) => index + 1)
+	);
 
 	function handleSave(): void {
 		tmuxConfigStore.setFileText(draftText);
@@ -88,8 +91,8 @@
 				</div>
 				<div class="editor-frame">
 					<div class="editor-gutter">
-						{#each draftText.split('\n') as _, index}
-							<span>{index + 1}</span>
+						{#each gutterLineNumbers as lineNumber (lineNumber)}
+							<span>{lineNumber}</span>
 						{/each}
 					</div>
 					<textarea
@@ -149,7 +152,10 @@
 					{:else}
 						<ul class="warning-list">
 							{#each parsedDraft.warnings as warning}
-								<li class:warning={warning.severity === 'warning'} class:error={warning.severity === 'error'}>
+								<li
+									class:warning={warning.severity === 'warning'}
+									class:error={warning.severity === 'error'}
+								>
 									<strong>Line {warning.line}</strong>
 									<span>{warning.message}</span>
 								</li>
@@ -165,7 +171,10 @@
 					{:else}
 						<ul class="warning-list">
 							{#each activeWarnings as warning}
-								<li class:warning={warning.severity === 'warning'} class:error={warning.severity === 'error'}>
+								<li
+									class:warning={warning.severity === 'warning'}
+									class:error={warning.severity === 'error'}
+								>
 									<strong>Line {warning.line}</strong>
 									<span>{warning.message}</span>
 								</li>

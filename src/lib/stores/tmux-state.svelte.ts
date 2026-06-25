@@ -56,16 +56,16 @@ function formatPaneList(panes: Pane[], focusedId: string): string {
 	const currentPanes =
 		typeof window !== 'undefined'
 			? Array.from(document.querySelectorAll('.pane-container')).map((node) => {
-				const bounds = node.getBoundingClientRect();
-				return {
-					width: Math.round(bounds.width),
-					height: Math.round(bounds.height)
-				};
-			})
+					const bounds = node.getBoundingClientRect();
+					return {
+						width: Math.round(bounds.width),
+						height: Math.round(bounds.height)
+					};
+				})
 			: panes.map(() => ({
-				width: 160,
-				height: 24
-			}));
+					width: 160,
+					height: 24
+				}));
 	return panes
 		.map((pane, index) => {
 			const isActive = pane.id === focusedId;
@@ -231,7 +231,6 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	const attachedSession = $derived(
 		state.attachedSessionIndex !== null ? state.sessions[state.attachedSessionIndex] : null
 	);
-	const sessionCount = $derived(state.sessions.length);
 	const isDetached = $derived(state.attachedSessionIndex === null);
 
 	// Shell pane (used when not attached to any session)
@@ -266,10 +265,6 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	});
 	const paneCount = $derived(isDetached ? 1 : activeWindow ? countPanes(activeWindow.paneTree) : 0);
 	const windowCount = $derived(attachedSession?.windows.length ?? 0);
-
-	// Zoom state
-	const zoomedPaneId = $derived(activeWindow?.zoomedPaneId ?? null);
-	const isZoomed = $derived(zoomedPaneId !== null);
 
 	function isDetachedState(): boolean {
 		return state.attachedSessionIndex === null;
@@ -1372,10 +1367,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 						windows: session.windows.map((w, windowIdx) =>
 							windowIdx === session.activeWindowIndex
 								? {
-									...w,
-									paneTree: newTree,
-									zoomedPaneId: shouldClearZoom ? null : w.zoomedPaneId
-								}
+										...w,
+										paneTree: newTree,
+										zoomedPaneId: shouldClearZoom ? null : w.zoomedPaneId
+									}
 								: w
 						)
 					};
@@ -2153,7 +2148,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		// Clear input
 		setInput('');
 
-		if (trimmedCommand === `vi ${TMUX_CONFIG_PATH}` || trimmedCommand === `vim ${TMUX_CONFIG_PATH}`) {
+		if (
+			trimmedCommand === `vi ${TMUX_CONFIG_PATH}` ||
+			trimmedCommand === `vim ${TMUX_CONFIG_PATH}`
+		) {
 			openConfigEditor();
 			return;
 		}

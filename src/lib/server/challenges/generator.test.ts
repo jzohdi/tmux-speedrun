@@ -87,7 +87,7 @@ describe('Prompt Variations', () => {
 	});
 
 	it('each command has 4-6 variations', () => {
-		for (const [cmdName, variations] of Object.entries(PROMPT_VARIATIONS)) {
+		for (const variations of Object.values(PROMPT_VARIATIONS)) {
 			expect(variations.length).toBeGreaterThanOrEqual(4);
 			expect(variations.length).toBeLessThanOrEqual(6);
 		}
@@ -127,15 +127,15 @@ describe('Prompt Variations', () => {
 	});
 
 	it('keeps previous-window and last-window prompts unambiguous', () => {
-		expect(PROMPT_VARIATIONS['previous-window'].some((prompt) => prompt.includes('previous active'))).toBe(
-			false
-		);
-		expect(PROMPT_VARIATIONS['last-window'].some((prompt) => prompt.includes('previous active'))).toBe(
-			false
-		);
-		expect(PROMPT_VARIATIONS['last-window'].some((prompt) => prompt.includes('Toggle to the previous'))).toBe(
-			false
-		);
+		expect(
+			PROMPT_VARIATIONS['previous-window'].some((prompt) => prompt.includes('previous active'))
+		).toBe(false);
+		expect(
+			PROMPT_VARIATIONS['last-window'].some((prompt) => prompt.includes('previous active'))
+		).toBe(false);
+		expect(
+			PROMPT_VARIATIONS['last-window'].some((prompt) => prompt.includes('Toggle to the previous'))
+		).toBe(false);
 	});
 });
 
@@ -262,8 +262,12 @@ describe('Instruction Generation', () => {
 			);
 
 			expect(compositeInstructions).toHaveLength(1);
-			expect(instructions.some((instruction) => instruction.expectedAction === 'copy-mode')).toBe(false);
-			expect(instructions.some((instruction) => instruction.expectedAction === 'paste-buffer')).toBe(false);
+			expect(instructions.some((instruction) => instruction.expectedAction === 'copy-mode')).toBe(
+				false
+			);
+			expect(
+				instructions.some((instruction) => instruction.expectedAction === 'paste-buffer')
+			).toBe(false);
 			expect(compositeInstructions[0].seedInput).toBeDefined();
 			expect(compositeInstructions[0].expectedAction).toBe(
 				createCopyPasteSequenceAction(compositeInstructions[0].seedInput!)

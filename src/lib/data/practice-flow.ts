@@ -108,5 +108,9 @@ export function shouldPreserveTerminalInputOnStepCompletion(
 	item: PracticeItem,
 	step: PracticeStep
 ): boolean {
-	return item.id === 'copy-paste-sequence' && step.kind === 'command' && step.commandName === 'paste-buffer';
+	return (
+		item.id === 'copy-paste-sequence' &&
+		step.kind === 'command' &&
+		step.commandName === 'paste-buffer'
+	);
 }

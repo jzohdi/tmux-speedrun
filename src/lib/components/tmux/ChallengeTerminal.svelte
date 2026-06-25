@@ -42,13 +42,9 @@
 		 * Whether the terminal is disabled (commands won't be processed).
 		 */
 		disabled?: boolean;
-		/**
-		 * If provided, shows what input value is expected (for rename commands).
-		 */
-		expectedInput?: string;
 	};
 
-	let { onSignal, disabled = false /* expectedInput */ }: ChallengeTerminalProps = $props();
+	let { onSignal, disabled = false }: ChallengeTerminalProps = $props();
 
 	// ========================================================================
 	// STATE

@@ -115,13 +115,13 @@ describe('tmux copy surface', () => {
 			history: [{ type: 'output', content: 'alpha\nbeta', timestamp: 1 }]
 		});
 
-		expect(getCopySurfaceSelectionRows(surface, { row: 0, column: 2 }, { row: 2, column: 1 })).toEqual(
-			[
-				{ row: 0, text: 'alpha', startColumn: 2, endColumn: 5 },
-				{ row: 1, text: 'beta', startColumn: 0, endColumn: 4 },
-				{ row: 2, text: '% ls', startColumn: 0, endColumn: 2 }
-			]
-		);
+		expect(
+			getCopySurfaceSelectionRows(surface, { row: 0, column: 2 }, { row: 2, column: 1 })
+		).toEqual([
+			{ row: 0, text: 'alpha', startColumn: 2, endColumn: 5 },
+			{ row: 1, text: 'beta', startColumn: 0, endColumn: 4 },
+			{ row: 2, text: '% ls', startColumn: 0, endColumn: 2 }
+		]);
 	});
 
 	it('keeps long logical lines unwrapped in the surface model', () => {

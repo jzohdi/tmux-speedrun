@@ -18,7 +18,9 @@ describe('practice flow', () => {
 	});
 
 	it('skips the composite copy practice item when copy or paste is unavailable', () => {
-		const items = createPracticeItems(TMUX_COMMANDS.filter((command) => command.name !== 'paste-buffer'));
+		const items = createPracticeItems(
+			TMUX_COMMANDS.filter((command) => command.name !== 'paste-buffer')
+		);
 
 		expect(items.some((item) => item.id === 'copy-paste-sequence')).toBe(false);
 	});
@@ -33,7 +35,11 @@ describe('practice flow', () => {
 				kind: 'copy-mode-action',
 				action: 'begin-selection'
 			}),
-			expect.objectContaining({ id: 'cursor-left', kind: 'copy-mode-action', action: 'cursor-left' }),
+			expect.objectContaining({
+				id: 'cursor-left',
+				kind: 'copy-mode-action',
+				action: 'cursor-left'
+			}),
 			expect.objectContaining({
 				id: 'copy-selection-and-cancel',
 				kind: 'copy-mode-action',

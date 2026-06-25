@@ -212,7 +212,6 @@
 
 {#if confirmMode?.active}
 	<!-- Confirmation mode: orange bar with y/n prompt -->
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div
 		class="status-bar confirm-mode"
 		bind:this={confirmRef}

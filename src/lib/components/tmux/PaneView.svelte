@@ -69,8 +69,12 @@
 	// Derived
 	const prompt = $derived(pane.mode === 'tmux' ? '%' : '$');
 	const showCopySurface = $derived(pane.copyState !== null && pane.mode === 'tmux');
-	const showInput = $derived(pane.mode !== 'man' && pane.mode !== 'editor' && pane.copyState === null);
-	const showHistory = $derived(pane.mode !== 'man' && pane.mode !== 'editor' && pane.copyState === null);
+	const showInput = $derived(
+		pane.mode !== 'man' && pane.mode !== 'editor' && pane.copyState === null
+	);
+	const showHistory = $derived(
+		pane.mode !== 'man' && pane.mode !== 'editor' && pane.copyState === null
+	);
 	const isEditorMode = $derived(pane.mode === 'editor');
 	const editorState = $derived(pane.editorState);
 	const copySurface = $derived(showCopySurface ? createCopySurface(pane) : null);
@@ -90,7 +94,9 @@
 	const overlayText = $derived(getPaneOverlayText(paneOverlay, pane.id));
 	const showPaneOverlay = $derived(overlayText !== null);
 	const overlayClassName = $derived(
-		paneOverlay?.kind === 'pane-number' ? 'pane-overlay pane-number-overlay' : 'pane-overlay clock-overlay'
+		paneOverlay?.kind === 'pane-number'
+			? 'pane-overlay pane-number-overlay'
+			: 'pane-overlay clock-overlay'
 	);
 
 	/**

@@ -9,8 +9,17 @@ import {
 	hasPrefixKeybinding,
 	eventToBindingKey,
 	getPrefixKeybindings,
-	getPrefixKeyDisplay
+	getPrefixKeyDisplay,
+	type Keybinding
 } from './keybindings';
+
+/**
+ * Read the command name from a binding, narrowing the discriminated union.
+ * Returns undefined for non-command bindings (e.g. copy-mode actions).
+ */
+function commandNameOf(binding: Keybinding | undefined): string | undefined {
+	return binding?.kind === 'command' ? binding.commandName : undefined;
+}
 
 /**
  * Create a mock KeyboardEvent for testing.
@@ -49,12 +58,12 @@ describe('Keybindings', () => {
 
 		it('maps split-vertical to % by default', () => {
 			const binding = lookupKeybinding(createKeyEvent('%'));
-			expect(binding?.commandName).toBe('split-vertical');
+			expect(commandNameOf(binding)).toBe('split-vertical');
 		});
 
 		it('maps rotate-panes to Ctrl+o by default', () => {
 			const binding = lookupKeybinding(createKeyEvent('o', { ctrlKey: true }));
-			expect(binding?.commandName).toBe('rotate-panes');
+			expect(commandNameOf(binding)).toBe('rotate-panes');
 			expect(binding?.withCtrl).toBe(true);
 		});
 	});
@@ -158,7 +167,7 @@ describe('Keybindings', () => {
 			const binding = lookupKeybinding(event);
 
 			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('split-vertical');
+			expect(commandNameOf(binding)).toBe('split-vertical');
 		});
 
 		it('should find binding for c key', () => {
@@ -166,12 +175,12 @@ describe('Keybindings', () => {
 			const binding = lookupKeybinding(event);
 
 			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('new-window');
+			expect(commandNameOf(binding)).toBe('new-window');
 		});
 
 		it('maps p to previous-window and l to last-window', () => {
-			expect(lookupKeybinding(createKeyEvent('p'))?.commandName).toBe('previous-window');
-			expect(lookupKeybinding(createKeyEvent('l'))?.commandName).toBe('last-window');
+			expect(commandNameOf(lookupKeybinding(createKeyEvent('p')))).toBe('previous-window');
+			expect(commandNameOf(lookupKeybinding(createKeyEvent('l')))).toBe('last-window');
 		});
 
 		it('should find binding for Ctrl+o', () => {
@@ -179,7 +188,7 @@ describe('Keybindings', () => {
 			const binding = lookupKeybinding(event);
 
 			expect(binding).toBeDefined();
-			expect(binding?.commandName).toBe('rotate-panes');
+			expect(commandNameOf(binding)).toBe('rotate-panes');
 		});
 
 		it('should return undefined for unknown key', () => {
@@ -194,16 +203,14 @@ describe('Keybindings', () => {
 			tmuxConfigStore.applySavedConfig();
 
 			expect(lookupKeybinding(createKeyEvent('d'))).toBeUndefined();
-			expect(lookupKeybinding(createKeyEvent('y'))?.commandName).toBe('kill-session');
+			expect(commandNameOf(lookupKeybinding(createKeyEvent('y')))).toBe('kill-session');
 		});
 
 		it('looks up default emacs copy-mode bindings', () => {
 			expect(
 				lookupKeybinding(createKeyEvent(' ', { code: 'Space', ctrlKey: true }), 'copy-mode')?.kind
 			).toBe('copy-mode-action');
-			expect(
-				lookupKeybinding(createKeyEvent('w', { altKey: true }), 'copy-mode')
-			).toMatchObject({
+			expect(lookupKeybinding(createKeyEvent('w', { altKey: true }), 'copy-mode')).toMatchObject({
 				kind: 'copy-mode-action',
 				action: 'copy-selection-and-cancel'
 			});
@@ -222,7 +229,9 @@ describe('Keybindings', () => {
 			tmuxConfigStore.setFileText('set -g mode-keys vi');
 			tmuxConfigStore.applySavedConfig();
 
-			expect(lookupKeybinding(createKeyEvent(' ', { code: 'Space' }), 'copy-mode-vi')).toMatchObject({
+			expect(
+				lookupKeybinding(createKeyEvent(' ', { code: 'Space' }), 'copy-mode-vi')
+			).toMatchObject({
 				kind: 'copy-mode-action',
 				action: 'begin-selection'
 			});
@@ -233,14 +242,18 @@ describe('Keybindings', () => {
 		});
 
 		it('applies config overrides inside copy-mode tables', () => {
-			tmuxConfigStore.setFileText(`
+			tmuxConfigStore.setFileText(
+				`
 set -g mode-keys vi
 unbind-key -T copy-mode-vi Space
 bind-key -T copy-mode-vi y send -X copy-pipe-and-cancel
-			`.trim());
+			`.trim()
+			);
 			tmuxConfigStore.applySavedConfig();
 
-			expect(lookupKeybinding(createKeyEvent(' ', { code: 'Space' }), 'copy-mode-vi')).toBeUndefined();
+			expect(
+				lookupKeybinding(createKeyEvent(' ', { code: 'Space' }), 'copy-mode-vi')
+			).toBeUndefined();
 			expect(lookupKeybinding(createKeyEvent('y'), 'copy-mode-vi')).toMatchObject({
 				kind: 'copy-mode-action',
 				action: 'copy-selection-and-cancel'

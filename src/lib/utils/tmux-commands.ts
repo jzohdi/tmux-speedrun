@@ -297,8 +297,7 @@ function matchesPattern(
 	// prefix mode still needs a token boundary so aliases like "new"
 	// don't accidentally match different commands like "new-window".
 	return (
-		normalizedCommand === normalizedPattern ||
-		normalizedCommand.startsWith(normalizedPattern + ' ')
+		normalizedCommand === normalizedPattern || normalizedCommand.startsWith(normalizedPattern + ' ')
 	);
 }
 

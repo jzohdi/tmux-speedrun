@@ -596,7 +596,11 @@ function parseBindDirective(tokens: string[], lineNumber: number, rawLine: strin
 	};
 }
 
-function parseUnbindDirective(tokens: string[], lineNumber: number, rawLine: string): ParsedTmuxConf {
+function parseUnbindDirective(
+	tokens: string[],
+	lineNumber: number,
+	rawLine: string
+): ParsedTmuxConf {
 	const { table, positionalTokens, warnings } = parseBindLikeDirective(tokens, lineNumber, rawLine);
 	const keyToken = positionalTokens[0];
 

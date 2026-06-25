@@ -249,12 +249,7 @@
 
 		<!-- Terminal -->
 		<section class="terminal-section">
-			<ChallengeTerminal
-				bind:this={terminalRef}
-				onSignal={handleSignal}
-				disabled={!showInput}
-				expectedInput={challenge.currentRequiredInput ?? undefined}
-			/>
+			<ChallengeTerminal bind:this={terminalRef} onSignal={handleSignal} disabled={!showInput} />
 		</section>
 
 		<!-- Completion Screen -->

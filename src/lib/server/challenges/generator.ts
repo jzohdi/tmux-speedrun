@@ -99,7 +99,11 @@ export function generateInstructions(challengeId: number): Instruction[] {
 		).length;
 		const additionalInputNeeded = minInputCommands - currentInputCount;
 
-		for (let i = 0; i < additionalInputNeeded && instructions.length < maxStandardInstructions; i++) {
+		for (
+			let i = 0;
+			i < additionalInputNeeded && instructions.length < maxStandardInstructions;
+			i++
+		) {
 			// Reuse input commands with new random strings
 			const cmd = inputCommands[i % inputCommands.length];
 			instructions.push(createInputInstruction(cmd));

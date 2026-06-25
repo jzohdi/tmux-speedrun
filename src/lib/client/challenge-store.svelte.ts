@@ -5,12 +5,7 @@
  * Components can import and use this to display prompts, progress, and results.
  */
 
-import {
-	ChallengeSession,
-	type DecryptedStep,
-	type ChallengeResult,
-	formatDuration
-} from './challenge';
+import { ChallengeSession, type ChallengeResult, formatDuration } from './challenge';
 
 /**
  * Challenge status enum.
