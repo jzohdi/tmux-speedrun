@@ -478,4 +478,16 @@ describe('createTmuxStore kill-server command', () => {
 		expect(store.sessionCount).toBe(0);
 		expect(store.focusedPane?.history.at(-1)?.content).toBe('no server running');
 	});
+
+	it('reports no server running via the registered-command path when no sessions exist', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.executeRegisteredTmuxCommand('kill-server'); // kills the only session
+		expect(store.sessionCount).toBe(0);
+
+		store.executeRegisteredTmuxCommand('kill-server'); // nothing left to kill
+
+		expect(store.sessionCount).toBe(0);
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('no server running');
+	});
 });
