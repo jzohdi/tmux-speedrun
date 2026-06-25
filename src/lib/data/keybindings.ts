@@ -89,6 +89,8 @@ function createCopyModeBinding(
 const DEFAULT_KEYBINDINGS: Keybinding[] = [
 	createCommandBinding('prefix', 'd', 'detach', { commandText: 'detach' }),
 	createCommandBinding('prefix', '$', 'rename-session'),
+	createCommandBinding('prefix', ')', 'next-session', { commandText: 'next-session' }),
+	createCommandBinding('prefix', '(', 'previous-session', { commandText: 'previous-session' }),
 	createCommandBinding('prefix', 'c', 'new-window', { commandText: 'new-window' }),
 	createCommandBinding('prefix', 'n', 'next-window', { commandText: 'next-window' }),
 	createCommandBinding('prefix', 'p', 'previous-window', { commandText: 'previous-window' }),

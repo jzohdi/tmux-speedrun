@@ -612,6 +612,34 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	}
 
 	/**
+	 * Switch to the next or previous session relative to the attached one,
+	 * wrapping around the session list.
+	 *
+	 * No-op when detached or when only one session exists (matches tmux, which
+	 * silently stays put rather than erroring).
+	 *
+	 * @returns true if the attached session changed
+	 */
+	function switchSessionRelative(direction: 'next' | 'previous'): boolean {
+		if (state.attachedSessionIndex === null) {
+			return false;
+		}
+
+		const sessionTotal = state.sessions.length;
+		if (sessionTotal <= 1) {
+			return false;
+		}
+
+		const currentIndex = state.attachedSessionIndex;
+		const nextIndex =
+			direction === 'next'
+				? (currentIndex + 1) % sessionTotal
+				: (currentIndex - 1 + sessionTotal) % sessionTotal;
+
+		return attachSessionByTarget(nextIndex);
+	}
+
+	/**
 	 * Detach from the current session.
 	 * The session continues to exist in the background.
 	 * Returns the name of the detached session for display purposes.
@@ -843,6 +871,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 						timestamp: Date.now()
 					});
 				}
+				break;
+			}
+			case 'switch': {
+				// Relative session switch. Silent no-op when detached or only one
+				// session exists, mirroring next-window/previous-window behavior.
+				switchSessionRelative(operation.direction);
 				break;
 			}
 		}

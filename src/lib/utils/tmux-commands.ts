@@ -54,6 +54,8 @@ export const CommandId = {
 	LIST_SESSIONS: 'list-sessions',
 	KILL_SESSION: 'kill-session',
 	RENAME_SESSION: 'rename-session',
+	NEXT_SESSION: 'next-session',
+	PREVIOUS_SESSION: 'previous-session',
 
 	// Window Management
 	NEW_WINDOW: 'new-window',
@@ -126,7 +128,8 @@ export type SessionOperation =
 	| { type: 'attach'; target: string | number }
 	| { type: 'detach' }
 	| { type: 'kill'; target?: string | number }
-	| { type: 'rename'; name: string; target?: string | number };
+	| { type: 'rename'; name: string; target?: string | number }
+	| { type: 'switch'; direction: 'next' | 'previous' };
 
 /**
  * Pane operation types for command results.
@@ -686,6 +689,34 @@ registerCommand({
 			sessionOperation: { type: 'rename', name }
 		};
 	}
+});
+
+/**
+ * Switch to the next session (wraps around).
+ * Bound to prefix + ) by default (tmux: switch-client -n).
+ */
+registerCommand({
+	name: CommandId.NEXT_SESSION,
+	matchPatterns: ['next-session'],
+	description: 'Switch to the next session',
+	handler: () => ({
+		handled: true,
+		sessionOperation: { type: 'switch', direction: 'next' }
+	})
+});
+
+/**
+ * Switch to the previous session (wraps around).
+ * Bound to prefix + ( by default (tmux: switch-client -p).
+ */
+registerCommand({
+	name: CommandId.PREVIOUS_SESSION,
+	matchPatterns: ['previous-session'],
+	description: 'Switch to the previous session',
+	handler: () => ({
+		handled: true,
+		sessionOperation: { type: 'switch', direction: 'previous' }
+	})
 });
 
 // ============================================================================

@@ -150,6 +150,31 @@ describe('ChallengeTerminal browser', () => {
 		await expect.element(screen.getByText('man tmux')).toBeVisible();
 	});
 
+	it('switches between sessions with prefix ) and prefix (', async () => {
+		const screen = await render(ChallengeTerminal);
+		const input = screen.getByRole('textbox');
+		const terminal = screen.getByRole('application', {
+			name: /challenge terminal/i
+		});
+
+		// Create two extra named sessions; each attaches on creation.
+		await userEvent.click(input);
+		await userEvent.keyboard('new-session -s alpha{Enter}');
+		await expect.element(screen.getByText('[alpha]')).toBeVisible();
+
+		await userEvent.keyboard('new-session -s beta{Enter}');
+		await expect.element(screen.getByText('[beta]')).toBeVisible();
+
+		// prefix + ( moves to the previous session (beta -> alpha).
+		await userEvent.click(terminal);
+		await userEvent.keyboard('{Control>}b{/Control}(');
+		await expect.element(screen.getByText('[alpha]')).toBeVisible();
+
+		// prefix + ) moves to the next session (alpha -> beta).
+		await userEvent.keyboard('{Control>}b{/Control})');
+		await expect.element(screen.getByText('[beta]')).toBeVisible();
+	});
+
 	it('supports mouse drag selection in copy mode', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

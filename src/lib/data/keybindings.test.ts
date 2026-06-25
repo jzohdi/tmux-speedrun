@@ -183,6 +183,11 @@ describe('Keybindings', () => {
 			expect(commandNameOf(lookupKeybinding(createKeyEvent('l')))).toBe('last-window');
 		});
 
+		it('maps ) to next-session and ( to previous-session', () => {
+			expect(commandNameOf(lookupKeybinding(createKeyEvent(')')))).toBe('next-session');
+			expect(commandNameOf(lookupKeybinding(createKeyEvent('(')))).toBe('previous-session');
+		});
+
 		it('should find binding for Ctrl+o', () => {
 			const event = createKeyEvent('o', { ctrlKey: true });
 			const binding = lookupKeybinding(event);
