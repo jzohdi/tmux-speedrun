@@ -340,3 +340,83 @@ describe('createTmuxStore paste buffer foundations', () => {
 		expect(store.focusedPane?.copyState).toBeNull();
 	});
 });
+
+describe('createTmuxStore session navigation', () => {
+	it('cycles forward through sessions with next-session, wrapping around', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.createSession('1', true);
+		store.createSession('2', true);
+		expect(store.attachedSessionIndex).toBe(2);
+
+		expect(store.executeRegisteredTmuxCommand('next-session')).toBe(true);
+		expect(store.attachedSessionIndex).toBe(0); // wraps 2 -> 0
+
+		store.executeRegisteredTmuxCommand('next-session');
+		expect(store.attachedSessionIndex).toBe(1);
+	});
+
+	it('cycles backward through sessions with previous-session, wrapping around', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.createSession('1', true);
+		store.createSession('2', true);
+		expect(store.attachedSessionIndex).toBe(2);
+
+		store.executeRegisteredTmuxCommand('previous-session');
+		expect(store.attachedSessionIndex).toBe(1);
+
+		store.executeRegisteredTmuxCommand('previous-session'); // 1 -> 0
+		store.executeRegisteredTmuxCommand('previous-session'); // 0 -> wraps to 2
+		expect(store.attachedSessionIndex).toBe(2);
+	});
+
+	it('is a no-op when only one session exists', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		expect(store.attachedSessionIndex).toBe(0);
+
+		store.executeRegisteredTmuxCommand('next-session');
+		expect(store.attachedSessionIndex).toBe(0);
+
+		store.executeRegisteredTmuxCommand('previous-session');
+		expect(store.attachedSessionIndex).toBe(0);
+	});
+
+	it('is a no-op when detached, even with multiple sessions', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.createSession('1', true);
+		store.createSession('2', true);
+		store.detachSession();
+		expect(store.attachedSessionIndex).toBeNull();
+
+		store.executeRegisteredTmuxCommand('next-session');
+		expect(store.attachedSessionIndex).toBeNull();
+
+		store.executeRegisteredTmuxCommand('previous-session');
+		expect(store.attachedSessionIndex).toBeNull();
+	});
+
+	it('emits command-executed and session-attached when switching sessions', () => {
+		tmuxConfigStore.resetForTesting();
+		const signals: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					signals.push(`cmd:${signal.commandName}`);
+				}
+				if (signal.type === 'session-attached') {
+					signals.push('session-attached');
+				}
+			}
+		});
+		store.createSession('1', true);
+		signals.length = 0;
+
+		store.executeRegisteredTmuxCommand('next-session'); // 1 -> 0
+		expect(store.attachedSessionIndex).toBe(0);
+		expect(signals).toContain('cmd:next-session');
+		expect(signals).toContain('session-attached');
+	});
+});

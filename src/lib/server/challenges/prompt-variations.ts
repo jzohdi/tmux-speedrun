@@ -50,6 +50,20 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'End a tmux session',
 		'Shut down a session'
 	],
+	'next-session': [
+		'Switch to the next session',
+		'Move to the next tmux session',
+		'Go to the next session',
+		'Cycle forward to the next session',
+		'Advance to the next session'
+	],
+	'previous-session': [
+		'Switch to the previous session',
+		'Move to the previous tmux session',
+		'Go back to the previous session',
+		'Cycle backward to the previous session',
+		'Return to the prior session'
+	],
 
 	// Window Management
 	'new-window': [

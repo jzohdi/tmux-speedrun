@@ -63,6 +63,20 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		category: 'session',
 		requiresInput: true
 	},
+	{
+		name: 'next-session',
+		shortcut: 'prefix + )',
+		description: 'Switch to the next session',
+		difficulty: 'intermediate',
+		category: 'session'
+	},
+	{
+		name: 'previous-session',
+		shortcut: 'prefix + (',
+		description: 'Switch to the previous session',
+		difficulty: 'intermediate',
+		category: 'session'
+	},
 
 	// Window Management - Beginner/Intermediate
 	{
