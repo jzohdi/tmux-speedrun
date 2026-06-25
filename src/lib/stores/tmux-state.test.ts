@@ -383,6 +383,21 @@ describe('createTmuxStore session navigation', () => {
 		expect(store.attachedSessionIndex).toBe(0);
 	});
 
+	it('is a no-op when detached, even with multiple sessions', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.createSession('1', true);
+		store.createSession('2', true);
+		store.detachSession();
+		expect(store.attachedSessionIndex).toBeNull();
+
+		store.executeRegisteredTmuxCommand('next-session');
+		expect(store.attachedSessionIndex).toBeNull();
+
+		store.executeRegisteredTmuxCommand('previous-session');
+		expect(store.attachedSessionIndex).toBeNull();
+	});
+
 	it('emits command-executed and session-attached when switching sessions', () => {
 		tmuxConfigStore.resetForTesting();
 		const signals: string[] = [];
