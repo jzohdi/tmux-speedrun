@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { createTmuxStore } from './tmux-state.svelte';
 import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
-import { createPane, createSession, createWindow, findPaneById } from '$lib/utils/pane-tree';
+import {
+	createPane,
+	createSession,
+	createWindow,
+	findPaneById,
+	splitPane,
+	type Pane
+} from '$lib/utils/pane-tree';
 
 describe('createTmuxStore session killing', () => {
 	it('allows killing the last remaining session', async () => {
@@ -884,5 +891,127 @@ describe('createTmuxStore list-keys command', () => {
 		store.executeRegisteredTmuxCommand('list-keys');
 
 		expect(commandNames).toContain('list-keys');
+	});
+});
+
+describe('createTmuxStore break-pane command', () => {
+	// Build an attached store whose single window has two panes, with the second
+	// (split-off) pane focused. Seeding via initialState avoids the unreliable
+	// derived reads of chaining splitPane + addHistory/togglePaneZoom in a test.
+	function createTwoPaneStore(options: { focusedContent?: string; zoomFocused?: boolean } = {}) {
+		const session = createSession('0');
+		const window = session.windows[0];
+		const rootPane = window.paneTree as Pane;
+		const result = splitPane(window.paneTree, rootPane.id, 'horizontal');
+		if (!result) {
+			throw new Error('expected split to succeed');
+		}
+
+		window.paneTree = result.tree;
+		session.focusedPaneId = result.newPane.id;
+		if (options.focusedContent) {
+			result.newPane.history = [{ type: 'output', content: options.focusedContent, timestamp: 1 }];
+		}
+		if (options.zoomFocused) {
+			window.zoomedPaneId = result.newPane.id;
+		}
+
+		return createTmuxStore({
+			initialState: {
+				sessions: [session],
+				attachedSessionIndex: 0,
+				shellPane: createPane('default'),
+				pasteBuffers: []
+			}
+		});
+	}
+
+	it('breaks the focused pane into a new active window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.splitPane('horizontal'); // 2 panes, focused on the new one
+		const movedPaneId = store.focusedPaneId;
+		expect(store.windowCount).toBe(1);
+		expect(store.paneCount).toBe(2);
+
+		const handled = store.executeRegisteredTmuxCommand('break-pane');
+
+		expect(handled).toBe(true);
+		expect(store.windowCount).toBe(2);
+		expect(store.activeWindowIndex).toBe(1);
+		expect(store.paneCount).toBe(1); // new window holds the single moved pane
+		expect(store.focusedPaneId).toBe(movedPaneId);
+
+		// Source window collapsed back to a single pane.
+		store.switchWindow(0);
+		expect(store.paneCount).toBe(1);
+	});
+
+	it('resolves the breakp alias to break the focused pane into a new window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.splitPane('horizontal'); // 2 panes, focused on the new one
+		const movedPaneId = store.focusedPaneId;
+
+		const handled = store.executeRegisteredTmuxCommand('breakp');
+
+		expect(handled).toBe(true);
+		expect(store.windowCount).toBe(2);
+		expect(store.activeWindowIndex).toBe(1);
+		expect(store.paneCount).toBe(1); // new window holds the single moved pane
+		expect(store.focusedPaneId).toBe(movedPaneId);
+	});
+
+	it('is a no-op when the window has only one pane', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('break-pane');
+
+		expect(store.windowCount).toBe(1);
+		expect(store.paneCount).toBe(1);
+	});
+
+	it('preserves the moved pane history', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTwoPaneStore({ focusedContent: 'kept' });
+
+		store.executeRegisteredTmuxCommand('break-pane');
+
+		expect(store.focusedPane?.history.some((entry) => entry.content === 'kept')).toBe(true);
+	});
+
+	it('clears the source window zoom when the zoomed pane is broken out', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTwoPaneStore({ zoomFocused: true });
+		expect(store.isZoomed).toBe(true);
+
+		store.executeRegisteredTmuxCommand('break-pane');
+
+		expect(store.isZoomed).toBe(false); // new window is not zoomed
+		store.switchWindow(0);
+		expect(store.isZoomed).toBe(false); // source window zoom cleared
+	});
+
+	it('emits command-executed and window-created when breaking a pane', () => {
+		tmuxConfigStore.resetForTesting();
+		const signals: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					signals.push(`cmd:${signal.commandName}`);
+				}
+				if (signal.type === 'window-created') {
+					signals.push('window-created');
+				}
+			}
+		});
+		store.splitPane('horizontal');
+		signals.length = 0;
+
+		store.executeRegisteredTmuxCommand('break-pane');
+
+		expect(signals).toContain('cmd:break-pane');
+		expect(signals).toContain('window-created');
 	});
 });

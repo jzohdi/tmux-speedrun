@@ -100,6 +100,7 @@ const DEFAULT_KEYBINDINGS: Keybinding[] = [
 	createCommandBinding('prefix', '"', 'split-horizontal', { commandText: 'split-window -v' }),
 	createCommandBinding('prefix', '%', 'split-vertical', { commandText: 'split-window -h' }),
 	createCommandBinding('prefix', 'x', 'kill-pane', { commandText: 'kill-pane' }),
+	createCommandBinding('prefix', '!', 'break-pane', { commandText: 'break-pane' }),
 	createCommandBinding('prefix', 'z', 'toggle-zoom', { commandText: 'resize-pane -Z' }),
 	createCommandBinding('prefix', '{', 'swap-pane', { commandText: 'swap-pane -U' }),
 	createCommandBinding('prefix', '}', 'swap-pane', { commandText: 'swap-pane -D' }),

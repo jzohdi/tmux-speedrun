@@ -71,6 +71,7 @@ export const CommandId = {
 	SPLIT_HORIZONTAL: 'split-horizontal',
 	SPLIT_VERTICAL: 'split-vertical',
 	KILL_PANE: 'kill-pane',
+	BREAK_PANE: 'break-pane',
 	TOGGLE_ZOOM: 'toggle-zoom',
 	// NOTE: RESIZE_PANE removed - Ctrl+Arrow conflicts with macOS Mission Control
 	SWAP_PANE: 'swap-pane',
@@ -145,6 +146,7 @@ export type SessionOperation =
 export type PaneOperation =
 	| { type: 'split'; direction: 'horizontal' | 'vertical' }
 	| { type: 'kill' }
+	| { type: 'break-pane' }
 	| { type: 'toggle-zoom' }
 	| { type: 'rotate' }
 	| { type: 'swap'; direction: 'next' | 'previous' }
@@ -883,6 +885,20 @@ registerCommand({
 	handler: () => ({
 		handled: true,
 		paneOperation: { type: 'kill' }
+	})
+});
+
+/**
+ * Break the focused pane out into a new window.
+ * Supports: break-pane, breakp. Also bound to prefix + !.
+ */
+registerCommand({
+	name: CommandId.BREAK_PANE,
+	matchPatterns: ['break-pane', 'breakp'],
+	description: 'Break the focused pane into a new window',
+	handler: () => ({
+		handled: true,
+		paneOperation: { type: 'break-pane' }
 	})
 });
 
