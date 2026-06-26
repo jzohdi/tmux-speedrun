@@ -73,6 +73,7 @@ export const CommandId = {
 	SPLIT_VERTICAL: 'split-vertical',
 	KILL_PANE: 'kill-pane',
 	BREAK_PANE: 'break-pane',
+	JOIN_PANE: 'join-pane',
 	TOGGLE_ZOOM: 'toggle-zoom',
 	// NOTE: RESIZE_PANE removed - Ctrl+Arrow conflicts with macOS Mission Control
 	SWAP_PANE: 'swap-pane',
@@ -148,6 +149,7 @@ export type PaneOperation =
 	| { type: 'split'; direction: 'horizontal' | 'vertical' }
 	| { type: 'kill' }
 	| { type: 'break-pane' }
+	| { type: 'join'; sourceWindow: number; direction: 'horizontal' | 'vertical' }
 	| { type: 'toggle-zoom' }
 	| { type: 'rotate' }
 	| { type: 'swap'; direction: 'next' | 'previous' }
@@ -902,6 +904,33 @@ registerCommand({
 		handled: true,
 		paneOperation: { type: 'break-pane' }
 	})
+});
+
+/**
+ * Join a pane from another window into the current one as a split.
+ * Supports: join-pane -s <window> [-h|-v], joinp -s <window>.
+ * Default split is horizontal (top/bottom); -h splits left/right.
+ */
+registerCommand({
+	name: CommandId.JOIN_PANE,
+	matchPatterns: ['join-pane', 'joinp'],
+	matchMode: 'prefix',
+	description: 'Join a pane from another window into the current window',
+	handler: (ctx) => {
+		const sourceRaw = getFlagValue(ctx.args, '-s');
+		const sourceWindow = sourceRaw === undefined ? NaN : parseInt(sourceRaw, 10);
+		if (Number.isNaN(sourceWindow)) {
+			return { handled: true, error: 'usage: join-pane -s <window> [-h|-v]' };
+		}
+
+		// tmux -h splits left/right (our 'vertical'); default/-v is top/bottom ('horizontal').
+		const direction = ctx.args.includes('-h') ? 'vertical' : 'horizontal';
+
+		return {
+			handled: true,
+			paneOperation: { type: 'join', sourceWindow, direction }
+		};
+	}
 });
 
 /**

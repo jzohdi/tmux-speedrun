@@ -501,9 +501,12 @@ export function getLastPane(node: PaneNode): Pane {
 export function splitPane(
 	root: PaneNode,
 	paneId: string,
-	direction: SplitDirection
+	direction: SplitDirection,
+	existingPane?: Pane
 ): { tree: PaneNode; newPane: Pane } | null {
-	const newPane = createPane('tmux'); // New panes inherit tmux mode when splitting
+	// Normally a fresh pane is created. join-pane passes an existing pane so its
+	// state is preserved when moved between windows.
+	const newPane = existingPane ?? createPane('tmux'); // New panes inherit tmux mode when splitting
 
 	function split(node: PaneNode): PaneNode | null {
 		if (isPane(node)) {

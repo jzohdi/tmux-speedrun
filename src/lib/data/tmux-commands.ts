@@ -175,6 +175,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		category: 'pane'
 	},
 	{
+		name: 'join-pane',
+		shortcut: 'join-pane -s <window>',
+		description: 'Join a pane from another window into the current window',
+		difficulty: 'advanced',
+		category: 'pane'
+	},
+	{
 		name: 'toggle-zoom',
 		shortcut: 'prefix + z',
 		description: 'Toggle pane zoom (fullscreen)',
