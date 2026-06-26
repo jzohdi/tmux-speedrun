@@ -7,16 +7,17 @@
  * - A minimum number of input commands (rename-style with random strings)
  *
  * Pool composition is flexible and can be easily adjusted.
- * Current design:
- * - C0: Beginner commands only (13 commands)
- * - C1-C2: Beginner + Intermediate
- * - C3-C5: All commands (28 total)
+ * Current design (difficulty-gated so later challenges use more advanced commands):
+ * - C0: Beginner commands only (16 commands)
+ * - C1-C2: Beginner + Intermediate (30 commands)
+ * - C3-C5: All commands, including Advanced (39 commands)
  *
  * Instruction counts grow by 15 per challenge level:
  * C0=25, C1=40, C2=55, C3=70, C4=85, C5=100
  *
  * Input commands (rename-window, rename-session) add security by
- * expanding the answer space from 28 options to 28 + (N × 144,000).
+ * expanding the answer space from 39 options to 39 + (N × 144,000),
+ * where 144,000 = 40 adjectives × 40 nouns × 90 number suffixes.
  */
 
 import type { TmuxCommand } from '$lib/data/tmux-commands';

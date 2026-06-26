@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
 	import PromptBox from '$lib/components/PromptBox.svelte';
 	import { createChallengeStore } from '$lib/client/challenge-store.svelte';
@@ -123,7 +124,7 @@
 	 */
 	function handleBackClick() {
 		challenge.reset();
-		goto('/');
+		goto(resolve('/'));
 	}
 
 	/**
@@ -195,7 +196,7 @@
 		<header class="challenge-header">
 			<button class="back-link" onclick={handleBackClick}>← Back</button>
 			<span class="challenge-label">Challenge {data.challengeIndex}</span>
-			<a href="/tmux-conf" class="config-link">tmux.conf</a>
+			<a href={resolve('/tmux-conf')} class="config-link">tmux.conf</a>
 			<span class="help-hint">
 				<code>man tmux</code> for help
 			</span>
@@ -246,6 +247,15 @@
 				/>
 			</section>
 		{/if}
+
+		<!-- Practice mode hint -->
+		<p class="practice-hint">
+			Not sure how to perform a command?
+			<a href={resolve('/practice')} target="_blank" rel="noopener noreferrer" class="practice-link">
+				Open Practice mode
+			</a>
+			to review every command, step-by-step.
+		</p>
 
 		<!-- Terminal -->
 		<section class="terminal-section">
@@ -483,6 +493,24 @@
 			opacity: 1;
 			transform: translateY(0);
 		}
+	}
+
+	.practice-hint {
+		margin: 0;
+		text-align: center;
+		font-size: 13px;
+		color: #888;
+	}
+
+	.practice-link {
+		color: #8be9fd;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		transition: opacity 0.2s ease;
+	}
+
+	.practice-link:hover {
+		opacity: 0.75;
 	}
 
 	.terminal-section {
