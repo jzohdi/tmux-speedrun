@@ -1023,6 +1023,13 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				breakFocusedPane();
 				break;
 			}
+			case 'join': {
+				const result = joinPaneFromWindow(operation.sourceWindow, operation.direction);
+				if (!result.ok && result.error) {
+					addHistory({ type: 'error', content: result.error, timestamp: Date.now() });
+				}
+				break;
+			}
 			case 'toggle-zoom': {
 				if (paneCount > 1) {
 					togglePaneZoom();
@@ -1626,6 +1633,101 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		emitSignal('window-created', { windowId: newWindow.id });
 		triggerInputFocus();
 		return true;
+	}
+
+	/**
+	 * Join the first pane of another window into the current window, splitting the
+	 * focused pane. The inverse of break-pane.
+	 *
+	 * The moved pane keeps its state. If the source window had only that pane it is
+	 * closed; otherwise its tree collapses. The current window is unzoomed on join,
+	 * and focus moves to the joined pane. Window indices are recomputed when the
+	 * source window is removed so the current window stays active.
+	 *
+	 * Reads live state directly (not derived) so it stays correct when invoked
+	 * right after another mutation in the same tick.
+	 *
+	 * @returns { ok: true } on success, or { ok: false, error? } with a message to display
+	 */
+	function joinPaneFromWindow(
+		sourceWindowIndex: number,
+		direction: SplitDirection
+	): { ok: boolean; error?: string } {
+		const session = getAttachedSessionState();
+		const currentWindow = getActiveWindowState();
+		const targetPane = getFocusedPaneState();
+		if (!session || !currentWindow || !targetPane) {
+			return { ok: false };
+		}
+
+		if (sourceWindowIndex < 0 || sourceWindowIndex >= session.windows.length) {
+			return { ok: false, error: 'usage: join-pane -s <window> [-h|-v]' };
+		}
+
+		const currentIndex = session.activeWindowIndex;
+		if (sourceWindowIndex === currentIndex) {
+			return { ok: false, error: "can't join a pane to its own window" };
+		}
+
+		const sourceWindow = session.windows[sourceWindowIndex];
+		const movedPane = getFirstPane(sourceWindow.paneTree);
+		const sourceSurvives = countPanes(sourceWindow.paneTree) > 1;
+
+		// Insert the moved pane by splitting the current focused pane.
+		const splitResult = splitPane(currentWindow.paneTree, targetPane.id, direction, movedPane);
+		if (!splitResult) {
+			return { ok: false };
+		}
+
+		const newSourceTree = sourceSurvives ? removePane(sourceWindow.paneTree, movedPane.id) : null;
+		if (sourceSurvives && !newSourceTree) {
+			return { ok: false };
+		}
+
+		let updatedWindows = session.windows.map((w, windowIdx) => {
+			if (windowIdx === currentIndex) {
+				// Unzoom the current window when joining a pane into it.
+				return { ...w, paneTree: splitResult.tree, zoomedPaneId: null };
+			}
+			if (windowIdx === sourceWindowIndex && sourceSurvives) {
+				return {
+					...w,
+					paneTree: newSourceTree!,
+					zoomedPaneId: w.zoomedPaneId === movedPane.id ? null : w.zoomedPaneId
+				};
+			}
+			return w;
+		});
+
+		let newActiveIndex = currentIndex;
+		if (!sourceSurvives) {
+			// The source window emptied; drop it and recompute the current index.
+			updatedWindows = updatedWindows.filter((_, windowIdx) => windowIdx !== sourceWindowIndex);
+			if (sourceWindowIndex < currentIndex) {
+				newActiveIndex = currentIndex - 1;
+			}
+		}
+
+		state = {
+			...state,
+			sessions: state.sessions.map((s, idx) =>
+				idx === state.attachedSessionIndex
+					? {
+							...s,
+							windows: updatedWindows,
+							activeWindowIndex: newActiveIndex,
+							focusedPaneId: movedPane.id
+						}
+					: s
+			)
+		};
+
+		emitSignal('pane-split', {
+			paneId: movedPane.id,
+			metadata: { action: 'join-pane', sourceWindow: sourceWindowIndex }
+		});
+		triggerInputFocus();
+		return { ok: true };
 	}
 
 	/**
