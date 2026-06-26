@@ -47,7 +47,8 @@ import {
 	type SessionOperation,
 	type PaneOperation,
 	type WindowOperation,
-	type ConfigOperation
+	type ConfigOperation,
+	type BufferOperation
 } from '$lib/utils/tmux-commands';
 import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
 import { TMUX_CONFIG_PATH } from '$lib/utils/tmux-conf';
@@ -2105,6 +2106,36 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		}
 	}
 
+	/**
+	 * Handle a paste-buffer operation from a command result.
+	 * Shared by the tmux-mode and shell-mode command paths.
+	 */
+	function handleBufferOperation(operation: BufferOperation): void {
+		switch (operation.type) {
+			case 'show': {
+				const buffer = operation.name
+					? state.pasteBuffers.find((candidate) => candidate.name === operation.name)
+					: getLatestPasteBufferState();
+
+				if (!buffer) {
+					addHistory({
+						type: 'error',
+						content: operation.name ? `can't find buffer: ${operation.name}` : 'no buffers',
+						timestamp: Date.now()
+					});
+					return;
+				}
+
+				addHistory({
+					type: 'output',
+					content: buffer.content,
+					timestamp: Date.now()
+				});
+				break;
+			}
+		}
+	}
+
 	// ========================================================================
 	// PREFIX MODE
 	// ========================================================================
@@ -2222,6 +2253,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 		if (result.configOperation) {
 			handleConfigOperation(result.configOperation);
+		}
+
+		if (result.bufferOperation) {
+			handleBufferOperation(result.bufferOperation);
 		}
 
 		emitSignal('command-executed', {
@@ -2355,6 +2390,10 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 
 					if (result.configOperation) {
 						handleConfigOperation(result.configOperation);
+					}
+
+					if (result.bufferOperation) {
+						handleBufferOperation(result.bufferOperation);
 					}
 
 					// Handle session operations (attach, new-session, etc.)

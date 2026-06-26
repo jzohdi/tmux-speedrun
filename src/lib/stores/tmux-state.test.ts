@@ -563,3 +563,73 @@ describe('createTmuxStore list-buffers command', () => {
 		expect(commandNames).toContain('list-buffers');
 	});
 });
+
+describe('createTmuxStore show-buffer command', () => {
+	it('shows "no buffers" when there are none', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('show-buffer');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('no buffers');
+	});
+
+	it('prints the latest buffer contents by default', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello');
+		store.pushPasteBuffer('world');
+
+		store.executeRegisteredTmuxCommand('show-buffer');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('world');
+	});
+
+	it('prints a specific buffer by name with -b', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // buffer0001
+		store.pushPasteBuffer('world'); // buffer0002
+
+		store.executeRegisteredTmuxCommand('show-buffer -b buffer0001');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('hello');
+	});
+
+	it('prints multi-line buffer content verbatim', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('line1\nline2');
+
+		store.executeRegisteredTmuxCommand('show-buffer');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('line1\nline2');
+	});
+
+	it('errors when the named buffer is not found', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello');
+
+		store.executeRegisteredTmuxCommand('show-buffer -b buffer9999');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe("can't find buffer: buffer9999");
+	});
+
+	it('emits command-executed for show-buffer', () => {
+		tmuxConfigStore.resetForTesting();
+		const commandNames: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					commandNames.push(signal.commandName);
+				}
+			}
+		});
+		store.pushPasteBuffer('hello');
+
+		store.executeRegisteredTmuxCommand('show-buffer');
+
+		expect(commandNames).toContain('show-buffer');
+	});
+});

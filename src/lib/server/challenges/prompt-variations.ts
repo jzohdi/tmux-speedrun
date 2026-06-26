@@ -220,6 +220,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'View all tmux paste buffers',
 		'See the list of paste buffers'
 	],
+	'show-buffer': [
+		'Show the contents of the latest paste buffer',
+		'Print the most recent buffer contents',
+		'Display the contents of the top paste buffer',
+		'Output the most recent buffer to the screen',
+		'Reveal the latest paste buffer contents'
+	],
 	'command-prompt': [
 		'Open the command prompt',
 		'Enter command mode',

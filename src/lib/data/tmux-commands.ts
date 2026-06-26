@@ -238,6 +238,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		category: 'misc'
 	},
 	{
+		name: 'show-buffer',
+		shortcut: 'tmux show-buffer, tmux showb',
+		description: 'Show the contents of a paste buffer',
+		difficulty: 'advanced',
+		category: 'misc'
+	},
+	{
 		name: 'command-prompt',
 		shortcut: 'prefix + :',
 		description: 'Open tmux command prompt',
