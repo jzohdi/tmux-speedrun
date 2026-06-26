@@ -7,8 +7,10 @@ import {
 	createSession,
 	createWindow,
 	findPaneById,
+	getFirstPane,
 	splitPane,
-	type Pane
+	type Pane,
+	type TmuxWindow
 } from '$lib/utils/pane-tree';
 
 describe('createTmuxStore session killing', () => {
@@ -1013,5 +1015,137 @@ describe('createTmuxStore break-pane command', () => {
 
 		expect(signals).toContain('cmd:break-pane');
 		expect(signals).toContain('window-created');
+	});
+});
+
+describe('createTmuxStore join-pane command', () => {
+	// Build an attached store from explicit windows, focusing the active window's
+	// first pane. Seeding via initialState keeps multi-window setups reliable.
+	function storeWithWindows(windows: TmuxWindow[], activeWindowIndex = 0) {
+		const session = createSession('0');
+		session.windows = windows;
+		session.activeWindowIndex = activeWindowIndex;
+		session.focusedPaneId = getFirstPane(windows[activeWindowIndex].paneTree).id;
+
+		return createTmuxStore({
+			initialState: {
+				sessions: [session],
+				attachedSessionIndex: 0,
+				shellPane: createPane('default'),
+				pasteBuffers: []
+			}
+		});
+	}
+
+	function windowWithHistory(name: string, content: string): TmuxWindow {
+		const window = createWindow(name);
+		(window.paneTree as Pane).history = [{ type: 'output', content, timestamp: 1 }];
+		return window;
+	}
+
+	it('joins a single-pane source window and closes that window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithWindows([createWindow('main'), windowWithHistory('w1', 'fromW1')]);
+		expect(store.windowCount).toBe(2);
+		expect(store.paneCount).toBe(1);
+
+		const handled = store.executeRegisteredTmuxCommand('join-pane -s 1');
+
+		expect(handled).toBe(true);
+		expect(store.windowCount).toBe(1); // emptied source window closed
+		expect(store.paneCount).toBe(2); // current window gained the joined pane
+		expect(store.activeWindowIndex).toBe(0);
+		// Moved pane kept its state and is now focused.
+		expect(store.focusedPane?.history.some((entry) => entry.content === 'fromW1')).toBe(true);
+	});
+
+	it('joins one pane from a multi-pane source window, leaving the source intact', () => {
+		tmuxConfigStore.resetForTesting();
+		const w1 = createWindow('w1');
+		const split = splitPane(w1.paneTree, (w1.paneTree as Pane).id, 'horizontal');
+		if (!split) {
+			throw new Error('expected split to succeed');
+		}
+		w1.paneTree = split.tree; // window 1 now has two panes
+		const store = storeWithWindows([createWindow('main'), w1]);
+
+		store.executeRegisteredTmuxCommand('join-pane -s 1');
+
+		expect(store.windowCount).toBe(2); // source survives
+		expect(store.paneCount).toBe(2); // current window gained a pane
+		store.switchWindow(1);
+		expect(store.paneCount).toBe(1); // source window left with one pane
+	});
+
+	it('errors when joining a window to itself', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithWindows([createWindow('main'), createWindow('w1')]);
+
+		store.executeRegisteredTmuxCommand('join-pane -s 0'); // source == current
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe("can't join a pane to its own window");
+		expect(store.windowCount).toBe(2); // unchanged
+	});
+
+	it('errors on an out-of-range source window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithWindows([createWindow('main'), createWindow('w1')]);
+
+		store.executeRegisteredTmuxCommand('join-pane -s 5');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('usage: join-pane -s <window> [-h|-v]');
+		expect(store.windowCount).toBe(2);
+	});
+
+	it('keeps the current window active when an earlier source window closes', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithWindows(
+			[createWindow('main'), createWindow('w1'), createWindow('w2')],
+			2 // active window is index 2
+		);
+		expect(store.activeWindowIndex).toBe(2);
+
+		store.executeRegisteredTmuxCommand('join-pane -s 0'); // earlier window closes
+
+		expect(store.windowCount).toBe(2); // window 0 removed
+		expect(store.activeWindowIndex).toBe(1); // current window shifted 2 -> 1, still active
+		expect(store.paneCount).toBe(2); // current window gained the joined pane
+	});
+
+	it('resolves the joinp alias to join a pane from another window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithWindows([createWindow('main'), windowWithHistory('w1', 'fromW1')]);
+
+		const handled = store.executeRegisteredTmuxCommand('joinp -s 1');
+
+		expect(handled).toBe(true);
+		expect(store.windowCount).toBe(1); // single-pane source closed
+		expect(store.paneCount).toBe(2); // current window gained the joined pane
+		expect(store.focusedPane?.history.some((entry) => entry.content === 'fromW1')).toBe(true);
+	});
+
+	it('emits command-executed for join-pane', () => {
+		tmuxConfigStore.resetForTesting();
+		const commandNames: string[] = [];
+		const session = createSession('0');
+		session.windows = [createWindow('main'), createWindow('w1')];
+		session.focusedPaneId = getFirstPane(session.windows[0].paneTree).id;
+		const store = createTmuxStore({
+			initialState: {
+				sessions: [session],
+				attachedSessionIndex: 0,
+				shellPane: createPane('default'),
+				pasteBuffers: []
+			},
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					commandNames.push(signal.commandName);
+				}
+			}
+		});
+
+		store.executeRegisteredTmuxCommand('join-pane -s 1');
+
+		expect(commandNames).toContain('join-pane');
 	});
 });

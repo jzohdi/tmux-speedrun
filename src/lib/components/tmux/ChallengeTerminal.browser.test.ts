@@ -33,6 +33,26 @@ describe('ChallengeTerminal browser', () => {
 		expect(document.querySelectorAll('.pane-container')).toHaveLength(1);
 	});
 
+	it('joins a pane from another window with join-pane -s', async () => {
+		const screen = await render(ChallengeTerminal);
+		const terminal = screen.getByRole('application', {
+			name: /challenge terminal/i
+		});
+
+		// Create a second window (now active) so there are two windows.
+		await userEvent.click(terminal);
+		await userEvent.keyboard('{Control>}b{/Control}c');
+		expect(document.querySelectorAll('.pane-container')).toHaveLength(1);
+
+		// Join window 0's pane into the current window; window 0 closes, this window
+		// now shows two panes.
+		const input = screen.getByRole('textbox');
+		await userEvent.click(input);
+		await userEvent.keyboard('join-pane -s 0{Enter}');
+
+		expect(document.querySelectorAll('.pane-container')).toHaveLength(2);
+	});
+
 	it('lists key bindings with prefix + ?', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

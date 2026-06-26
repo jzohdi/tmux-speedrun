@@ -159,6 +159,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Split this pane off into a separate window',
 		'Turn the focused pane into a new window'
 	],
+	'join-pane': [
+		'Join a pane from another window into this one',
+		'Pull a pane from another window into the current window',
+		'Merge a pane from another window as a split',
+		'Bring a pane from another window into this window',
+		'Join another window’s pane into the current window'
+	],
 	'toggle-zoom': [
 		'Toggle pane zoom',
 		'Maximize or restore this pane',
