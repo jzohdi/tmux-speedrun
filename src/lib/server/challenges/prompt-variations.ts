@@ -227,6 +227,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Output the most recent buffer to the screen',
 		'Reveal the latest paste buffer contents'
 	],
+	'delete-buffer': [
+		'Delete the most recent paste buffer',
+		'Remove the latest paste buffer',
+		'Discard the top paste buffer',
+		'Drop the most recent buffer',
+		'Delete the newest paste buffer'
+	],
 	'command-prompt': [
 		'Open the command prompt',
 		'Enter command mode',

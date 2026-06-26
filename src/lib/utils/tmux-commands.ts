@@ -87,6 +87,7 @@ export const CommandId = {
 	PASTE_BUFFER: 'paste-buffer',
 	LIST_BUFFERS: 'list-buffers',
 	SHOW_BUFFER: 'show-buffer',
+	DELETE_BUFFER: 'delete-buffer',
 	COMMAND_PROMPT: 'command-prompt',
 	SHOW_TIME: 'show-time',
 	RELOAD_CONFIG: 'reload-config'
@@ -171,9 +172,9 @@ export type ConfigOperation = {
 
 /**
  * Paste-buffer operation types for command results.
- * Used by buffer commands (show-buffer, and later delete-buffer/capture-pane).
+ * Used by buffer commands (show-buffer, delete-buffer, and later capture-pane).
  */
-export type BufferOperation = { type: 'show'; name?: string };
+export type BufferOperation = { type: 'show'; name?: string } | { type: 'delete'; name?: string };
 
 /**
  * Result returned from a command handler.
@@ -417,6 +418,15 @@ function getTrailingArgument(args: string[]): string | null {
 	return nonFlagArgs[nonFlagArgs.length - 1];
 }
 
+/**
+ * Get the value following a flag (e.g. `-b buffer0001` → 'buffer0001').
+ * Returns undefined when the flag is absent or has no following value.
+ */
+function getFlagValue(args: string[], flag: string): string | undefined {
+	const flagIndex = args.indexOf(flag);
+	return flagIndex !== -1 ? (args[flagIndex + 1] ?? undefined) : undefined;
+}
+
 // ============================================================================
 // BUILT-IN TEXT COMMANDS
 // ============================================================================
@@ -560,15 +570,26 @@ registerCommand({
 	matchPatterns: ['tmux show-buffer', 'tmux showb', 'show-buffer', 'showb'],
 	matchMode: 'prefix',
 	description: 'Show the contents of a paste buffer',
-	handler: (ctx) => {
-		const bIndex = ctx.args.indexOf('-b');
-		const name = bIndex !== -1 && ctx.args[bIndex + 1] ? ctx.args[bIndex + 1] : undefined;
+	handler: (ctx) => ({
+		handled: true,
+		bufferOperation: { type: 'show', name: getFlagValue(ctx.args, '-b') }
+	})
+});
 
-		return {
-			handled: true,
-			bufferOperation: { type: 'show', name }
-		};
-	}
+/**
+ * Delete a paste buffer (tmux-style).
+ * Supports: tmux delete-buffer, tmux deleteb, delete-buffer, deleteb, optionally -b <name>.
+ * Without -b, deletes the most-recent buffer.
+ */
+registerCommand({
+	name: CommandId.DELETE_BUFFER,
+	matchPatterns: ['tmux delete-buffer', 'tmux deleteb', 'delete-buffer', 'deleteb'],
+	matchMode: 'prefix',
+	description: 'Delete a paste buffer',
+	handler: (ctx) => ({
+		handled: true,
+		bufferOperation: { type: 'delete', name: getFlagValue(ctx.args, '-b') }
+	})
 });
 
 /**

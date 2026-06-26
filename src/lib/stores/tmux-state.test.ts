@@ -655,3 +655,93 @@ describe('createTmuxStore show-buffer command', () => {
 		expect(commandNames).toContain('show-buffer');
 	});
 });
+
+describe('createTmuxStore delete-buffer command', () => {
+	it('shows "no buffers" when there are none', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('delete-buffer');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('no buffers');
+	});
+
+	it('deletes the most recent buffer by default', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // buffer0001
+		store.pushPasteBuffer('world'); // buffer0002 (latest)
+
+		store.executeRegisteredTmuxCommand('delete-buffer');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[deleted buffer buffer0002]');
+		expect(store.pasteBuffers).toHaveLength(1);
+		expect(store.latestPasteBuffer?.content).toBe('hello');
+	});
+
+	it('deletes a specific buffer by name with -b', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // buffer0001
+		store.pushPasteBuffer('world'); // buffer0002
+
+		store.executeRegisteredTmuxCommand('delete-buffer -b buffer0001');
+
+		expect(store.pasteBuffers.some((buffer) => buffer.name === 'buffer0001')).toBe(false);
+		expect(store.latestPasteBuffer?.content).toBe('world');
+	});
+
+	it('errors and leaves buffers untouched when the named buffer is not found', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello');
+
+		store.executeRegisteredTmuxCommand('delete-buffer -b buffer9999');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe("can't find buffer: buffer9999");
+		expect(store.pasteBuffers).toHaveLength(1);
+	});
+
+	it('leaves an empty list when the only buffer is deleted, and show-buffer then reports none', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('only');
+
+		store.executeRegisteredTmuxCommand('delete-buffer');
+
+		expect(store.pasteBuffers).toHaveLength(0);
+		expect(store.latestPasteBuffer).toBeNull();
+
+		store.executeRegisteredTmuxCommand('show-buffer');
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('no buffers');
+	});
+
+	it('resolves the deleteb alias to delete the latest buffer', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // buffer0001
+		store.pushPasteBuffer('world'); // buffer0002 (latest)
+
+		store.executeRegisteredTmuxCommand('deleteb');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[deleted buffer buffer0002]');
+		expect(store.latestPasteBuffer?.content).toBe('hello');
+	});
+
+	it('emits command-executed for delete-buffer', () => {
+		tmuxConfigStore.resetForTesting();
+		const commandNames: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					commandNames.push(signal.commandName);
+				}
+			}
+		});
+		store.pushPasteBuffer('hello');
+
+		store.executeRegisteredTmuxCommand('delete-buffer');
+
+		expect(commandNames).toContain('delete-buffer');
+	});
+});
