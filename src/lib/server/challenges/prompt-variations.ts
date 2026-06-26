@@ -108,6 +108,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		"Give this window the name '{input}'",
 		"Rename the current window to '{input}'"
 	],
+	'swap-window': [
+		'Swap the positions of two windows by their indices',
+		'Exchange two windows, passing their numbers as -s and -t',
+		'Swap two windows in the list using their index numbers',
+		'Trade the positions of two windows by number',
+		'Use swap-window with -s and -t to exchange two windows'
+	],
 	'kill-window': [
 		'Kill the current window',
 		'Close this window',

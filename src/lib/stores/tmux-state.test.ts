@@ -1015,3 +1015,146 @@ describe('createTmuxStore break-pane command', () => {
 		expect(signals).toContain('window-created');
 	});
 });
+
+describe('createTmuxStore swap-window command', () => {
+	// Build an attached store with three named windows so swaps are observable.
+	// Windows are ordered ['0', 'alpha', 'beta'] with the active index controllable.
+	function createThreeWindowStore(activeWindowIndex = 0) {
+		const session = createSession('0');
+		session.windows[0].name = '0';
+		session.windows = [session.windows[0], createWindow('alpha'), createWindow('beta')];
+		session.activeWindowIndex = activeWindowIndex;
+		session.focusedPaneId = (session.windows[activeWindowIndex].paneTree as Pane).id;
+
+		return createTmuxStore({
+			initialState: {
+				sessions: [session],
+				attachedSessionIndex: 0,
+				shellPane: createPane('default'),
+				pasteBuffers: []
+			}
+		});
+	}
+
+	it('swaps two non-active windows and leaves the active window in place', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(0); // active = '0'
+
+		const handled = store.executeRegisteredTmuxCommand('swap-window -s 1 -t 2');
+
+		expect(handled).toBe(true);
+		expect(store.windows.map((w) => w.name)).toEqual(['0', 'beta', 'alpha']);
+		// The active window ('0') was not part of the pair, so it stays put.
+		expect(store.activeWindowIndex).toBe(0);
+	});
+
+	it('keeps the active window selected when it is part of the swap', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(2); // active = 'beta'
+
+		const handled = store.executeRegisteredTmuxCommand('swap-window -s 2 -t 0');
+
+		expect(handled).toBe(true);
+		expect(store.windows.map((w) => w.name)).toEqual(['beta', 'alpha', '0']);
+		// The active window followed its content from index 2 to index 0.
+		expect(store.activeWindowIndex).toBe(0);
+		expect(store.attachedSession?.windows[store.activeWindowIndex].name).toBe('beta');
+	});
+
+	it('uses the active window as the source when -s is omitted', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(1); // active = 'alpha'
+
+		store.executeRegisteredTmuxCommand('swap-window -t 2');
+
+		expect(store.windows.map((w) => w.name)).toEqual(['0', 'beta', 'alpha']);
+		// 'alpha' moved from index 1 to index 2 and remains active.
+		expect(store.activeWindowIndex).toBe(2);
+	});
+
+	it('reports an error and leaves state unchanged for an out-of-range index', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(0);
+
+		store.executeRegisteredTmuxCommand('swap-window -s 0 -t 9');
+
+		expect(store.windows.map((w) => w.name)).toEqual(['0', 'alpha', 'beta']);
+		expect(store.activeWindowIndex).toBe(0);
+		expect(
+			store.focusedPane?.history.some((entry) => entry.content === "can't find window: 9")
+		).toBe(true);
+	});
+
+	it('is a no-op when source and target are the same window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(0);
+
+		store.executeRegisteredTmuxCommand('swap-window -s 1 -t 1');
+
+		expect(store.windows.map((w) => w.name)).toEqual(['0', 'alpha', 'beta']);
+		expect(store.activeWindowIndex).toBe(0);
+		// No error history for a same-index swap.
+		expect(store.focusedPane?.history.some((entry) => entry.type === 'error')).toBe(false);
+	});
+
+	it('resolves the swapw alias', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(0);
+
+		const handled = store.executeRegisteredTmuxCommand('swapw -s 0 -t 2');
+
+		expect(handled).toBe(true);
+		expect(store.windows.map((w) => w.name)).toEqual(['beta', 'alpha', '0']);
+	});
+
+	it('reports a usage error when the required -t target is missing', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(0);
+
+		store.executeRegisteredTmuxCommand('swap-window -s 1');
+
+		expect(store.windows.map((w) => w.name)).toEqual(['0', 'alpha', 'beta']);
+		expect(
+			store.focusedPane?.history.some(
+				(entry) => entry.content === 'usage: swap-window [-s src] -t dst'
+			)
+		).toBe(true);
+	});
+
+	it('reports a usage error when an index is not a number', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(0);
+
+		store.executeRegisteredTmuxCommand('swap-window -t abc');
+
+		expect(store.windows.map((w) => w.name)).toEqual(['0', 'alpha', 'beta']);
+		expect(
+			store.focusedPane?.history.some(
+				(entry) => entry.content === 'usage: swap-window [-s src] -t dst'
+			)
+		).toBe(true);
+	});
+
+	// Direct tests of the exported swapWindows mutation, isolating the index math
+	// from command parsing. The internal range guard is unreachable via the
+	// command path (the handler validates first), so it is only covered here.
+	it('swapWindows exchanges two indices and moves the active window with its content', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(2); // active = 'beta'
+
+		store.swapWindows(2, 0);
+
+		expect(store.windows.map((w) => w.name)).toEqual(['beta', 'alpha', '0']);
+		expect(store.activeWindowIndex).toBe(0);
+	});
+
+	it('swapWindows is a no-op for an out-of-range index', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createThreeWindowStore(0);
+
+		store.swapWindows(0, 99);
+
+		expect(store.windows.map((w) => w.name)).toEqual(['0', 'alpha', 'beta']);
+		expect(store.activeWindowIndex).toBe(0);
+	});
+});

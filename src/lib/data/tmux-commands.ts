@@ -123,6 +123,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		requiresInput: true
 	},
 	{
+		name: 'swap-window',
+		shortcut: 'swap-window -s X -t Y, swapw -s X -t Y',
+		description: 'Swap the positions of two windows by their indices',
+		difficulty: 'advanced',
+		category: 'window'
+	},
+	{
 		name: 'kill-window',
 		shortcut: 'prefix + &',
 		description: 'Kill the current window, or kill the session if it is the last window',

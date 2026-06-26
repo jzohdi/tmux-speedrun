@@ -64,6 +64,7 @@ export const CommandId = {
 	PREVIOUS_WINDOW: 'previous-window',
 	SELECT_WINDOW: 'select-window',
 	RENAME_WINDOW: 'rename-window',
+	SWAP_WINDOW: 'swap-window',
 	KILL_WINDOW: 'kill-window',
 	LIST_WINDOWS: 'list-windows',
 
@@ -166,6 +167,7 @@ export type WindowOperation =
 	| { type: 'next' }
 	| { type: 'previous' }
 	| { type: 'rename'; name: string; index?: number }
+	| { type: 'swap'; source?: number; target: number }
 	| { type: 'last' }
 	| { type: 'list' };
 
@@ -1129,6 +1131,39 @@ registerCommand({
 		return {
 			handled: true,
 			windowOperation: { type: 'rename', name }
+		};
+	}
+});
+
+/**
+ * Swap the positions of two windows in the current session.
+ * Supports: swap-window -s <src> -t <dst>, swapw -t <dst>
+ * Without -s, the current (active) window is used as the source.
+ */
+registerCommand({
+	name: CommandId.SWAP_WINDOW,
+	matchPatterns: ['swap-window', 'swapw'],
+	matchMode: 'prefix',
+	description: 'Swap the positions of two windows',
+	handler: (ctx) => {
+		// Parse an index flag: undefined when the flag is absent, NaN when it is
+		// present but not a valid number.
+		const parseIndexFlag = (flag: string): number | undefined => {
+			const raw = getFlagValue(ctx.args, flag);
+			return raw === undefined ? undefined : parseInt(raw, 10);
+		};
+
+		// -t <dst> is required; -s <src> is optional (defaults to the active window).
+		const target = parseIndexFlag('-t');
+		const source = parseIndexFlag('-s');
+
+		if (target === undefined || isNaN(target) || (source !== undefined && isNaN(source))) {
+			return { handled: true, error: 'usage: swap-window [-s src] -t dst' };
+		}
+
+		return {
+			handled: true,
+			windowOperation: { type: 'swap', source, target }
 		};
 	}
 });

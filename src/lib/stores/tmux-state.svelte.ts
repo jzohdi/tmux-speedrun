@@ -1110,6 +1110,22 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				renameWindow(operation.name, operation.index);
 				break;
 			}
+			case 'swap': {
+				const source = operation.source ?? activeWindowIndex;
+				const target = operation.target;
+				// Validate both indices before mutating; report the first invalid one.
+				const invalidIndex = [source, target].find((i) => i < 0 || i >= windowCount);
+				if (invalidIndex !== undefined) {
+					addHistory({
+						type: 'error',
+						content: `can't find window: ${invalidIndex}`,
+						timestamp: Date.now()
+					});
+					break;
+				}
+				swapWindows(source, target);
+				break;
+			}
 			case 'last': {
 				// Toggle to previous window (tmux "last-window" behavior)
 				if (windowCount > 1) {
@@ -1433,6 +1449,51 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 			toIndex <= attachedSession.activeWindowIndex
 		) {
 			newActiveIndex++;
+		}
+
+		updateAttachedSession({
+			windows: newWindows,
+			activeWindowIndex: newActiveIndex
+		});
+	}
+
+	/**
+	 * Swap the positions of two windows in the window list.
+	 *
+	 * Unlike {@link reorderWindows} (which *moves* a window, shifting the
+	 * windows in between), this exchanges exactly two indices and leaves every
+	 * other window's index fixed. The active window follows its content: if it
+	 * is one of the swapped pair, `activeWindowIndex` is updated to its new
+	 * position so the user keeps looking at the same window.
+	 *
+	 * @param source - First window index
+	 * @param target - Second window index
+	 */
+	function swapWindows(source: number, target: number): void {
+		if (!attachedSession) {
+			return;
+		}
+
+		const windows = attachedSession.windows;
+		if (
+			source < 0 ||
+			source >= windows.length ||
+			target < 0 ||
+			target >= windows.length ||
+			source === target
+		) {
+			return;
+		}
+
+		const newWindows = [...windows];
+		[newWindows[source], newWindows[target]] = [newWindows[target], newWindows[source]];
+
+		// Active window follows its content to the swapped position.
+		let newActiveIndex = attachedSession.activeWindowIndex;
+		if (newActiveIndex === source) {
+			newActiveIndex = target;
+		} else if (newActiveIndex === target) {
+			newActiveIndex = source;
 		}
 
 		updateAttachedSession({
@@ -2838,6 +2899,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		previousWindow,
 		renameWindow,
 		reorderWindows,
+		swapWindows,
 
 		// Pane operations
 		splitPane: splitFocusedPane,
