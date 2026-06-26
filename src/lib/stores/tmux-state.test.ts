@@ -947,6 +947,21 @@ describe('createTmuxStore break-pane command', () => {
 		expect(store.paneCount).toBe(1);
 	});
 
+	it('resolves the breakp alias to break the focused pane into a new window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.splitPane('horizontal'); // 2 panes, focused on the new one
+		const movedPaneId = store.focusedPaneId;
+
+		const handled = store.executeRegisteredTmuxCommand('breakp');
+
+		expect(handled).toBe(true);
+		expect(store.windowCount).toBe(2);
+		expect(store.activeWindowIndex).toBe(1);
+		expect(store.paneCount).toBe(1); // new window holds the single moved pane
+		expect(store.focusedPaneId).toBe(movedPaneId);
+	});
+
 	it('is a no-op when the window has only one pane', () => {
 		tmuxConfigStore.resetForTesting();
 		const store = createTmuxStore();
