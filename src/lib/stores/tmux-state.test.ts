@@ -515,6 +515,16 @@ describe('createTmuxStore list-buffers command', () => {
 		);
 	});
 
+	it('resolves the lsb alias to the same buffer list', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello');
+
+		store.executeRegisteredTmuxCommand('lsb');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('buffer0001: 5 bytes: "hello"');
+	});
+
 	it('collapses newlines in the preview but reports the full byte length', () => {
 		tmuxConfigStore.resetForTesting();
 		const store = createTmuxStore();
