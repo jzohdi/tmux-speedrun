@@ -491,3 +491,65 @@ describe('createTmuxStore kill-server command', () => {
 		expect(store.focusedPane?.history.at(-1)?.content).toBe('no server running');
 	});
 });
+
+describe('createTmuxStore list-buffers command', () => {
+	it('shows "no buffers" when there are none', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('list-buffers');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('no buffers');
+	});
+
+	it('lists buffers newest-first with byte counts', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello');
+		store.pushPasteBuffer('world');
+
+		store.executeRegisteredTmuxCommand('list-buffers');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe(
+			'buffer0002: 5 bytes: "world"\nbuffer0001: 5 bytes: "hello"'
+		);
+	});
+
+	it('collapses newlines in the preview but reports the full byte length', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('line1\nline2');
+
+		store.executeRegisteredTmuxCommand('list-buffers');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('buffer0001: 11 bytes: "line1 line2"');
+	});
+
+	it('truncates long previews while keeping the true byte length', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('x'.repeat(60));
+
+		store.executeRegisteredTmuxCommand('list-buffers');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe(
+			`buffer0001: 60 bytes: "${'x'.repeat(50)}…"`
+		);
+	});
+
+	it('emits command-executed for list-buffers', () => {
+		tmuxConfigStore.resetForTesting();
+		const commandNames: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					commandNames.push(signal.commandName);
+				}
+			}
+		});
+
+		store.executeRegisteredTmuxCommand('list-buffers');
+
+		expect(commandNames).toContain('list-buffers');
+	});
+});

@@ -213,6 +213,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Paste from tmux buffer',
 		'Insert buffer contents'
 	],
+	'list-buffers': [
+		'List all paste buffers',
+		'Show every paste buffer',
+		'Display the paste buffer list',
+		'View all tmux paste buffers',
+		'See the list of paste buffers'
+	],
 	'command-prompt': [
 		'Open the command prompt',
 		'Enter command mode',

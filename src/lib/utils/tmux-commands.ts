@@ -85,6 +85,7 @@ export const CommandId = {
 	// Miscellaneous
 	COPY_MODE: 'copy-mode',
 	PASTE_BUFFER: 'paste-buffer',
+	LIST_BUFFERS: 'list-buffers',
 	COMMAND_PROMPT: 'command-prompt',
 	SHOW_TIME: 'show-time',
 	RELOAD_CONFIG: 'reload-config'
@@ -189,7 +190,7 @@ export type CommandResult = {
 		data?: Record<string, unknown>;
 	};
 	/** Type of output to generate (handled by store) */
-	generateOutput?: 'pane-list' | 'window-list' | 'session-list';
+	generateOutput?: 'pane-list' | 'window-list' | 'session-list' | 'buffer-list';
 	/**
 	 * Special exit behavior:
 	 * - 'close-pane-or-detach': If multiple panes, close current pane; otherwise detach from tmux
@@ -520,6 +521,21 @@ registerCommand({
 	handler: () => ({
 		handled: true,
 		generateOutput: 'pane-list'
+	})
+});
+
+/**
+ * List paste buffers command (tmux-style).
+ * Supports: tmux list-buffers, tmux lsb, list-buffers, lsb
+ * The non-"tmux" prefixed versions are for command-prompt usage.
+ */
+registerCommand({
+	name: CommandId.LIST_BUFFERS,
+	matchPatterns: ['tmux list-buffers', 'tmux lsb', 'list-buffers', 'lsb'],
+	description: 'List all paste buffers',
+	handler: () => ({
+		handled: true,
+		generateOutput: 'buffer-list'
 	})
 });
 

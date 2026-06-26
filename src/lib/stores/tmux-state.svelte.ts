@@ -94,6 +94,33 @@ function formatSessionDate(timestamp: number): string {
 	});
 }
 
+/** Maximum characters shown in a paste-buffer preview before truncating. */
+const BUFFER_PREVIEW_MAX_LENGTH = 50;
+
+/**
+ * Format paste-buffer list output (simulates 'tmux list-buffers' / 'tmux lsb').
+ * Format: 'buffer0001: 11 bytes: "hello world"', newest buffer first.
+ * Newlines are collapsed to spaces and long content is truncated for the
+ * preview, but the reported byte length is the full content length.
+ */
+function formatBufferList(buffers: TmuxPasteBuffer[]): string {
+	if (buffers.length === 0) {
+		return 'no buffers';
+	}
+
+	return buffers
+		.map((buffer) => {
+			const singleLine = buffer.content.replace(/\r?\n/g, ' ');
+			const preview =
+				singleLine.length > BUFFER_PREVIEW_MAX_LENGTH
+					? `${singleLine.slice(0, BUFFER_PREVIEW_MAX_LENGTH)}…`
+					: singleLine;
+
+			return `${buffer.name}: ${buffer.content.length} bytes: "${preview}"`;
+		})
+		.join('\n');
+}
+
 /**
  * Format session list output (simulates 'tmux ls' / 'tmux list-sessions').
  * Format: "0: 2 windows (created Mon Dec 29 13:37:03 2025) (attached)"
@@ -323,6 +350,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				return formatSessionList(sessions, attachedSessionIndex);
 			case 'window-list':
 				return formatWindowList(windows, activeWindowIndex);
+			case 'buffer-list':
+				return formatBufferList(state.pasteBuffers);
 			default:
 				return null;
 		}
