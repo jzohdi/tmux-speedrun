@@ -52,6 +52,7 @@ import {
 } from '$lib/utils/tmux-commands';
 import { tmuxConfigStore } from '$lib/stores/tmux-config.svelte';
 import { TMUX_CONFIG_PATH } from '$lib/utils/tmux-conf';
+import { getPrefixKeybindings, type Keybinding } from '$lib/data/keybindings';
 
 function formatPaneList(panes: Pane[], focusedId: string): string {
 	const currentPanes =
@@ -183,6 +184,22 @@ function formatWindowList(windows: TmuxWindow[], activeWindowIndex: number): str
 			const activeMarker = isActive ? ' (active)' : '';
 
 			return `${index}: ${tmuxWindow.name}${flag} (${paneCount} ${paneWord}) [${dimensions.width}x${dimensions.height}] [layout ${layoutId}] @${index}${activeMarker}`;
+		})
+		.join('\n');
+}
+
+/**
+ * Format key binding list output (simulates 'tmux list-keys' / 'tmux lsk').
+ * Lists the effective prefix-table bindings, reflecting tmux.conf overrides.
+ * Format: 'bind-key -T prefix c new-window'
+ */
+function formatKeybindingList(bindings: Keybinding[]): string {
+	return bindings
+		.map((binding) => {
+			const action =
+				binding.kind === 'command' ? (binding.commandText ?? binding.commandName) : binding.action;
+
+			return `bind-key -T ${binding.table} ${binding.tmuxNotation} ${action}`;
 		})
 		.join('\n');
 }
@@ -353,6 +370,8 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				return formatWindowList(windows, activeWindowIndex);
 			case 'buffer-list':
 				return formatBufferList(state.pasteBuffers);
+			case 'keybinding-list':
+				return formatKeybindingList(getPrefixKeybindings());
 			default:
 				return null;
 		}

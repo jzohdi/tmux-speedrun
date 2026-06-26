@@ -91,6 +91,7 @@ export const CommandId = {
 	CAPTURE_PANE: 'capture-pane',
 	COMMAND_PROMPT: 'command-prompt',
 	SHOW_TIME: 'show-time',
+	LIST_KEYS: 'list-keys',
 	RELOAD_CONFIG: 'reload-config'
 } as const;
 
@@ -202,7 +203,7 @@ export type CommandResult = {
 		data?: Record<string, unknown>;
 	};
 	/** Type of output to generate (handled by store) */
-	generateOutput?: 'pane-list' | 'window-list' | 'session-list' | 'buffer-list';
+	generateOutput?: 'pane-list' | 'window-list' | 'session-list' | 'buffer-list' | 'keybinding-list';
 	/**
 	 * Special exit behavior:
 	 * - 'close-pane-or-detach': If multiple panes, close current pane; otherwise detach from tmux
@@ -531,6 +532,21 @@ registerCommand({
 	handler: () => ({
 		handled: true,
 		generateOutput: 'window-list'
+	})
+});
+
+/**
+ * List key bindings command (tmux-style).
+ * Supports: tmux list-keys, tmux lsk, list-keys, lsk. Also bound to prefix + ?.
+ * Prints the prefix-table key bindings (the commands practice/challenges teach).
+ */
+registerCommand({
+	name: CommandId.LIST_KEYS,
+	matchPatterns: ['tmux list-keys', 'tmux lsk', 'list-keys', 'lsk'],
+	description: 'List the prefix key bindings',
+	handler: () => ({
+		handled: true,
+		generateOutput: 'keybinding-list'
 	})
 });
 
