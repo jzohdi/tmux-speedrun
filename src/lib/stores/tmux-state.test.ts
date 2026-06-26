@@ -616,6 +616,28 @@ describe('createTmuxStore show-buffer command', () => {
 		expect(store.focusedPane?.history.at(-1)?.content).toBe("can't find buffer: buffer9999");
 	});
 
+	it('resolves the showb alias to the latest buffer', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello');
+
+		store.executeRegisteredTmuxCommand('showb');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('hello');
+	});
+
+	it('shows the buffer from the shell with the tmux prefix', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // global buffer, survives detach
+		store.detachSession();
+		expect(store.isDetached).toBe(true);
+
+		store.processCommand('tmux show-buffer');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('hello');
+	});
+
 	it('emits command-executed for show-buffer', () => {
 		tmuxConfigStore.resetForTesting();
 		const commandNames: string[] = [];
