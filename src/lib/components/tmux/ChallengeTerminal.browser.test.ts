@@ -139,6 +139,18 @@ describe('ChallengeTerminal browser', () => {
 		await expect.element(screen.getByText('[deleted buffer buffer0001]')).toBeVisible();
 	});
 
+	it('captures the focused pane into a paste buffer', async () => {
+		const screen = await render(ChallengeTerminal);
+		const input = screen.getByRole('textbox');
+
+		await userEvent.click(input);
+		// Produce some pane history first, then capture it (creates buffer0001).
+		await userEvent.keyboard('list-buffers{Enter}');
+		await userEvent.keyboard('capture-pane{Enter}');
+
+		await expect.element(screen.getByText('[captured pane to buffer buffer0001]')).toBeVisible();
+	});
+
 	it('copies selection when mac Option changes the key value', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

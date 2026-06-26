@@ -88,6 +88,7 @@ export const CommandId = {
 	LIST_BUFFERS: 'list-buffers',
 	SHOW_BUFFER: 'show-buffer',
 	DELETE_BUFFER: 'delete-buffer',
+	CAPTURE_PANE: 'capture-pane',
 	COMMAND_PROMPT: 'command-prompt',
 	SHOW_TIME: 'show-time',
 	RELOAD_CONFIG: 'reload-config'
@@ -172,9 +173,12 @@ export type ConfigOperation = {
 
 /**
  * Paste-buffer operation types for command results.
- * Used by buffer commands (show-buffer, delete-buffer, and later capture-pane).
+ * Used by buffer commands (show-buffer, delete-buffer, capture-pane).
  */
-export type BufferOperation = { type: 'show'; name?: string } | { type: 'delete'; name?: string };
+export type BufferOperation =
+	| { type: 'show'; name?: string }
+	| { type: 'delete'; name?: string }
+	| { type: 'capture' };
 
 /**
  * Result returned from a command handler.
@@ -589,6 +593,20 @@ registerCommand({
 	handler: (ctx) => ({
 		handled: true,
 		bufferOperation: { type: 'delete', name: getFlagValue(ctx.args, '-b') }
+	})
+});
+
+/**
+ * Capture the focused pane's contents into a new paste buffer (tmux-style).
+ * Supports: tmux capture-pane, tmux capturep, capture-pane, capturep.
+ */
+registerCommand({
+	name: CommandId.CAPTURE_PANE,
+	matchPatterns: ['tmux capture-pane', 'tmux capturep', 'capture-pane', 'capturep'],
+	description: 'Capture the focused pane into a paste buffer',
+	handler: () => ({
+		handled: true,
+		bufferOperation: { type: 'capture' }
 	})
 });
 

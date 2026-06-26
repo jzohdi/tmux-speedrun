@@ -252,6 +252,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		category: 'misc'
 	},
 	{
+		name: 'capture-pane',
+		shortcut: 'tmux capture-pane, tmux capturep',
+		description: 'Capture the focused pane into a paste buffer',
+		difficulty: 'advanced',
+		category: 'misc'
+	},
+	{
 		name: 'command-prompt',
 		shortcut: 'prefix + :',
 		description: 'Open tmux command prompt',
