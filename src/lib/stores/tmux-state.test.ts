@@ -806,6 +806,17 @@ describe('createTmuxStore capture-pane command', () => {
 		expect(store.focusedPane?.history.at(-1)?.content).toBe('captured text');
 	});
 
+	it('resolves the capturep alias', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.addHistory({ type: 'output', content: 'hello', timestamp: Date.now() });
+
+		store.executeRegisteredTmuxCommand('capturep');
+
+		expect(store.latestPasteBuffer?.content).toBe('hello');
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[captured pane to buffer buffer0001]');
+	});
+
 	it('emits command-executed for capture-pane', () => {
 		tmuxConfigStore.resetForTesting();
 		const commandNames: string[] = [];
