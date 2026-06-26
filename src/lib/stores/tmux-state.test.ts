@@ -846,6 +846,17 @@ describe('createTmuxStore list-keys command', () => {
 		expect(output).toContain('bind-key -T prefix % split-window -h');
 	});
 
+	it('resolves the lsk alias to the same binding list', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('lsk');
+
+		expect(store.focusedPane?.history.at(-1)?.content ?? '').toContain(
+			'bind-key -T prefix c new-window'
+		);
+	});
+
 	it('reflects tmux.conf overrides (unbind and rebind)', () => {
 		tmuxConfigStore.resetForTesting();
 		tmuxConfigStore.setFileText('unbind-key d\nbind-key y kill-session');
