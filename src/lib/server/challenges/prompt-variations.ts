@@ -152,6 +152,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Remove this pane',
 		'Destroy the current pane'
 	],
+	'break-pane': [
+		'Break the pane into its own window',
+		'Move this pane into a new window',
+		'Break the current pane out to a new window',
+		'Split this pane off into a separate window',
+		'Turn the focused pane into a new window'
+	],
 	'toggle-zoom': [
 		'Toggle pane zoom',
 		'Maximize or restore this pane',

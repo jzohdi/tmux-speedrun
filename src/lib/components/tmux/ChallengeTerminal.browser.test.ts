@@ -17,6 +17,22 @@ describe('ChallengeTerminal browser', () => {
 		await expect.element(screen.getByText('-- PREFIX --')).toBeVisible();
 	});
 
+	it('breaks a pane into a new window with prefix + !', async () => {
+		const screen = await render(ChallengeTerminal);
+		const terminal = screen.getByRole('application', {
+			name: /challenge terminal/i
+		});
+
+		await userEvent.click(terminal);
+		// Split to get two panes in the window.
+		await userEvent.keyboard('{Control>}b{/Control}"');
+		expect(document.querySelectorAll('.pane-container')).toHaveLength(2);
+
+		// Break the focused pane out; the new active window shows a single pane.
+		await userEvent.keyboard('{Control>}b{/Control}!');
+		expect(document.querySelectorAll('.pane-container')).toHaveLength(1);
+	});
+
 	it('lists key bindings with prefix + ?', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

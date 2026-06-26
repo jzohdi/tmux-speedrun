@@ -161,6 +161,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		category: 'pane'
 	},
 	{
+		name: 'break-pane',
+		shortcut: 'prefix + !',
+		description: 'Break the focused pane into a new window',
+		difficulty: 'intermediate',
+		category: 'pane'
+	},
+	{
 		name: 'toggle-zoom',
 		shortcut: 'prefix + z',
 		description: 'Toggle pane zoom (fullscreen)',

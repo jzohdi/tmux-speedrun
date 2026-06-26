@@ -1018,6 +1018,11 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				}
 				break;
 			}
+			case 'break-pane': {
+				// breakFocusedPane self-guards (no-op for a single pane).
+				breakFocusedPane();
+				break;
+			}
 			case 'toggle-zoom': {
 				if (paneCount > 1) {
 					togglePaneZoom();
@@ -1548,6 +1553,78 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		setFocusedPane(newFocusedPane.id);
 
 		emitSignal('pane-closed', { paneId: closedPaneId });
+		return true;
+	}
+
+	/**
+	 * Break the focused pane out of its window into a new window.
+	 *
+	 * The moved pane keeps all of its state (history/mode/copy state). The new
+	 * window becomes active with the moved pane focused; the source window's tree
+	 * collapses and its zoom clears if the broken pane was the zoomed one.
+	 *
+	 * No-op when detached or when the window has only one pane (matching tmux's
+	 * "can't break the only pane").
+	 *
+	 * @returns true if the pane was broken into a new window
+	 */
+	function breakFocusedPane(): boolean {
+		// Read live state directly (not derived) so this stays correct when called
+		// right after another state mutation in the same tick.
+		const currentSession = getAttachedSessionState();
+		const currentWindow = getActiveWindowState();
+		const movedPane = getFocusedPaneState();
+		if (!currentSession || !currentWindow || !movedPane) {
+			return false;
+		}
+
+		// Cannot break the only pane in the window.
+		if (countPanes(currentWindow.paneTree) <= 1) {
+			return false;
+		}
+
+		const movedPaneId = movedPane.id;
+		const newSourceTree = removePane(currentWindow.paneTree, movedPaneId);
+		if (!newSourceTree) {
+			return false;
+		}
+
+		// The new window holds the moved pane itself (preserving its state); the
+		// fresh pane createWindow generates is discarded.
+		const newWindow = createWindow();
+		newWindow.paneTree = movedPane;
+
+		const sourceWindowIndex = currentSession.activeWindowIndex;
+		const newWindowIndex = currentSession.windows.length;
+
+		state = {
+			...state,
+			sessions: state.sessions.map((session, sessionIdx) => {
+				if (sessionIdx !== state.attachedSessionIndex) {
+					return session;
+				}
+
+				const updatedWindows = session.windows.map((w, windowIdx) =>
+					windowIdx === sourceWindowIndex
+						? {
+								...w,
+								paneTree: newSourceTree,
+								zoomedPaneId: w.zoomedPaneId === movedPaneId ? null : w.zoomedPaneId
+							}
+						: w
+				);
+
+				return {
+					...session,
+					windows: [...updatedWindows, newWindow],
+					activeWindowIndex: newWindowIndex,
+					focusedPaneId: movedPaneId
+				};
+			})
+		};
+
+		emitSignal('window-created', { windowId: newWindow.id });
+		triggerInputFocus();
 		return true;
 	}
 
