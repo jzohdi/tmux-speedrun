@@ -273,6 +273,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		category: 'misc'
 	},
 	{
+		name: 'list-keys',
+		shortcut: 'prefix + ?, tmux list-keys, tmux lsk',
+		description: 'List the prefix key bindings',
+		difficulty: 'intermediate',
+		category: 'misc'
+	},
+	{
 		name: 'reload-config',
 		shortcut: 'tmux source-file <file>, tmux source <file>, source-file <file>, source <file>',
 		description: 'Reload tmux configuration file',

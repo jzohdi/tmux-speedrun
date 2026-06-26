@@ -136,6 +136,7 @@ const DEFAULT_KEYBINDINGS: Keybinding[] = [
 	createCommandBinding('prefix', ']', 'paste-buffer'),
 	createCommandBinding('prefix', ':', 'command-prompt'),
 	createCommandBinding('prefix', 't', 'show-time'),
+	createCommandBinding('prefix', '?', 'list-keys', { commandText: 'list-keys' }),
 	...Array.from({ length: 10 }, (_, index) =>
 		createCommandBinding('prefix', String(index), 'select-window', {
 			commandText: `select-window -t ${index}`

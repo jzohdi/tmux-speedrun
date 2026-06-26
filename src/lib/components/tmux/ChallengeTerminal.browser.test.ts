@@ -17,6 +17,18 @@ describe('ChallengeTerminal browser', () => {
 		await expect.element(screen.getByText('-- PREFIX --')).toBeVisible();
 	});
 
+	it('lists key bindings with prefix + ?', async () => {
+		const screen = await render(ChallengeTerminal);
+		const terminal = screen.getByRole('application', {
+			name: /challenge terminal/i
+		});
+
+		await userEvent.click(terminal);
+		await userEvent.keyboard('{Control>}b{/Control}?');
+
+		await expect.element(screen.getByText(/bind-key -T prefix c new-window/)).toBeVisible();
+	});
+
 	it('enters and exits copy mode from the keyboard', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

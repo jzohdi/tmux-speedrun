@@ -255,6 +255,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Show a clock overlay',
 		'View the time'
 	],
+	'list-keys': [
+		'List the key bindings',
+		'Show all prefix key bindings',
+		'Display the tmux key bindings',
+		'View the keyboard shortcuts',
+		'Show the list of key bindings'
+	],
 	'reload-config': [
 		'Reload the tmux configuration',
 		'Refresh tmux settings',

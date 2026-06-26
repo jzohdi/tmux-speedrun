@@ -833,3 +833,45 @@ describe('createTmuxStore capture-pane command', () => {
 		expect(commandNames).toContain('capture-pane');
 	});
 });
+
+describe('createTmuxStore list-keys command', () => {
+	it('lists the default prefix key bindings', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('list-keys');
+
+		const output = store.focusedPane?.history.at(-1)?.content ?? '';
+		expect(output).toContain('bind-key -T prefix c new-window');
+		expect(output).toContain('bind-key -T prefix % split-window -h');
+	});
+
+	it('reflects tmux.conf overrides (unbind and rebind)', () => {
+		tmuxConfigStore.resetForTesting();
+		tmuxConfigStore.setFileText('unbind-key d\nbind-key y kill-session');
+		tmuxConfigStore.applySavedConfig();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('list-keys');
+
+		const output = store.focusedPane?.history.at(-1)?.content ?? '';
+		expect(output).toContain('bind-key -T prefix y kill-session');
+		expect(output).not.toContain('bind-key -T prefix d detach');
+	});
+
+	it('emits command-executed for list-keys', () => {
+		tmuxConfigStore.resetForTesting();
+		const commandNames: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					commandNames.push(signal.commandName);
+				}
+			}
+		});
+
+		store.executeRegisteredTmuxCommand('list-keys');
+
+		expect(commandNames).toContain('list-keys');
+	});
+});
