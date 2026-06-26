@@ -745,3 +745,91 @@ describe('createTmuxStore delete-buffer command', () => {
 		expect(commandNames).toContain('delete-buffer');
 	});
 });
+
+describe('createTmuxStore capture-pane command', () => {
+	it('captures the focused pane history into a new buffer', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.addHistory({ type: 'output', content: 'hello', timestamp: Date.now() });
+
+		store.executeRegisteredTmuxCommand('capture-pane');
+
+		expect(store.latestPasteBuffer?.content).toBe('hello');
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[captured pane to buffer buffer0001]');
+	});
+
+	it('joins multiple history entries with newlines', () => {
+		tmuxConfigStore.resetForTesting();
+		// Seed two history entries via initialState (a single addHistory works, but
+		// two sequential ones are unreliable outside a reactive context).
+		const session = createSession('0');
+		const pane = findPaneById(session.windows[0].paneTree, session.focusedPaneId);
+		if (!pane) {
+			throw new Error('expected a focused pane');
+		}
+		pane.history = [
+			{ type: 'output', content: 'line1', timestamp: 1 },
+			{ type: 'output', content: 'line2', timestamp: 2 }
+		];
+		const store = createTmuxStore({
+			initialState: {
+				sessions: [session],
+				attachedSessionIndex: 0,
+				shellPane: createPane('default'),
+				pasteBuffers: []
+			}
+		});
+
+		store.executeRegisteredTmuxCommand('capture-pane');
+
+		expect(store.latestPasteBuffer?.content).toBe('line1\nline2');
+	});
+
+	it('reports nothing to capture when the pane history is empty', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.executeRegisteredTmuxCommand('capture-pane');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[nothing to capture]');
+		expect(store.latestPasteBuffer).toBeNull();
+	});
+
+	it('produces a buffer that show-buffer can display', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.addHistory({ type: 'output', content: 'captured text', timestamp: Date.now() });
+
+		store.executeRegisteredTmuxCommand('capture-pane');
+		store.executeRegisteredTmuxCommand('show-buffer');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('captured text');
+	});
+
+	it('resolves the capturep alias', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.addHistory({ type: 'output', content: 'hello', timestamp: Date.now() });
+
+		store.executeRegisteredTmuxCommand('capturep');
+
+		expect(store.latestPasteBuffer?.content).toBe('hello');
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[captured pane to buffer buffer0001]');
+	});
+
+	it('emits command-executed for capture-pane', () => {
+		tmuxConfigStore.resetForTesting();
+		const commandNames: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					commandNames.push(signal.commandName);
+				}
+			}
+		});
+
+		store.executeRegisteredTmuxCommand('capture-pane');
+
+		expect(commandNames).toContain('capture-pane');
+	});
+});

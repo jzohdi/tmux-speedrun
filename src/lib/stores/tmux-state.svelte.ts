@@ -2182,6 +2182,21 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				});
 				break;
 			}
+			case 'capture': {
+				// Capture the focused pane's committed history (our analogue of the
+				// "visible pane contents") into a new buffer. Read the content before
+				// pushing so the confirmation line itself is not captured.
+				const pane = getFocusedPaneState();
+				const content = pane ? pane.history.map((entry) => entry.content).join('\n') : '';
+				const buffer = pushPasteBuffer(content);
+
+				addHistory({
+					type: 'system',
+					content: buffer ? `[captured pane to buffer ${buffer.name}]` : '[nothing to capture]',
+					timestamp: Date.now()
+				});
+				break;
+			}
 		}
 	}
 

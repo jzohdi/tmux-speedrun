@@ -234,6 +234,13 @@ export const PROMPT_VARIATIONS: Record<string, string[]> = {
 		'Drop the most recent buffer',
 		'Delete the newest paste buffer'
 	],
+	'capture-pane': [
+		'Capture the pane contents into a buffer',
+		'Copy the current pane into a paste buffer',
+		'Save the pane contents to a buffer',
+		'Capture this pane into a new buffer',
+		'Grab the pane contents as a paste buffer'
+	],
 	'command-prompt': [
 		'Open the command prompt',
 		'Enter command mode',
