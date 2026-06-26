@@ -1112,6 +1112,18 @@ describe('createTmuxStore join-pane command', () => {
 		expect(store.paneCount).toBe(2); // current window gained the joined pane
 	});
 
+	it('resolves the joinp alias to join a pane from another window', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithWindows([createWindow('main'), windowWithHistory('w1', 'fromW1')]);
+
+		const handled = store.executeRegisteredTmuxCommand('joinp -s 1');
+
+		expect(handled).toBe(true);
+		expect(store.windowCount).toBe(1); // single-pane source closed
+		expect(store.paneCount).toBe(2); // current window gained the joined pane
+		expect(store.focusedPane?.history.some((entry) => entry.content === 'fromW1')).toBe(true);
+	});
+
 	it('emits command-executed for join-pane', () => {
 		tmuxConfigStore.resetForTesting();
 		const commandNames: string[] = [];
