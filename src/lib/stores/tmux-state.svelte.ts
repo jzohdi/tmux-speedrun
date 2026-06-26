@@ -490,8 +490,20 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		);
 	}
 
-	function getLatestPasteBufferState(): TmuxPasteBuffer | null {
+	/**
+	 * Find a paste buffer by name, or the most-recent buffer when no name is given.
+	 * Shared resolution for show-buffer / delete-buffer / paste-buffer.
+	 */
+	function findPasteBuffer(name?: string): TmuxPasteBuffer | null {
+		if (name) {
+			return state.pasteBuffers.find((buffer) => buffer.name === name) ?? null;
+		}
+
 		return state.pasteBuffers[0] ?? null;
+	}
+
+	function getLatestPasteBufferState(): TmuxPasteBuffer | null {
+		return findPasteBuffer();
 	}
 
 	function pushPasteBuffer(content: string, name?: string): TmuxPasteBuffer | null {
@@ -511,6 +523,26 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		};
 
 		return buffer;
+	}
+
+	/**
+	 * Delete a paste buffer by name, or the most-recent one when no name is given.
+	 *
+	 * @returns the deleted buffer, or null if it was not found / there are none
+	 */
+	function deletePasteBuffer(name?: string): TmuxPasteBuffer | null {
+		const target = findPasteBuffer(name);
+
+		if (!target) {
+			return null;
+		}
+
+		state = {
+			...state,
+			pasteBuffers: state.pasteBuffers.filter((buffer) => buffer !== target)
+		};
+
+		return target;
 	}
 
 	function setFocusedPane(paneId: string): void {
@@ -2113,9 +2145,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	function handleBufferOperation(operation: BufferOperation): void {
 		switch (operation.type) {
 			case 'show': {
-				const buffer = operation.name
-					? state.pasteBuffers.find((candidate) => candidate.name === operation.name)
-					: getLatestPasteBufferState();
+				const buffer = findPasteBuffer(operation.name);
 
 				if (!buffer) {
 					addHistory({
@@ -2129,6 +2159,25 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				addHistory({
 					type: 'output',
 					content: buffer.content,
+					timestamp: Date.now()
+				});
+				break;
+			}
+			case 'delete': {
+				const deleted = deletePasteBuffer(operation.name);
+
+				if (!deleted) {
+					addHistory({
+						type: 'error',
+						content: operation.name ? `can't find buffer: ${operation.name}` : 'no buffers',
+						timestamp: Date.now()
+					});
+					return;
+				}
+
+				addHistory({
+					type: 'system',
+					content: `[deleted buffer ${deleted.name}]`,
 					timestamp: Date.now()
 				});
 				break;

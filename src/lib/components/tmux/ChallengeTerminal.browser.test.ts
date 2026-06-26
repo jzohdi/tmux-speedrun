@@ -118,6 +118,27 @@ describe('ChallengeTerminal browser', () => {
 		await expect.element(screen.getByText('no buffers')).toBeVisible();
 	});
 
+	it('deletes a paste buffer created in copy mode', async () => {
+		const screen = await render(ChallengeTerminal);
+		const terminal = screen.getByRole('application', {
+			name: /challenge terminal/i
+		});
+
+		// Copy something into a buffer via copy mode (creates buffer0001).
+		await userEvent.click(terminal);
+		await userEvent.keyboard('{Control>}b{/Control}{[}');
+		await userEvent.keyboard('{Control>}{Space}{/Control}');
+		await userEvent.keyboard('{ArrowLeft}');
+		await userEvent.keyboard('{Alt>}w{/Alt}');
+		await expect.element(screen.getByText('Copied to buffer0001')).toBeVisible();
+
+		const input = screen.getByRole('textbox');
+		await userEvent.click(input);
+		await userEvent.keyboard('delete-buffer{Enter}');
+
+		await expect.element(screen.getByText('[deleted buffer buffer0001]')).toBeVisible();
+	});
+
 	it('copies selection when mac Option changes the key value', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

@@ -87,6 +87,7 @@ export const CommandId = {
 	PASTE_BUFFER: 'paste-buffer',
 	LIST_BUFFERS: 'list-buffers',
 	SHOW_BUFFER: 'show-buffer',
+	DELETE_BUFFER: 'delete-buffer',
 	COMMAND_PROMPT: 'command-prompt',
 	SHOW_TIME: 'show-time',
 	RELOAD_CONFIG: 'reload-config'
@@ -171,9 +172,9 @@ export type ConfigOperation = {
 
 /**
  * Paste-buffer operation types for command results.
- * Used by buffer commands (show-buffer, and later delete-buffer/capture-pane).
+ * Used by buffer commands (show-buffer, delete-buffer, and later capture-pane).
  */
-export type BufferOperation = { type: 'show'; name?: string };
+export type BufferOperation = { type: 'show'; name?: string } | { type: 'delete'; name?: string };
 
 /**
  * Result returned from a command handler.
@@ -567,6 +568,27 @@ registerCommand({
 		return {
 			handled: true,
 			bufferOperation: { type: 'show', name }
+		};
+	}
+});
+
+/**
+ * Delete a paste buffer (tmux-style).
+ * Supports: tmux delete-buffer, tmux deleteb, delete-buffer, deleteb, optionally -b <name>.
+ * Without -b, deletes the most-recent buffer.
+ */
+registerCommand({
+	name: CommandId.DELETE_BUFFER,
+	matchPatterns: ['tmux delete-buffer', 'tmux deleteb', 'delete-buffer', 'deleteb'],
+	matchMode: 'prefix',
+	description: 'Delete a paste buffer',
+	handler: (ctx) => {
+		const bIndex = ctx.args.indexOf('-b');
+		const name = bIndex !== -1 && ctx.args[bIndex + 1] ? ctx.args[bIndex + 1] : undefined;
+
+		return {
+			handled: true,
+			bufferOperation: { type: 'delete', name }
 		};
 	}
 });

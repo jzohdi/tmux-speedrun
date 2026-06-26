@@ -245,6 +245,13 @@ export const TMUX_COMMANDS: TmuxCommand[] = [
 		category: 'misc'
 	},
 	{
+		name: 'delete-buffer',
+		shortcut: 'tmux delete-buffer, tmux deleteb',
+		description: 'Delete a paste buffer',
+		difficulty: 'advanced',
+		category: 'misc'
+	},
+	{
 		name: 'command-prompt',
 		shortcut: 'prefix + :',
 		description: 'Open tmux command prompt',
