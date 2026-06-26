@@ -86,6 +86,7 @@ export const CommandId = {
 	COPY_MODE: 'copy-mode',
 	PASTE_BUFFER: 'paste-buffer',
 	LIST_BUFFERS: 'list-buffers',
+	SHOW_BUFFER: 'show-buffer',
 	COMMAND_PROMPT: 'command-prompt',
 	SHOW_TIME: 'show-time',
 	RELOAD_CONFIG: 'reload-config'
@@ -169,6 +170,12 @@ export type ConfigOperation = {
 };
 
 /**
+ * Paste-buffer operation types for command results.
+ * Used by buffer commands (show-buffer, and later delete-buffer/capture-pane).
+ */
+export type BufferOperation = { type: 'show'; name?: string };
+
+/**
  * Result returned from a command handler.
  */
 export type CommandResult = {
@@ -212,6 +219,10 @@ export type CommandResult = {
 	 * Config operation to perform (handled by store).
 	 */
 	configOperation?: ConfigOperation;
+	/**
+	 * Paste-buffer operation to perform (handled by store).
+	 */
+	bufferOperation?: BufferOperation;
 };
 
 /**
@@ -537,6 +548,27 @@ registerCommand({
 		handled: true,
 		generateOutput: 'buffer-list'
 	})
+});
+
+/**
+ * Show paste buffer contents (tmux-style).
+ * Supports: tmux show-buffer, tmux showb, show-buffer, showb, optionally -b <name>.
+ * Without -b, shows the most-recent buffer.
+ */
+registerCommand({
+	name: CommandId.SHOW_BUFFER,
+	matchPatterns: ['tmux show-buffer', 'tmux showb', 'show-buffer', 'showb'],
+	matchMode: 'prefix',
+	description: 'Show the contents of a paste buffer',
+	handler: (ctx) => {
+		const bIndex = ctx.args.indexOf('-b');
+		const name = bIndex !== -1 && ctx.args[bIndex + 1] ? ctx.args[bIndex + 1] : undefined;
+
+		return {
+			handled: true,
+			bufferOperation: { type: 'show', name }
+		};
+	}
 });
 
 /**

@@ -108,6 +108,16 @@ describe('ChallengeTerminal browser', () => {
 		await expect.element(screen.getByText(/buffer0001:/)).toBeVisible();
 	});
 
+	it('show-buffer reports no buffers when none exist', async () => {
+		const screen = await render(ChallengeTerminal);
+		const input = screen.getByRole('textbox');
+
+		await userEvent.click(input);
+		await userEvent.keyboard('show-buffer{Enter}');
+
+		await expect.element(screen.getByText('no buffers')).toBeVisible();
+	});
+
 	it('copies selection when mac Option changes the key value', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {
