@@ -261,6 +261,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	let prefixActive = $state(false);
 	let lastFocusedPaneId = $state<string | null>(null);
 	/**
+	 * ID of the window that was active before the current one. Tracked by ID
+	 * (not index) so it survives window reordering/closing, mirroring
+	 * lastFocusedPaneId. Powers tmux "last-window" (prefix + l).
+	 */
+	let lastActiveWindowId = $state<string | null>(null);
+	/**
 	 * Counter that increments whenever input focus should be refreshed.
 	 * Used to trigger focus in PaneView even when focusedPaneId hasn't changed.
 	 */
@@ -1134,10 +1140,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				break;
 			}
 			case 'last': {
-				// Toggle to previous window (tmux "last-window" behavior)
-				if (windowCount > 1) {
-					previousWindow();
-				}
+				lastWindow();
 				break;
 			}
 			case 'list': {
@@ -1336,20 +1339,27 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @param index - Window index to switch to
 	 */
 	function switchWindow(index: number): void {
-		if (!attachedSession) {
+		// Read live session state (not the attachedSession derived) so a sequence
+		// of switches within one tick sees each other's updates, matching the
+		// session-navigation helpers.
+		const session = getAttachedSessionState();
+		if (!session) {
 			return;
 		}
 
-		if (index < 0 || index >= attachedSession.windows.length) {
+		if (index < 0 || index >= session.windows.length) {
 			return;
 		}
 
-		if (index === attachedSession.activeWindowIndex) {
+		if (index === session.activeWindowIndex) {
 			return;
 		}
 
-		const targetWindow = attachedSession.windows[index];
+		const targetWindow = session.windows[index];
 		const firstPane = getFirstPane(targetWindow.paneTree);
+
+		// Remember the window we are leaving so "last-window" can return to it.
+		lastActiveWindowId = session.windows[session.activeWindowIndex].id;
 
 		updateAttachedSession({
 			activeWindowIndex: index,
@@ -1365,11 +1375,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Switch to the next window (wraps around).
 	 */
 	function nextWindow(): void {
-		if (!attachedSession) {
+		const session = getAttachedSessionState();
+		if (!session) {
 			return;
 		}
 
-		const newIndex = (attachedSession.activeWindowIndex + 1) % attachedSession.windows.length;
+		const newIndex = (session.activeWindowIndex + 1) % session.windows.length;
 		switchWindow(newIndex);
 	}
 
@@ -1377,14 +1388,36 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * Switch to the previous window (wraps around).
 	 */
 	function previousWindow(): void {
-		if (!attachedSession) {
+		const session = getAttachedSessionState();
+		if (!session) {
 			return;
 		}
 
 		const newIndex =
-			(attachedSession.activeWindowIndex - 1 + attachedSession.windows.length) %
-			attachedSession.windows.length;
+			(session.activeWindowIndex - 1 + session.windows.length) % session.windows.length;
 		switchWindow(newIndex);
+	}
+
+	/**
+	 * Switch to the last active window (tmux "last-window", prefix + l).
+	 *
+	 * Returns to the window that was active before the current one, resolved by
+	 * ID so it stays correct across reordering. No-op when there is no recorded
+	 * last window or it has since been closed (matching tmux, which reports
+	 * "no last window").
+	 */
+	function lastWindow(): void {
+		const session = getAttachedSessionState();
+		if (!session || !lastActiveWindowId) {
+			return;
+		}
+
+		const index = session.windows.findIndex((w) => w.id === lastActiveWindowId);
+		if (index === -1) {
+			return;
+		}
+
+		switchWindow(index);
 	}
 
 	/**
@@ -1424,37 +1457,32 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @param toIndex - New index
 	 */
 	function reorderWindows(fromIndex: number, toIndex: number): void {
-		if (!attachedSession) {
+		const session = getAttachedSessionState();
+		if (!session) {
 			return;
 		}
 
 		if (
 			fromIndex < 0 ||
-			fromIndex >= attachedSession.windows.length ||
+			fromIndex >= session.windows.length ||
 			toIndex < 0 ||
-			toIndex >= attachedSession.windows.length ||
+			toIndex >= session.windows.length ||
 			fromIndex === toIndex
 		) {
 			return;
 		}
 
-		const newWindows = [...attachedSession.windows];
+		const newWindows = [...session.windows];
 		const [removed] = newWindows.splice(fromIndex, 1);
 		newWindows.splice(toIndex, 0, removed);
 
 		// Adjust active index
-		let newActiveIndex = attachedSession.activeWindowIndex;
-		if (fromIndex === attachedSession.activeWindowIndex) {
+		let newActiveIndex = session.activeWindowIndex;
+		if (fromIndex === session.activeWindowIndex) {
 			newActiveIndex = toIndex;
-		} else if (
-			fromIndex < attachedSession.activeWindowIndex &&
-			toIndex >= attachedSession.activeWindowIndex
-		) {
+		} else if (fromIndex < session.activeWindowIndex && toIndex >= session.activeWindowIndex) {
 			newActiveIndex--;
-		} else if (
-			fromIndex > attachedSession.activeWindowIndex &&
-			toIndex <= attachedSession.activeWindowIndex
-		) {
+		} else if (fromIndex > session.activeWindowIndex && toIndex <= session.activeWindowIndex) {
 			newActiveIndex++;
 		}
 
@@ -1477,11 +1505,12 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	 * @param target - Second window index
 	 */
 	function swapWindows(source: number, target: number): void {
-		if (!attachedSession) {
+		const session = getAttachedSessionState();
+		if (!session) {
 			return;
 		}
 
-		const windows = attachedSession.windows;
+		const windows = session.windows;
 		if (
 			source < 0 ||
 			source >= windows.length ||
@@ -1496,7 +1525,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		[newWindows[source], newWindows[target]] = [newWindows[target], newWindows[source]];
 
 		// Active window follows its content to the swapped position.
-		let newActiveIndex = attachedSession.activeWindowIndex;
+		let newActiveIndex = session.activeWindowIndex;
 		if (newActiveIndex === source) {
 			newActiveIndex = target;
 		} else if (newActiveIndex === target) {
@@ -2897,6 +2926,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		state = initialState ?? createInitialState();
 		prefixActive = false;
 		lastFocusedPaneId = null;
+		lastActiveWindowId = null;
 	}
 
 	// ========================================================================
@@ -2999,6 +3029,7 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 		switchWindow,
 		nextWindow,
 		previousWindow,
+		lastWindow,
 		renameWindow,
 		reorderWindows,
 		swapWindows,

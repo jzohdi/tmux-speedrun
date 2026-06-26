@@ -1292,3 +1292,70 @@ describe('createTmuxStore join-pane command', () => {
 		expect(commandNames).toContain('join-pane');
 	});
 });
+
+describe('createTmuxStore last-window command', () => {
+	// Seed three named windows ['main', 'a', 'b'] so last-window (previously
+	// active) is distinguishable from previous-window (index - 1).
+	function storeWithThreeWindows(activeWindowIndex = 0) {
+		const session = createSession('0');
+		session.windows = [createWindow('main'), createWindow('a'), createWindow('b')];
+		session.activeWindowIndex = activeWindowIndex;
+		session.focusedPaneId = getFirstPane(session.windows[activeWindowIndex].paneTree).id;
+
+		return createTmuxStore({
+			initialState: {
+				sessions: [session],
+				attachedSessionIndex: 0,
+				shellPane: createPane('default'),
+				pasteBuffers: []
+			}
+		});
+	}
+
+	it('returns to the previously active window, not the index-previous one', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithThreeWindows(0);
+
+		store.switchWindow(2); // active = b (2), last-active = main (0)
+		store.executeRegisteredTmuxCommand('last-window');
+
+		// previous-window from index 2 would land on index 1; last-window goes to main.
+		expect(store.activeWindowIndex).toBe(0);
+	});
+
+	it('toggles back and forth between the two most recent windows', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithThreeWindows(0);
+
+		store.switchWindow(2); // active = b (2), last-active = main (0)
+
+		store.executeRegisteredTmuxCommand('last-window');
+		expect(store.activeWindowIndex).toBe(0); // back to main
+
+		store.executeRegisteredTmuxCommand('last-window');
+		expect(store.activeWindowIndex).toBe(2); // back to b
+	});
+
+	it('is a no-op when no previous window has been recorded', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithThreeWindows(1); // active = a, nothing switched yet
+
+		store.lastWindow();
+
+		expect(store.activeWindowIndex).toBe(1); // unchanged
+	});
+
+	it('tracks the last window by id so it survives a swap', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = storeWithThreeWindows(0);
+
+		store.switchWindow(2); // active = b (2), last-active = main (0)
+		store.swapWindows(0, 1); // windows become [a, main, b]; active (b) unchanged
+
+		store.executeRegisteredTmuxCommand('last-window');
+
+		// main moved from index 0 to index 1 but is still resolved by id.
+		expect(store.activeWindowIndex).toBe(1);
+		expect(store.attachedSession?.windows[store.activeWindowIndex].name).toBe('main');
+	});
+});

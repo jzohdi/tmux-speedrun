@@ -23,14 +23,17 @@ import { getChallengePoolCount } from '$lib/server/challenges/pools';
  * Examples: "12.34s", "1m 23.45s"
  */
 function formatDuration(ms: number): string {
-	const seconds = ms / 1000;
+	// Round to centiseconds first so boundary values don't render with a
+	// rounded-up seconds field (e.g. 59999ms as "60.00s" or 119999ms as
+	// "1m 60.00s").
+	const totalSeconds = Math.round(ms / 10) / 100;
 
-	if (seconds < 60) {
-		return `${seconds.toFixed(2)}s`;
+	if (totalSeconds < 60) {
+		return `${totalSeconds.toFixed(2)}s`;
 	}
 
-	const minutes = Math.floor(seconds / 60);
-	const remainingSeconds = seconds % 60;
+	const minutes = Math.floor(totalSeconds / 60);
+	const remainingSeconds = totalSeconds - minutes * 60;
 
 	return `${minutes}m ${remainingSeconds.toFixed(2)}s`;
 }
