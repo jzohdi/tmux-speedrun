@@ -53,6 +53,57 @@ describe('ChallengeTerminal browser', () => {
 		expect(document.querySelectorAll('.pane-container')).toHaveLength(2);
 	});
 
+	it('keeps focus on the command prompt when focus() is called while it is open', async () => {
+		// Regression: entering command-prompt (prefix + :) emits a command-executed
+		// signal; parent pages react by calling the terminal's focus(). Before the fix
+		// focus() always targeted the pane input, racing StatusBar's auto-focus and
+		// intermittently leaving the cursor in the pane while the orange bar showed.
+		const screen = await render(ChallengeTerminal);
+		const terminal = screen.getByRole('application', {
+			name: /challenge terminal/i
+		});
+
+		await userEvent.click(terminal);
+		await userEvent.keyboard('{Control>}b{/Control}:');
+
+		// Orange command prompt is open.
+		const statusInput = document.querySelector('.status-input') as HTMLInputElement;
+		expect(statusInput).not.toBeNull();
+
+		// Simulate the parent page focusing the terminal in response to the signal.
+		// `component` is typed as the constructor by vitest-browser-svelte, but at
+		// runtime it is the instance exposing the exported focus().
+		const terminalApi = screen.component as unknown as { focus: () => Promise<void> };
+		await terminalApi.focus();
+		await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
+		expect(document.activeElement).toBe(statusInput);
+	});
+
+	it('keeps focus on the kill-pane confirmation when focus() is called while it is open', async () => {
+		// The y/n confirmation bar is a modal status-bar overlay just like the command
+		// prompt: focus() must keep focus on it, not steal it back to the pane (where
+		// the y/n keystrokes would be typed instead of confirming).
+		const screen = await render(ChallengeTerminal);
+		const terminal = screen.getByRole('application', {
+			name: /challenge terminal/i
+		});
+
+		await userEvent.click(terminal);
+		await userEvent.keyboard('{Control>}b{/Control}x');
+
+		// Orange confirmation bar is open.
+		const confirmBar = document.querySelector('.status-bar.confirm-mode') as HTMLElement;
+		expect(confirmBar).not.toBeNull();
+
+		// Simulate a parent focusing the terminal while the confirmation is up.
+		const terminalApi = screen.component as unknown as { focus: () => Promise<void> };
+		await terminalApi.focus();
+		await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
+		expect(document.activeElement).toBe(confirmBar);
+	});
+
 	it('lists key bindings with prefix + ?', async () => {
 		const screen = await render(ChallengeTerminal);
 		const terminal = screen.getByRole('application', {

@@ -1004,7 +1004,9 @@
 	// ========================================================================
 
 	/**
-	 * Focus the terminal input of the currently focused pane.
+	 * Focus the terminal's active input surface: a modal status-bar overlay
+	 * (command/rename prompt or kill-pane confirmation) when one is open,
+	 * otherwise the focused pane's input.
 	 * Uses tick() to ensure Svelte DOM updates are complete,
 	 * then requestAnimationFrame to ensure browser has rendered.
 	 */
@@ -1012,6 +1014,16 @@
 		await tick();
 		// Use requestAnimationFrame to ensure browser has rendered
 		requestAnimationFrame(() => {
+			// A status-bar overlay (command/rename prompt or kill-pane confirmation) is
+			// modal: while open it owns focus, not the pane underneath. Focusing the pane
+			// here would race StatusBar's own auto-focus and strand the cursor in the pane.
+			const statusOverlay = containerRef?.querySelector(
+				'.status-input, .status-bar.confirm-mode'
+			) as HTMLElement | null;
+			if (statusOverlay) {
+				statusOverlay.focus();
+				return;
+			}
 			const focusedPaneField = containerRef?.querySelector(
 				'.pane-view.focused input, .pane-view.focused textarea'
 			) as HTMLElement | null;
