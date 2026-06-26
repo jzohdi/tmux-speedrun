@@ -418,6 +418,15 @@ function getTrailingArgument(args: string[]): string | null {
 	return nonFlagArgs[nonFlagArgs.length - 1];
 }
 
+/**
+ * Get the value following a flag (e.g. `-b buffer0001` → 'buffer0001').
+ * Returns undefined when the flag is absent or has no following value.
+ */
+function getFlagValue(args: string[], flag: string): string | undefined {
+	const flagIndex = args.indexOf(flag);
+	return flagIndex !== -1 ? (args[flagIndex + 1] ?? undefined) : undefined;
+}
+
 // ============================================================================
 // BUILT-IN TEXT COMMANDS
 // ============================================================================
@@ -561,15 +570,10 @@ registerCommand({
 	matchPatterns: ['tmux show-buffer', 'tmux showb', 'show-buffer', 'showb'],
 	matchMode: 'prefix',
 	description: 'Show the contents of a paste buffer',
-	handler: (ctx) => {
-		const bIndex = ctx.args.indexOf('-b');
-		const name = bIndex !== -1 && ctx.args[bIndex + 1] ? ctx.args[bIndex + 1] : undefined;
-
-		return {
-			handled: true,
-			bufferOperation: { type: 'show', name }
-		};
-	}
+	handler: (ctx) => ({
+		handled: true,
+		bufferOperation: { type: 'show', name: getFlagValue(ctx.args, '-b') }
+	})
 });
 
 /**
@@ -582,15 +586,10 @@ registerCommand({
 	matchPatterns: ['tmux delete-buffer', 'tmux deleteb', 'delete-buffer', 'deleteb'],
 	matchMode: 'prefix',
 	description: 'Delete a paste buffer',
-	handler: (ctx) => {
-		const bIndex = ctx.args.indexOf('-b');
-		const name = bIndex !== -1 && ctx.args[bIndex + 1] ? ctx.args[bIndex + 1] : undefined;
-
-		return {
-			handled: true,
-			bufferOperation: { type: 'delete', name }
-		};
-	}
+	handler: (ctx) => ({
+		handled: true,
+		bufferOperation: { type: 'delete', name: getFlagValue(ctx.args, '-b') }
+	})
 });
 
 /**

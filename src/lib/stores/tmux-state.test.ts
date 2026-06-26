@@ -716,6 +716,18 @@ describe('createTmuxStore delete-buffer command', () => {
 		expect(store.focusedPane?.history.at(-1)?.content).toBe('no buffers');
 	});
 
+	it('resolves the deleteb alias to delete the latest buffer', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // buffer0001
+		store.pushPasteBuffer('world'); // buffer0002 (latest)
+
+		store.executeRegisteredTmuxCommand('deleteb');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('[deleted buffer buffer0002]');
+		expect(store.latestPasteBuffer?.content).toBe('hello');
+	});
+
 	it('emits command-executed for delete-buffer', () => {
 		tmuxConfigStore.resetForTesting();
 		const commandNames: string[] = [];
