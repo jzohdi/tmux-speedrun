@@ -54,5 +54,12 @@
 		"@tanstack/svelte-query": "^6.0.14",
 		"postgres": "^3.4.5",
 		"zod": "^4.2.1"
+	},
+	"allowScripts": {
+		"esbuild@0.18.20": true,
+		"esbuild@0.25.12": true,
+		"esbuild@0.28.1": true,
+		"fsevents@2.3.2": true,
+		"fsevents@2.3.3": true
 	}
 }
