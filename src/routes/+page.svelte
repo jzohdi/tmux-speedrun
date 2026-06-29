@@ -1,5 +1,13 @@
 <script lang="ts">
 	import Terminal from '$lib/components/Terminal.svelte';
+
+	let terminalComponent: ReturnType<typeof Terminal> | null = $state(null);
+	let terminalSectionRef: HTMLElement | null = $state(null);
+
+	function handleHintClick(cmd: string): void {
+		terminalComponent?.triggerCommand(cmd);
+		terminalSectionRef?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+	}
 </script>
 
 <svelte:head>
@@ -80,33 +88,33 @@
 			<p class="description">Practice tmux commands in timed challenges.</p>
 
 			<div class="command-hints">
-				<div class="hint">
+				<button type="button" class="hint" onclick={() => handleHintClick('tsr ls')}>
 					<code>tsr ls</code>
 					<span>list challenges</span>
-				</div>
-				<div class="hint">
+				</button>
+				<button type="button" class="hint" onclick={() => handleHintClick('tsr start <id>')}>
 					<code>tsr start &lt;id&gt;</code>
 					<span>begin a challenge</span>
-				</div>
-				<div class="hint">
+				</button>
+				<button type="button" class="hint" onclick={() => handleHintClick('tsr practice')}>
 					<code>tsr practice</code>
 					<span>learn step by step</span>
-				</div>
-				<div class="hint">
+				</button>
+				<button type="button" class="hint" onclick={() => handleHintClick('tsr config')}>
 					<code>tsr config</code>
 					<span>customize tmux.conf</span>
-				</div>
-				<div class="hint">
+				</button>
+				<button type="button" class="hint" onclick={() => handleHintClick('man tmux')}>
 					<code>man tmux</code>
 					<span>command reference</span>
-				</div>
+				</button>
 			</div>
 		</div>
 	</section>
 
 	<!-- Terminal Section -->
-	<section class="terminal-section">
-		<Terminal />
+	<section class="terminal-section" bind:this={terminalSectionRef}>
+		<Terminal bind:this={terminalComponent} />
 	</section>
 
 	<!-- Features Section -->
@@ -260,6 +268,21 @@
 		background: rgba(255, 255, 255, 0.03);
 		border: 1px solid rgba(255, 255, 255, 0.06);
 		border-radius: 8px;
+		appearance: none;
+		font-family: inherit;
+		font-size: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+	}
+
+	.hint:hover {
+		background: rgba(80, 250, 123, 0.08);
+		border-color: rgba(80, 250, 123, 0.25);
+	}
+
+	.hint:active {
+		transform: scale(0.97);
 	}
 
 	.hint code {

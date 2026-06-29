@@ -250,6 +250,29 @@
 		addOutput("Type 'help' for available commands.", 'error');
 	}
 
+	export function triggerCommand(cmd: string): void {
+		if (mode !== 'default') {
+			if (historyLengthBeforeMode > 0) {
+				history = history.slice(0, historyLengthBeforeMode);
+			}
+			mode = 'default';
+			selectedIndex = 0;
+			listData = [];
+			historyLengthBeforeMode = 0;
+		}
+
+		const hasPlaceholder = /<[^>]+>/.test(cmd);
+		if (hasPlaceholder) {
+			inputValue = cmd.replace(/<[^>]+>/g, '').trim() + ' ';
+			tick().then(() => inputRef?.focus());
+		} else {
+			tick().then(() => {
+				processCommand(cmd);
+				inputRef?.focus();
+			});
+		}
+	}
+
 	function toggleMaximize() {
 		isMaximized = !isMaximized;
 	}
