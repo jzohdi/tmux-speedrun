@@ -1,5 +1,19 @@
 <script lang="ts">
 	import Terminal from '$lib/components/Terminal.svelte';
+
+	type Hint = { command: string; description: string };
+
+	// Single source of truth for the command-hint row: the string shown IS the
+	// string executed when the hint is clicked — no separate mapping (per #31).
+	const hints: Hint[] = [
+		{ command: 'tsr ls', description: 'list challenges' },
+		{ command: 'tsr start <id>', description: 'begin a challenge' },
+		{ command: 'tsr practice', description: 'learn step by step' },
+		{ command: 'tsr config', description: 'customize tmux.conf' },
+		{ command: 'man tmux', description: 'command reference' }
+	];
+
+	let terminal: Terminal | undefined = $state();
 </script>
 
 <svelte:head>
@@ -80,33 +94,24 @@
 			<p class="description">Practice tmux commands in timed challenges.</p>
 
 			<div class="command-hints">
-				<div class="hint">
-					<code>tsr ls</code>
-					<span>list challenges</span>
-				</div>
-				<div class="hint">
-					<code>tsr start &lt;id&gt;</code>
-					<span>begin a challenge</span>
-				</div>
-				<div class="hint">
-					<code>tsr practice</code>
-					<span>learn step by step</span>
-				</div>
-				<div class="hint">
-					<code>tsr config</code>
-					<span>customize tmux.conf</span>
-				</div>
-				<div class="hint">
-					<code>man tmux</code>
-					<span>command reference</span>
-				</div>
+				{#each hints as hint (hint.command)}
+					<button
+						type="button"
+						class="hint"
+						aria-label={`Run command: ${hint.command}`}
+						onclick={() => terminal?.runCommand(hint.command)}
+					>
+						<code>{hint.command}</code>
+						<span>{hint.description}</span>
+					</button>
+				{/each}
 			</div>
 		</div>
 	</section>
 
 	<!-- Terminal Section -->
 	<section class="terminal-section">
-		<Terminal />
+		<Terminal bind:this={terminal} />
 	</section>
 
 	<!-- Features Section -->
@@ -260,6 +265,29 @@
 		background: rgba(255, 255, 255, 0.03);
 		border: 1px solid rgba(255, 255, 255, 0.06);
 		border-radius: 8px;
+		/* Button reset so the <button> matches the old <div> appearance */
+		margin: 0;
+		font-family: inherit;
+		color: inherit;
+		text-align: left;
+		/* Interactivity affordance (clickable hint) */
+		cursor: pointer;
+		transition:
+			background 0.2s ease,
+			border-color 0.2s ease,
+			transform 0.2s ease;
+	}
+
+	.hint:hover {
+		background: rgba(255, 255, 255, 0.06);
+		border-color: rgba(50, 255, 150, 0.3);
+		transform: translateY(-1px);
+	}
+
+	.hint:focus-visible {
+		outline: none;
+		border-color: rgba(50, 255, 150, 0.5);
+		background: rgba(255, 255, 255, 0.06);
 	}
 
 	.hint code {

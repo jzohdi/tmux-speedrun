@@ -323,6 +323,19 @@
 		}
 	}
 
+	/**
+	 * Run a command through the exact same execution path as a typed-and-Entered
+	 * command line, then move focus into the terminal. Exposed so the home page's
+	 * clickable command hints can run their command without the user typing it.
+	 */
+	export function runCommand(cmd: string) {
+		processCommand(cmd); // same execution path as pressing Enter
+		inputValue = ''; // mirror the Enter handler, which clears the input
+		// A command may change `mode` (e.g. `tsr ls` → list, `man tmux` → man), so
+		// defer the focus call until after the mode-driven DOM change is applied.
+		tick().then(() => focusInput());
+	}
+
 	// Scroll to bottom when history changes
 	$effect(() => {
 		if (history.length > 0) {
