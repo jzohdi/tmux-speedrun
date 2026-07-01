@@ -25,8 +25,6 @@
 		verified: boolean;
 	};
 
-	// Free-text name for the anonymous "Save time" path.
-	let usernameInput = $state('');
 	// Guards against double-submits / duplicate auto-records.
 	let recording = $state(false);
 	let autoRecordAttempted = $state(false);
@@ -50,6 +48,20 @@
 		window.location.href = signInHref;
 	}
 
+	/**
+	 * Header sign-in (mid-challenge, no return-to). Full navigation — this is a
+	 * server route that redirects to an external origin (GitHub).
+	 */
+	function signIn() {
+		window.location.href = '/api/auth/github/login';
+	}
+
+	/** Sign out from the challenge page (reload drops back to the anonymous state). */
+	async function signOut() {
+		await fetch('/api/auth/logout', { method: 'POST' });
+		window.location.reload();
+	}
+
 	/** Fetch this challenge's leaderboard for the completion panel (req #2). */
 	async function loadLeaderboard() {
 		try {
@@ -65,11 +77,16 @@
 		}
 	}
 
-	/** Save the deferred (anonymous) time under an optional free-text name. */
-	async function handleSaveTime() {
+	/**
+	 * Save the deferred time. Identity is resolved server-side: signed-in users
+	 * record under their verified GitHub identity, otherwise the entry is
+	 * Anonymous. Drives both the "Save as Anonymous" and signed-in "Save my time"
+	 * buttons — `record()` takes no argument (iteration 3).
+	 */
+	async function handleSave() {
 		if (recording || challenge.recorded) return;
 		recording = true;
-		const ok = await challenge.record(usernameInput.trim() || undefined);
+		const ok = await challenge.record();
 		recording = false;
 		if (ok) await loadLeaderboard();
 	}
@@ -299,6 +316,19 @@
 				<code>man tmux</code> for help
 			</span>
 			<span class="timer">{challenge.formattedTime}</span>
+
+			<!-- Auth control: signed-in indicator + sign-out (req: log out anywhere). -->
+			<span class="auth-control">
+				{#if data.user}
+					<span class="signed-in" title="Verified GitHub identity">
+						<span class="dot" aria-hidden="true">●</span>
+						{data.user.username}
+					</span>
+					<button type="button" class="auth-btn" onclick={signOut}>Sign out</button>
+				{:else}
+					<button type="button" class="auth-btn signin" onclick={signIn}>Sign in</button>
+				{/if}
+			</span>
 		</header>
 
 		<!-- Progress Bar -->
@@ -395,35 +425,27 @@
 								{#if isSignedIn}<span class="verified-badge">✓ verified</span>{/if}
 							</p>
 						{:else}
-							<!-- Unrecorded: free-text save + GitHub sign-in prompt -->
+							<!-- Unrecorded: exactly two choices — Anonymous or verified GitHub.
+							     No free-text name (iteration 3). -->
 							<div class="record-form">
-								<div class="record-row">
-									<input
-										id="username-input"
-										class="username-input"
-										type="text"
-										maxlength="32"
-										placeholder="Enter a username (optional)"
-										aria-label="Username for the leaderboard"
-										bind:value={usernameInput}
-										disabled={recording}
-										onkeydown={(e) => e.key === 'Enter' && handleSaveTime()}
-									/>
-									<button
-										class="action-button primary"
-										onclick={handleSaveTime}
-										disabled={recording}
-									>
-										{recording ? 'Saving…' : 'Save time'}
+								{#if isSignedIn}
+									<!-- Signed-in edge (hydrated but not yet recorded): record verified.
+									     Never prompt an already-authenticated user to sign in again. -->
+									<button class="action-button primary" onclick={handleSave} disabled={recording}>
+										{recording ? 'Saving…' : 'Save my time'}
 									</button>
-								</div>
+								{:else}
+									<button class="action-button primary" onclick={handleSave} disabled={recording}>
+										{recording ? 'Saving…' : 'Save as Anonymous'}
+									</button>
 
-								<div class="or-divider"><span>or</span></div>
+									<div class="or-divider"><span>or</span></div>
 
-								<button class="github-button" onclick={handleSignIn}>
-									<span class="github-mark">✓</span>
-									Sign in with GitHub to save a verified time
-								</button>
+									<button class="github-button" onclick={handleSignIn}>
+										<span class="github-mark">✓</span>
+										Sign in with GitHub to save a verified time
+									</button>
+								{/if}
 							</div>
 						{/if}
 
@@ -567,6 +589,59 @@
 		font-size: 18px;
 		font-weight: 600;
 		color: #50fa7b;
+	}
+
+	/* Auth control (signed-in indicator + sign-out / sign-in) */
+	.auth-control {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 12px;
+	}
+
+	.auth-control .signed-in {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		color: #a0a0a0;
+		max-width: 160px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.auth-control .signed-in .dot {
+		color: #50fa7b;
+		font-size: 9px;
+		line-height: 1;
+	}
+
+	.auth-control .auth-btn {
+		display: inline-flex;
+		align-items: center;
+		padding: 4px 10px;
+		border-radius: 6px;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		background: rgba(255, 255, 255, 0.03);
+		color: #e0e0e0;
+		font-family: inherit;
+		font-size: 12px;
+		cursor: pointer;
+		text-decoration: none;
+		transition:
+			background 0.2s ease,
+			border-color 0.2s ease;
+	}
+
+	.auth-control .auth-btn:hover {
+		background: rgba(80, 250, 123, 0.1);
+		border-color: rgba(80, 250, 123, 0.3);
+	}
+
+	.auth-control .auth-btn.signin {
+		color: #50fa7b;
+		border-color: rgba(80, 250, 123, 0.25);
 	}
 
 	.progress-container {
@@ -764,32 +839,6 @@
 		flex-direction: column;
 		gap: 16px;
 		margin-bottom: 28px;
-	}
-
-	.record-row {
-		display: flex;
-		gap: 8px;
-	}
-
-	.username-input {
-		flex: 1;
-		min-width: 0;
-		padding: 10px 12px;
-		background: #0d0d0d;
-		border: 1px solid #3d3d3d;
-		border-radius: 8px;
-		color: #e0e0e0;
-		font-family: 'JetBrains Mono', monospace;
-		font-size: 14px;
-	}
-
-	.username-input:focus {
-		outline: none;
-		border-color: #50fa7b;
-	}
-
-	.username-input:disabled {
-		opacity: 0.6;
 	}
 
 	.or-divider {

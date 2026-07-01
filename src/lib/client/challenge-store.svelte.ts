@@ -228,22 +228,22 @@ export function createChallengeStore() {
 	}
 
 	/**
-	 * Record a deferred (anonymous) result to the leaderboard.
+	 * Record a deferred result to the leaderboard.
 	 *
-	 * Resolves identity server-side: a verified GitHub session wins and the
-	 * free-text `username` is ignored; otherwise the optional name is used (blank →
-	 * Anonymous). Updates `result` with the final rank + resolved username.
+	 * Resolves identity entirely server-side: a verified GitHub session records
+	 * under that username, otherwise the entry is Anonymous (`username: null`).
+	 * No client-supplied name is sent (iteration 3). Updates `result` with the
+	 * final rank + resolved username.
 	 *
-	 * @param username - Optional free-text name (ignored when signed in)
 	 * @returns true when the record succeeded
 	 */
-	async function record(username?: string): Promise<boolean> {
+	async function record(): Promise<boolean> {
 		if (!result || !result.valid || result.recorded) {
 			return false;
 		}
 
 		try {
-			const recordResult = await recordChallenge(username);
+			const recordResult = await recordChallenge();
 			result = {
 				...result,
 				recorded: true,

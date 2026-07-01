@@ -37,19 +37,6 @@ export const finishChallengeRequestSchema = z.object({
 });
 
 /**
- * Request schema for POST /api/challenge/record (iteration 2 — PR #36 feedback).
- *
- * Lets a signed-out user attach an optional free-text name to a deferred result.
- * Signed-in users always use their verified identity — the body username is
- * ignored server-side. Shape validation only requires an optional string; the
- * sanitizer (`parseRecordRequest`) trims, strips control chars, and enforces the
- * final 32-char display cap (so an over-long name is truncated, not rejected).
- */
-export const recordChallengeRequestSchema = z.object({
-	username: z.string().optional()
-});
-
-/**
  * Schema for the session cookie payload.
  * This is what gets serialized/deserialized from the cookie.
  */
@@ -93,43 +80,7 @@ export function parseSessionCookie(data: unknown) {
 	return challengeSessionSchema.parse(data);
 }
 
-/**
- * Parse + sanitize the record request.
- *
- * Trims, strips control characters (0x00–0x1F and DEL), and caps length at 32.
- * An empty / whitespace-only name normalizes to `undefined` (→ Anonymous).
- * Svelte auto-escapes on render, so display is XSS-safe.
- *
- * @param data - Raw request body
- * @returns `{ username: string | undefined }`
- * @throws ZodError if the shape is invalid (e.g. non-string username)
- */
-export function parseRecordRequest(data: unknown): { username: string | undefined } {
-	const { username } = recordChallengeRequestSchema.parse(data);
-
-	if (username === undefined) {
-		return { username: undefined };
-	}
-
-	// Strip control characters (code point <= 0x1F, or DEL 0x7F).
-	let stripped = '';
-	for (let i = 0; i < username.length; i++) {
-		const code = username.charCodeAt(i);
-		if (code > 0x1f && code !== 0x7f) {
-			stripped += username[i];
-		}
-	}
-
-	const cleaned = stripped.trim();
-	if (cleaned.length === 0) {
-		return { username: undefined };
-	}
-
-	return { username: cleaned.slice(0, 32) };
-}
-
 // Export inferred types
 export type StartChallengeRequestBody = z.infer<typeof startChallengeRequestSchema>;
 export type FinishChallengeRequestBody = z.infer<typeof finishChallengeRequestSchema>;
-export type RecordChallengeRequestBody = z.infer<typeof recordChallengeRequestSchema>;
 export type ChallengeSessionCookie = z.infer<typeof challengeSessionSchema>;

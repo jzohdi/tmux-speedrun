@@ -56,9 +56,13 @@ export type ChallengeState = {
  * Result from finishing a challenge.
  *
  * Iteration 2 (PR #36 feedback): an anonymous finish is DEFERRED — the server
- * returns `recorded: false` with a provisional rank until the user saves under a
- * free-text name or a verified GitHub identity via `record()`. A signed-in
- * finish still records immediately (`recorded: true`, with `username`).
+ * returns `recorded: false` with a provisional rank until the user saves the
+ * time via `record()`. A signed-in finish still records immediately
+ * (`recorded: true`, with `username`).
+ *
+ * Iteration 3 (PR #36 feedback): saving offers exactly two outcomes —
+ * Anonymous (`username: null`) or a verified GitHub identity. There is no
+ * free-text name; `record()` takes no argument.
  */
 export type ChallengeResult = {
 	valid: boolean;
@@ -279,41 +283,40 @@ export class ChallengeSession {
 	}
 
 	/**
-	 * Record a deferred (anonymous) result to the leaderboard.
+	 * Record a deferred result to the leaderboard.
 	 *
 	 * The server reads the deferred result from the signed pending-result cookie
-	 * and resolves identity server-side: when the user is signed in, the verified
-	 * GitHub identity wins and `username` here is ignored; otherwise the optional
-	 * free-text name is used (blank → Anonymous).
+	 * and resolves identity server-side: a signed-in user records under their
+	 * verified GitHub identity, otherwise the entry is Anonymous (`username:
+	 * null`). No client-supplied name is accepted (iteration 3).
 	 *
-	 * @param username - Optional free-text name (ignored when signed in)
 	 * @returns The final record result with resolved username + rank
 	 * @throws Error if the server request fails (e.g. no valid pending result)
 	 */
-	async record(username?: string): Promise<RecordResult> {
-		return recordChallenge(username);
+	async record(): Promise<RecordResult> {
+		return recordChallenge();
 	}
 }
 
 /**
- * Record a deferred (anonymous) result to the leaderboard.
+ * Record a deferred result to the leaderboard.
  *
  * Standalone (not tied to a live session) so it also drives the post-OAuth
  * hydration path, where the completion screen is rebuilt from a server-provided
  * pending result and there is no in-memory `ChallengeSession`. The deferred
  * result travels in the signed pending-result cookie; identity is resolved
- * server-side (verified GitHub identity wins over any `username` here).
+ * entirely server-side: verified GitHub identity when signed in, otherwise
+ * Anonymous (`username: null`). No client-supplied name is sent (iteration 3).
  *
- * @param username - Optional free-text name (ignored when signed in)
  * @returns The final record result with resolved username + rank
  * @throws Error if the server request fails (e.g. no valid pending result)
  */
-export async function recordChallenge(username?: string): Promise<RecordResult> {
+export async function recordChallenge(): Promise<RecordResult> {
 	const response = await fetch('/api/challenge/record', {
 		method: 'POST',
 		credentials: 'include',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(username ? { username } : {})
+		body: JSON.stringify({})
 	});
 
 	if (!response.ok) {
