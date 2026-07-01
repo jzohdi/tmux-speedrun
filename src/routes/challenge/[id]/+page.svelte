@@ -15,6 +15,78 @@
 	// Component refs
 	let terminalRef = $state<ReturnType<typeof ChallengeTerminal> | null>(null);
 
+	// --- Completion flow (iteration 2 — PR #36 feedback) -------------------
+	// A leaderboard entry as returned by GET /api/leaderboard.
+	type LeaderboardEntry = {
+		rank: number;
+		username: string;
+		time: string;
+		durationMs: number;
+		verified: boolean;
+	};
+
+	// Free-text name for the anonymous "Save time" path.
+	let usernameInput = $state('');
+	// Guards against double-submits / duplicate auto-records.
+	let recording = $state(false);
+	let autoRecordAttempted = $state(false);
+	// This challenge's leaderboard (top entries) once loaded for the overlay.
+	let leaderboard = $state<LeaderboardEntry[] | null>(null);
+	let leaderboardLoaded = $state(false);
+
+	// Whether the signed-in user's verified identity applies to this result.
+	const isSignedIn = $derived(data.user != null);
+
+	// Full-page GitHub sign-in that returns to this challenge and auto-records.
+	// A full navigation (not `<a href>`/goto) is required — this is a server
+	// route that redirects to an external origin (GitHub), mirroring the home /
+	// terminal sign-in affordances.
+	const signInHref = $derived(
+		'/api/auth/github/login?return_to=' +
+			encodeURIComponent(`/challenge/${data.challengeIndex}?completed=1&record=1`)
+	);
+
+	function handleSignIn() {
+		window.location.href = signInHref;
+	}
+
+	/** Fetch this challenge's leaderboard for the completion panel (req #2). */
+	async function loadLeaderboard() {
+		try {
+			const res = await fetch('/api/leaderboard', { credentials: 'include' });
+			if (!res.ok) return;
+			const body = await res.json();
+			leaderboard = (body[String(data.challengeIndex)] ?? []) as LeaderboardEntry[];
+		} catch {
+			// Non-fatal: the overlay still shows the time + rank without the list.
+			leaderboard = null;
+		} finally {
+			leaderboardLoaded = true;
+		}
+	}
+
+	/** Save the deferred (anonymous) time under an optional free-text name. */
+	async function handleSaveTime() {
+		if (recording || challenge.recorded) return;
+		recording = true;
+		const ok = await challenge.record(usernameInput.trim() || undefined);
+		recording = false;
+		if (ok) await loadLeaderboard();
+	}
+
+	// Load the leaderboard whenever there is a completed result to show it against.
+	$effect(() => {
+		if (challenge.status === 'complete' && challenge.result?.valid && !leaderboardLoaded) {
+			loadLeaderboard();
+		}
+	});
+
+	// Strip the transient OAuth flow params so a refresh starts a fresh challenge.
+	function stripCompletionParams() {
+		if (typeof history === 'undefined') return;
+		history.replaceState(history.state, '', location.pathname);
+	}
+
 	// Derived state for UI
 	const statusMessage = $derived(getStatusMessage(challenge.status));
 	const showInput = $derived(challenge.status === 'active');
@@ -138,6 +210,32 @@
 
 	// Start challenge on mount
 	onMount(async () => {
+		const params = new URL(location.href).searchParams;
+		const completed = params.get('completed') === '1';
+		const shouldRecord = params.get('record') === '1';
+
+		// Post-OAuth (or any completed=1 return) re-hydration: rebuild the completion
+		// overlay from the server-verified pending result instead of starting a new
+		// challenge (§I9). The OAuth round-trip destroyed the in-memory session.
+		if (completed && data.pendingResult) {
+			challenge.hydratePending(data.challengeIndex, data.pendingResult.durationMs);
+
+			// If we came back from a successful sign-in, auto-record the just-completed
+			// time under the verified identity (empty body — server uses locals.user).
+			if (shouldRecord && data.user && !autoRecordAttempted) {
+				autoRecordAttempted = true;
+				recording = true;
+				const ok = await challenge.record();
+				recording = false;
+				if (ok) await loadLeaderboard();
+			}
+
+			// Clear the transient params so a refresh starts a normal challenge.
+			stripCompletionParams();
+			return;
+		}
+
+		// Normal flow: start a fresh challenge.
 		await challenge.start(data.challengeIndex);
 
 		// Focus the terminal after a short delay to ensure DOM is ready
@@ -251,7 +349,12 @@
 		<!-- Practice mode hint -->
 		<p class="practice-hint">
 			Not sure how to perform a command?
-			<a href={resolve('/practice')} target="_blank" rel="noopener noreferrer" class="practice-link">
+			<a
+				href={resolve('/practice')}
+				target="_blank"
+				rel="noopener noreferrer"
+				class="practice-link"
+			>
 				Open Practice mode
 			</a>
 			to review every command, step-by-step.
@@ -279,11 +382,80 @@
 							</div>
 							{#if challenge.result.leaderboardPosition}
 								<div class="stat">
-									<span class="stat-label">Rank</span>
+									<span class="stat-label">{challenge.recorded ? 'Rank' : "You'd place"}</span>
 									<span class="stat-value">#{challenge.result.leaderboardPosition}</span>
 								</div>
 							{/if}
 						</div>
+
+						{#if challenge.recorded}
+							<!-- Recorded (either free-text or verified) -->
+							<p class="saved-line">
+								Saved as <strong>{challenge.recordedUsername || 'Anonymous'}</strong>
+								{#if isSignedIn}<span class="verified-badge">✓ verified</span>{/if}
+							</p>
+						{:else}
+							<!-- Unrecorded: free-text save + GitHub sign-in prompt -->
+							<div class="record-form">
+								<div class="record-row">
+									<input
+										id="username-input"
+										class="username-input"
+										type="text"
+										maxlength="32"
+										placeholder="Enter a username (optional)"
+										aria-label="Username for the leaderboard"
+										bind:value={usernameInput}
+										disabled={recording}
+										onkeydown={(e) => e.key === 'Enter' && handleSaveTime()}
+									/>
+									<button
+										class="action-button primary"
+										onclick={handleSaveTime}
+										disabled={recording}
+									>
+										{recording ? 'Saving…' : 'Save time'}
+									</button>
+								</div>
+
+								<div class="or-divider"><span>or</span></div>
+
+								<button class="github-button" onclick={handleSignIn}>
+									<span class="github-mark">✓</span>
+									Sign in with GitHub to save a verified time
+								</button>
+							</div>
+						{/if}
+
+						<!-- Leaderboard panel (req #2) -->
+						{#if leaderboard && leaderboard.length > 0}
+							<div class="leaderboard-panel">
+								<h3 class="leaderboard-title">Challenge {data.challengeIndex} leaderboard</h3>
+								<ol class="leaderboard-list">
+									{#each leaderboard as entry (entry.rank)}
+										<li
+											class="leaderboard-entry"
+											class:you={challenge.recorded &&
+												entry.rank === challenge.result.leaderboardPosition}
+										>
+											<span class="lb-rank">#{entry.rank}</span>
+											<span class="lb-name">
+												{entry.username}
+												{#if entry.verified}
+													<span class="verified-mark" title="Verified GitHub identity">✓</span>
+												{/if}
+											</span>
+											<span class="lb-time">{entry.time}</span>
+										</li>
+									{/each}
+								</ol>
+								{#if challenge.result.leaderboardPosition && challenge.result.leaderboardPosition > leaderboard.length}
+									<p class="lb-you-row">
+										… you: #{challenge.result.leaderboardPosition}
+									</p>
+								{/if}
+							</div>
+						{/if}
 					{:else}
 						<p class="completion-message">{challenge.result.message}</p>
 					{/if}
@@ -533,10 +705,12 @@
 		background: #1c1c1c;
 		border: 1px solid #3d3d3d;
 		border-radius: 16px;
-		padding: 48px;
+		padding: 40px;
 		text-align: center;
-		max-width: 400px;
+		max-width: 480px;
 		width: 90%;
+		max-height: 90vh;
+		overflow-y: auto;
 	}
 
 	.completion-icon {
@@ -582,6 +756,185 @@
 	.completion-message {
 		color: #a0a0a0;
 		margin-bottom: 32px;
+	}
+
+	/* Record form (anonymous save + GitHub prompt) */
+	.record-form {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		margin-bottom: 28px;
+	}
+
+	.record-row {
+		display: flex;
+		gap: 8px;
+	}
+
+	.username-input {
+		flex: 1;
+		min-width: 0;
+		padding: 10px 12px;
+		background: #0d0d0d;
+		border: 1px solid #3d3d3d;
+		border-radius: 8px;
+		color: #e0e0e0;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 14px;
+	}
+
+	.username-input:focus {
+		outline: none;
+		border-color: #50fa7b;
+	}
+
+	.username-input:disabled {
+		opacity: 0.6;
+	}
+
+	.or-divider {
+		display: flex;
+		align-items: center;
+		text-align: center;
+		color: #666;
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	.or-divider::before,
+	.or-divider::after {
+		content: '';
+		flex: 1;
+		height: 1px;
+		background: #2d2d2d;
+	}
+
+	.or-divider span {
+		padding: 0 12px;
+	}
+
+	.github-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		width: 100%;
+		padding: 12px 16px;
+		background: #1c1c1c;
+		border: 1px solid #50fa7b;
+		border-radius: 8px;
+		color: #50fa7b;
+		font-family: inherit;
+		font-size: 14px;
+		font-weight: 500;
+		text-decoration: none;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.github-button:hover {
+		background: rgba(80, 250, 123, 0.1);
+	}
+
+	.github-mark {
+		font-weight: 700;
+	}
+
+	/* Recorded confirmation line */
+	.saved-line {
+		color: #c0c0c0;
+		font-size: 15px;
+		margin: 0 0 28px;
+	}
+
+	.saved-line strong {
+		color: #ffffff;
+	}
+
+	.verified-badge {
+		display: inline-block;
+		margin-left: 6px;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: rgba(80, 250, 123, 0.15);
+		color: #50fa7b;
+		font-size: 12px;
+		font-weight: 600;
+	}
+
+	/* Leaderboard panel */
+	.leaderboard-panel {
+		text-align: left;
+		margin-bottom: 28px;
+		border-top: 1px solid #2d2d2d;
+		padding-top: 20px;
+	}
+
+	.leaderboard-title {
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		color: #666;
+		margin: 0 0 12px;
+	}
+
+	.leaderboard-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.leaderboard-entry {
+		display: grid;
+		grid-template-columns: 48px 1fr auto;
+		align-items: center;
+		gap: 12px;
+		padding: 6px 10px;
+		border-radius: 6px;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 13px;
+		color: #c0c0c0;
+	}
+
+	.leaderboard-entry.you {
+		background: rgba(80, 250, 123, 0.12);
+		color: #50fa7b;
+	}
+
+	.lb-rank {
+		color: #666;
+	}
+
+	.leaderboard-entry.you .lb-rank {
+		color: #50fa7b;
+	}
+
+	.lb-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.verified-mark {
+		color: #50fa7b;
+		font-weight: 700;
+		margin-left: 4px;
+	}
+
+	.lb-time {
+		color: #8be9fd;
+	}
+
+	.lb-you-row {
+		margin: 8px 0 0;
+		padding: 6px 10px;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 13px;
+		color: #50fa7b;
 	}
 
 	.completion-actions {

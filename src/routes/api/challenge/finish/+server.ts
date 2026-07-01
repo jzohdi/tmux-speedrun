@@ -17,6 +17,7 @@ import { eq, lt, and, count } from 'drizzle-orm';
 import { validateChallenge } from '$lib/server/challenges';
 import { parseFinishRequest, parseSessionCookie } from '$lib/server/challenges/schemas';
 import { getSessionSecret, CHALLENGE_COOKIE_NAME } from '$lib/server/env';
+import { setPendingResultCookie } from '$lib/server/challenges/pending';
 import { db } from '$lib/server/db';
 import { leaderboard } from '$lib/server/db/schema';
 
@@ -81,23 +82,20 @@ export const POST: RequestHandler = async ({ request, cookies, locals }) => {
 		});
 	}
 
-	// Clear the session cookie (challenge completed)
+	// Clear the challenge session cookie (the crypto challenge is spent either way).
 	cookies.delete(CHALLENGE_COOKIE_NAME, { path: '/' });
 
-	// Record to leaderboard. The verified GitHub identity comes ONLY from the
-	// server-verified session (locals.user) — never from the request body — so a
-	// client cannot spoof a username. Anonymous submissions omit these fields.
+	// Iteration 2 (PR #36 feedback): identity is resolved at record time.
+	//
+	// - Signed in already → record immediately with the verified GitHub identity
+	//   (comes ONLY from locals.user, never the request body → non-spoofable).
+	// - Anonymous → DEFER: do not insert. Stash the result in a signed
+	//   pending-result cookie and return a provisional rank, so the user can
+	//   later attach a free-text name or a verified identity via /api/challenge/record.
 	const user = locals.user;
-	let leaderboardPosition: number | undefined;
-	try {
-		// Insert the result
-		await db.insert(leaderboard).values({
-			challengeId: String(challengeId),
-			durationMs,
-			...(user ? { username: user.username, githubId: user.githubId } : {})
-		});
 
-		// Get leaderboard position (count of entries with faster times + 1)
+	/** Count entries with strictly faster times for this challenge (+1 = rank). */
+	async function computeRank(): Promise<number | undefined> {
 		const result = await db
 			.select({ count: count() })
 			.from(leaderboard)
@@ -107,16 +105,47 @@ export const POST: RequestHandler = async ({ request, cookies, locals }) => {
 					lt(leaderboard.durationMs, durationMs)
 				)
 			);
+		return (result[0]?.count ?? 0) + 1;
+	}
 
-		leaderboardPosition = (result[0]?.count ?? 0) + 1;
+	if (user) {
+		let leaderboardPosition: number | undefined;
+		try {
+			await db.insert(leaderboard).values({
+				challengeId: String(challengeId),
+				durationMs,
+				username: user.username,
+				githubId: user.githubId
+			});
+			leaderboardPosition = await computeRank();
+		} catch (dbError) {
+			// Log error but don't fail the request - the challenge was still valid
+			console.error('Failed to record to leaderboard:', dbError);
+		}
+
+		return json({
+			valid: true,
+			durationMs,
+			recorded: true,
+			leaderboardPosition,
+			username: user.username
+		});
+	}
+
+	// Anonymous: defer the result behind a signed cookie; provide a provisional rank.
+	await setPendingResultCookie(cookies, { challengeId, durationMs, iat: Date.now() });
+
+	let leaderboardPosition: number | undefined;
+	try {
+		leaderboardPosition = await computeRank();
 	} catch (dbError) {
-		// Log error but don't fail the request - the challenge was still valid
-		console.error('Failed to record to leaderboard:', dbError);
+		console.error('Failed to compute provisional rank:', dbError);
 	}
 
 	return json({
 		valid: true,
 		durationMs,
+		recorded: false,
 		leaderboardPosition
 	});
 };

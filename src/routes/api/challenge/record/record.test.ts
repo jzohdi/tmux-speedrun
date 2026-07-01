@@ -47,13 +47,15 @@ async function makeEvent(opts: {
 	challengeId?: number;
 	durationMs?: number;
 }) {
-	const {
-		user = null,
-		body = {},
-		challengeId = 3,
-		durationMs = 12_340,
-		pending = await createPendingResultToken({ challengeId, durationMs, iat: Date.now() })
-	} = opts;
+	const { user = null, body = {}, challengeId = 3, durationMs = 12_340 } = opts;
+
+	// Only synthesize a signed cookie when `pending` is omitted entirely. An
+	// explicit `pending: undefined` means "no cookie" — a destructuring default
+	// would otherwise fire on explicit undefined and mask the absent-cookie case.
+	const pending =
+		'pending' in opts
+			? opts.pending
+			: await createPendingResultToken({ challengeId, durationMs, iat: Date.now() });
 
 	return {
 		request: { json: async () => body },
@@ -151,7 +153,11 @@ describe('POST /api/challenge/record — no valid pending result', () => {
 	});
 
 	it('400s when the pending cookie signature was tampered', async () => {
-		const good = await createPendingResultToken({ challengeId: 3, durationMs: 5000, iat: Date.now() });
+		const good = await createPendingResultToken({
+			challengeId: 3,
+			durationMs: 5000,
+			iat: Date.now()
+		});
 		const [payloadPart, sigPart] = good.split('.');
 		const flipped = sigPart[0] === 'A' ? 'B' : 'A';
 		await expect400(await makeEvent({ pending: `${payloadPart}.${flipped}${sigPart.slice(1)}` }));

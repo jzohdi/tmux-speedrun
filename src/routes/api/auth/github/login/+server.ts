@@ -13,9 +13,12 @@ import {
 	getGitHubOAuthConfig,
 	getGitHubRedirectUri,
 	OAUTH_STATE_COOKIE_NAME,
-	OAUTH_STATE_COOKIE_OPTIONS
+	OAUTH_STATE_COOKIE_OPTIONS,
+	OAUTH_RETURN_COOKIE_NAME,
+	OAUTH_RETURN_COOKIE_OPTIONS
 } from '$lib/server/env';
 import { generateOAuthState } from '$lib/server/auth/state';
+import { sanitizeReturnPath } from '$lib/server/auth/return-to';
 import { buildAuthorizeUrl } from '$lib/server/auth/github';
 
 export const GET: RequestHandler = async ({ cookies, url }) => {
@@ -26,6 +29,14 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 	const { clientId } = getGitHubOAuthConfig();
 	const state = generateOAuthState();
 	cookies.set(OAUTH_STATE_COOKIE_NAME, state, OAUTH_STATE_COOKIE_OPTIONS);
+
+	// Iteration 2 (PR #36 feedback): stash a validated same-origin return path so
+	// the callback can send the user back to where they left off (login-after-finish).
+	// Unsafe values are dropped (open-redirect guard) → callback falls back to default.
+	const safeReturn = sanitizeReturnPath(url.searchParams.get('return_to'));
+	if (safeReturn) {
+		cookies.set(OAUTH_RETURN_COOKIE_NAME, safeReturn, OAUTH_RETURN_COOKIE_OPTIONS);
+	}
 
 	const redirectUri = getGitHubRedirectUri(url);
 	const authorizeUrl = buildAuthorizeUrl({ clientId, redirectUri, state });

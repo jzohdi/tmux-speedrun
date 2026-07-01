@@ -12,13 +12,20 @@ import type { RequestHandler } from './$types';
 import {
 	getGitHubOAuthConfig,
 	getGitHubRedirectUri,
-	OAUTH_STATE_COOKIE_NAME
+	OAUTH_STATE_COOKIE_NAME,
+	OAUTH_RETURN_COOKIE_NAME
 } from '$lib/server/env';
 import { verifyOAuthState } from '$lib/server/auth/state';
+import { sanitizeReturnPath } from '$lib/server/auth/return-to';
 import { exchangeCodeForToken, fetchGitHubUser } from '$lib/server/auth/github';
 import { setSessionCookie } from '$lib/server/auth/session';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
+	// Read + clear the post-login return path (iteration 2). Clearing on every
+	// path keeps it single-use; re-sanitized below as defense-in-depth.
+	const returnCookie = cookies.get(OAUTH_RETURN_COOKIE_NAME);
+	cookies.delete(OAUTH_RETURN_COOKIE_NAME, { path: '/' });
+
 	const stateParam = url.searchParams.get('state');
 	const stateCookie = cookies.get(OAUTH_STATE_COOKIE_NAME);
 
@@ -52,5 +59,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		redirect(302, '/?auth_error=oauth');
 	}
 
-	redirect(302, '/?signed_in=1');
+	// Send the user back to where they left off, or home in a signed-in state.
+	const safeReturn = sanitizeReturnPath(returnCookie);
+	redirect(302, safeReturn ?? '/?signed_in=1');
 };

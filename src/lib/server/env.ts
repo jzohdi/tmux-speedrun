@@ -105,6 +105,38 @@ export const OAUTH_STATE_COOKIE_OPTIONS = {
 /** Fixed OAuth callback path. The GitHub OAuth App callback URL must be `${ORIGIN}` + this. */
 export const GITHUB_CALLBACK_PATH = '/api/auth/github/callback';
 
+// ---------------------------------------------------------------------------
+// Iteration 2 (PR #36 feedback): deferred-result + OAuth return-path cookies.
+// See `.agent/interface.md` §I1.
+// ---------------------------------------------------------------------------
+
+/** Deferred (anonymous) challenge result cookie name. */
+export const PENDING_RESULT_COOKIE_NAME = 'tmux_pending_result';
+
+/** OAuth post-login return-path cookie name. */
+export const OAUTH_RETURN_COOKIE_NAME = 'tmux_oauth_return';
+
+/**
+ * Pending-result cookie (1h). sameSite 'lax' so it survives the GitHub redirect,
+ * matching the existing challenge-session TTL.
+ */
+export const PENDING_RESULT_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 60 // 1 hour
+};
+
+/** Short-lived return-path cookie (10 min). */
+export const OAUTH_RETURN_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 10 // 10 minutes
+};
+
 export type GitHubOAuthConfig = { clientId: string; clientSecret: string };
 
 /**

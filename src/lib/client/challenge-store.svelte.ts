@@ -5,7 +5,12 @@
  * Components can import and use this to display prompts, progress, and results.
  */
 
-import { ChallengeSession, type ChallengeResult, formatDuration } from './challenge';
+import {
+	ChallengeSession,
+	recordChallenge,
+	type ChallengeResult,
+	formatDuration
+} from './challenge';
 
 /**
  * Challenge status enum.
@@ -201,6 +206,58 @@ export function createChallengeStore() {
 	}
 
 	/**
+	 * Seed the completion view from a server-provided pending result.
+	 *
+	 * Used on the post-OAuth hydration path (§I9): the challenge page returns a
+	 * `pendingResult` from the signed cookie, and we render the completion overlay
+	 * without an in-memory session (the OAuth round-trip destroyed it). The seeded
+	 * result is a deferred anonymous finish: `{ valid: true, recorded: false }`.
+	 *
+	 * @param id - The challenge index this pending result belongs to
+	 * @param durationMs - The just-completed time carried in the pending cookie
+	 */
+	function hydratePending(id: number, durationMs: number) {
+		stopTimer();
+		session = null;
+		challengeId = id;
+		elapsedMs = durationMs;
+		lastFeedback = null;
+		error = null;
+		result = { valid: true, durationMs, recorded: false };
+		status = 'complete';
+	}
+
+	/**
+	 * Record a deferred (anonymous) result to the leaderboard.
+	 *
+	 * Resolves identity server-side: a verified GitHub session wins and the
+	 * free-text `username` is ignored; otherwise the optional name is used (blank →
+	 * Anonymous). Updates `result` with the final rank + resolved username.
+	 *
+	 * @param username - Optional free-text name (ignored when signed in)
+	 * @returns true when the record succeeded
+	 */
+	async function record(username?: string): Promise<boolean> {
+		if (!result || !result.valid || result.recorded) {
+			return false;
+		}
+
+		try {
+			const recordResult = await recordChallenge(username);
+			result = {
+				...result,
+				recorded: true,
+				leaderboardPosition: recordResult.leaderboardPosition,
+				username: recordResult.username
+			};
+			return true;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to record time';
+			return false;
+		}
+	}
+
+	/**
 	 * Reset the store to initial state.
 	 */
 	function reset() {
@@ -275,9 +332,19 @@ export function createChallengeStore() {
 		get formattedTime() {
 			return formattedTime;
 		},
+		// Whether the current result has been recorded to the leaderboard.
+		get recorded() {
+			return result?.recorded ?? false;
+		},
+		// The username the result was recorded under (null = Anonymous), if any.
+		get recordedUsername() {
+			return result?.username ?? null;
+		},
 		// Actions
 		start,
 		submitAnswer,
+		record,
+		hydratePending,
 		reset,
 		clearFeedback
 	};

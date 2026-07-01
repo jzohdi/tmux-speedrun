@@ -43,6 +43,7 @@ export type LeaderboardEntry = {
 	username: string;
 	time: string;
 	durationMs: number;
+	verified: boolean; // true iff githubId != null (a verified GitHub identity)
 };
 
 export type LeaderboardResponse = Record<string, LeaderboardEntry[]>;
@@ -57,7 +58,8 @@ export const GET: RequestHandler = async ({ setHeaders }) => {
 			const entries = await db
 				.select({
 					username: leaderboard.username,
-					durationMs: leaderboard.durationMs
+					durationMs: leaderboard.durationMs,
+					githubId: leaderboard.githubId
 				})
 				.from(leaderboard)
 				.where(eq(leaderboard.challengeId, String(id)))
@@ -70,7 +72,8 @@ export const GET: RequestHandler = async ({ setHeaders }) => {
 					rank: index + 1,
 					username: entry.username ?? 'Anonymous',
 					time: formatDuration(entry.durationMs),
-					durationMs: entry.durationMs
+					durationMs: entry.durationMs,
+					verified: entry.githubId != null
 				}))
 			};
 		})
