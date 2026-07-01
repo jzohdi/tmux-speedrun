@@ -1,16 +1,21 @@
 /**
- * Tests for POST /api/challenge/record (iteration 2 — PR #36 feedback).
+ * Tests for POST /api/challenge/record (iteration 3 — PR #36 feedback).
  *
  * `record` is the explicit "save my time" step that replaces the finish
  * endpoint's silent anonymous insert. It resolves identity at record time:
  *
- *   - signed in  → verified GitHub `username`/`githubId` from `locals.user`;
- *                  any body `username` is IGNORED (spoof-resistant, invariant I0.1)
- *   - signed out → optional sanitized free-text name, `githubId` null
+ *   - signed in  → verified GitHub `username`/`githubId` from `locals.user`
+ *   - signed out → Anonymous: `username: null`, `githubId` null
+ *
+ * Iteration 3 removes the free-text username entirely. The endpoint no longer
+ * reads the request body for a name, so a client-supplied `username` is IGNORED
+ * in BOTH branches — the only named entries are verified GitHub identities and
+ * anonymous entries are always `null`. This strengthens the spoof-resistance
+ * invariant end-to-end (interface §II0.1 / §II1).
  *
  * The deferred result travels in an HMAC-signed pending-result cookie; a
  * missing/expired/tampered cookie → 400. Recording is single-use: the cookie is
- * cleared on success, so a replay → 400. See `.agent/interface.md` §I6 / §I0.
+ * cleared on success, so a replay → 400. See `.agent/interface.md` §II1.
  *
  * `db`, the pending cookie, and the private env are mocked/real-signed so the
  * handler runs in isolation; assertions target `db.insert(...).values()`.
@@ -107,18 +112,8 @@ describe('POST /api/challenge/record — signed in (verified identity)', () => {
 	});
 });
 
-describe('POST /api/challenge/record — anonymous (free-text name)', () => {
-	it('records the sanitized free-text username with null githubId', async () => {
-		const event = await makeEvent({ user: null, body: { username: '  speedy  ' } });
-
-		await POST(event as never);
-
-		const values = insertValues.mock.calls[0][0];
-		expect(values.username).toBe('speedy');
-		expect(values.githubId ?? null).toBeNull();
-	});
-
-	it('records as Anonymous (null username) when no name is given', async () => {
+describe('POST /api/challenge/record — anonymous (always null username)', () => {
+	it('records as Anonymous (null username, null githubId) when no name is given', async () => {
 		const event = await makeEvent({ user: null, body: {} });
 
 		await POST(event as never);
@@ -126,15 +121,43 @@ describe('POST /api/challenge/record — anonymous (free-text name)', () => {
 		const values = insertValues.mock.calls[0][0];
 		expect(values.username ?? null).toBeNull();
 		expect(values.githubId ?? null).toBeNull();
+		expect(values.challengeId).toBe('3');
 	});
 
-	it('records as Anonymous (null username) for a blank/whitespace name', async () => {
-		const event = await makeEvent({ user: null, body: { username: '   ' } });
+	it('IGNORES a body username on the anonymous path — always records null', async () => {
+		// Iteration 3: the free-text name is gone end-to-end. A crafted client body
+		// carrying a `username` must NOT reach the leaderboard; the entry stays
+		// Anonymous (null). This is the key iteration-3 invariant (§II0.1).
+		const event = await makeEvent({ user: null, body: { username: 'sneaky-name' } });
 
 		await POST(event as never);
 
 		const values = insertValues.mock.calls[0][0];
 		expect(values.username ?? null).toBeNull();
+		expect(values.username).not.toBe('sneaky-name');
+		expect(values.githubId ?? null).toBeNull();
+	});
+
+	it('reports the recorded username as null in the response', async () => {
+		const event = await makeEvent({ user: null, body: { username: 'sneaky-name' } });
+
+		const res = await POST(event as never);
+		const data = await res.json();
+
+		expect(data.recorded).toBe(true);
+		expect(data.username ?? null).toBeNull();
+		expect(data.leaderboardPosition).toBe(3); // 2 faster + 1
+	});
+
+	it('clears the pending-result cookie on the anonymous path (single-use)', async () => {
+		const event = await makeEvent({ user: null, body: {} });
+
+		await POST(event as never);
+
+		expect(event.cookies.delete).toHaveBeenCalledWith(
+			PENDING_RESULT_COOKIE_NAME,
+			expect.objectContaining({ path: '/' })
+		);
 	});
 });
 

@@ -7,7 +7,6 @@ import {
 	parseStartRequest,
 	parseFinishRequest,
 	parseSessionCookie,
-	parseRecordRequest,
 	startChallengeRequestSchema,
 	finishChallengeRequestSchema,
 	challengeSessionSchema
@@ -302,40 +301,13 @@ describe('Challenge Session Cookie Schema', () => {
 	});
 });
 
-describe('Record Challenge Request (free-text username)', () => {
-	// Iteration 2 (PR #36 feedback): the record endpoint lets a signed-out user
-	// attach an optional free-text name to a deferred result. Signed-in users
-	// always use their verified identity — the body username is ignored server-side.
-	// See `.agent/interface.md` §I4.
-
-	it('returns a trimmed username', () => {
-		expect(parseRecordRequest({ username: '  octocat  ' })).toEqual({ username: 'octocat' });
-	});
-
-	it('normalizes a blank / whitespace-only name to undefined (→ Anonymous)', () => {
-		expect(parseRecordRequest({ username: '   ' })).toEqual({ username: undefined });
-		expect(parseRecordRequest({ username: '' })).toEqual({ username: undefined });
-	});
-
-	it('treats a missing username (empty body) as undefined', () => {
-		expect(parseRecordRequest({})).toEqual({ username: undefined });
-	});
-
-	it('strips embedded control characters, preserving the visible text', () => {
-		// A trailing newline and an embedded NUL are removed; letters survive.
-		expect(parseRecordRequest({ username: 'octo\u0000cat\n' })).toEqual({ username: 'octocat' });
-	});
-
-	it('caps the sanitized username at 32 characters', () => {
-		const parsed = parseRecordRequest({ username: 'a'.repeat(100) });
-		expect(parsed.username).toBeDefined();
-		expect((parsed.username as string).length).toBeLessThanOrEqual(32);
-	});
-
-	it('rejects a non-string username', () => {
-		expect(() => parseRecordRequest({ username: 12345 })).toThrow();
-	});
-});
+// Iteration 3 (PR #36 feedback): the free-text record username is removed
+// end-to-end — `recordChallengeRequestSchema` / `parseRecordRequest` no longer
+// exist. The record endpoint no longer reads the request body for a name, so
+// there is nothing to validate here. Anonymous entries are always `username:
+// null`; named entries come only from a verified GitHub session. The behavioral
+// coverage lives in `src/routes/api/challenge/record/record.test.ts`. See
+// `.agent/interface.md` §II1 / §II2.
 
 describe('Schema Type Inference', () => {
 	it('startChallengeRequestSchema has correct shape', () => {
