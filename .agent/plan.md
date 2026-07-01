@@ -2,6 +2,12 @@
 
 Issue: jzohdi/tmux-speedrun#34
 
+> **Iteration 2 (PR #36 feedback).** The original sign-in feature below is **implemented and approved**
+> on this branch. Reviewer left a follow-up `feedback:` comment requesting additional completion-flow
+> UX. That work is specified in **"## Revision — PR #36 feedback (iteration 2)"** at the end of this
+> file; it is the active scope for this pass. The sections in between are the (already-shipped) original
+> plan, kept for context — do **not** re-implement them.
+
 ## Goal (restated)
 
 Let users authenticate with GitHub via OAuth (Authorization Code flow, token exchange
@@ -200,8 +206,224 @@ Modify:
 - **Manual** (documented, not run in CI): create a GitHub OAuth App, set env, sign in, submit a
   time, confirm the verified username shows on `tsr lb`, then sign out → anonymous.
 
-## Scope flags
+## Scope flags (iteration 1 — shipped)
 
 - `needs_frontend: true` — terminal commands, signed-in indicator, sign-in/out buttons.
 - `needs_backend: true` — OAuth routes, hooks, session helpers, env config, DB column + migration,
   finish-endpoint change.
+
+---
+
+# Revision — PR #36 feedback (iteration 2)
+
+The reviewer approved the sign-in feature, then asked for a better **challenge-completion flow**. The
+current completion screen (`src/routes/challenge/[id]/+page.svelte`, the `completion-overlay` card in
+the screenshot) shows only Time + Rank and records the time silently — anonymously unless already
+signed in. The feedback (verbatim):
+
+1. When completing a challenge and the user is **not** logged in, prompt them to sign in with GitHub
+   to record their time.
+2. Show the current leaderboard and what place they got for that challenge.
+3. Do **not** require login to see the leaderboard / record a time — let them enter a (free-text)
+   username and record the time under that name.
+4. If they log in **after** finishing, the flow must be seamless: pick up where they left off (cookies)
+   and record the just-completed time under their GitHub username.
+
+## What this changes about the current design
+
+Two things in the shipped code block requirement #4:
+
+- **`/api/challenge/finish` records immediately and deletes the challenge cookie.** Once it returns,
+  the completion is already written (anonymously) and the crypto session is gone — there is nothing
+  left to attach a verified username to after a later login.
+- **The completion screen is ephemeral client state.** `challenge/[id]/+page.svelte` starts a *new*
+  challenge on `onMount`, so a full-page OAuth round-trip (which we need — GitHub is an external
+  origin) destroys the completion view. The result must survive the redirect on the **server** side.
+
+So the core move is: **defer the leaderboard write** behind a short-lived, server-**signed**
+"pending result" cookie, and add an explicit **record** step. Recording resolves the identity at
+record time — verified GitHub identity if signed in, otherwise the free-text name — which keeps the
+approved invariant intact: *a client can never set the username on a **verified** entry* (§0.1 of the
+interface spec). Free-text names are, by the reviewer's explicit request, allowed for anonymous
+entries and are understood to be unverified; verified entries are visually badged so a free-text name
+cannot masquerade as a verified one.
+
+## Approach & architecture (iteration 2)
+
+### A. Signed "pending result" cookie (new helper)
+
+New module `src/lib/server/challenges/pending.ts` (mirrors the HMAC pattern of
+`src/lib/server/auth/session.ts`, reusing `$lib/crypto` + `getSessionSecret()` — no new deps):
+
+- Payload: `{ challengeId: number, durationMs: number, iat: number }`.
+- `createPendingResultToken(payload)` / `verifyPendingResultToken(raw)` — base64url(json).base64url(hmac),
+  `constantTimeEqual` on verify, returns `null` on tamper/garbage, and **null when older than
+  `MAX_CHALLENGE_DURATION_MS` (1h)** (single expiry source of truth). `set/clearPendingResultCookie(cookies)`.
+- Cookie: `PENDING_RESULT_COOKIE_NAME = 'tmux_pending_result'`, `sameSite: 'lax'` (must survive the
+  GitHub redirect), `httpOnly`, `secure: !dev`, `path: '/'`, `maxAge` = 1h. Constants live in
+  `src/lib/server/env.ts` alongside the existing cookie constants.
+- **Why signed:** the client must not be able to forge/alter `durationMs` or `challengeId` between
+  finish and record. The username is *never* in this cookie — it is always derived at record time.
+
+### B. `POST /api/challenge/finish` (modify) — defer when anonymous
+
+- Validate proof + compute `durationMs` exactly as today. Then branch on `locals.user`:
+  - **Signed in already** → record immediately (verified `username` + `githubId`, as today), return
+    `{ valid: true, durationMs, recorded: true, leaderboardPosition, username }`. Do **not** set a
+    pending cookie. (Preserves today's behavior + acceptance criteria for the already-authed path.)
+  - **Not signed in** → do **not** insert. Set the signed pending-result cookie, compute the
+    **provisional** rank (same "count of faster entries + 1" query, without inserting), and return
+    `{ valid: true, durationMs, recorded: false, leaderboardPosition (provisional) }`.
+- Keep clearing `CHALLENGE_COOKIE_NAME` (the crypto challenge session is spent either way). The
+  pending-result cookie — not the crypto session — is what carries the result forward.
+- Invalid proof path unchanged.
+
+### C. `POST /api/challenge/record` (new) — the explicit record step
+
+- Reads + verifies the pending-result cookie → `{ challengeId, durationMs }`; missing/expired/tampered
+  → `400` (nothing to record). Body: `{ username?: string }` (see schema below).
+- Identity resolution (the invariant):
+  - `locals.user` present → insert `{ username: user.username, githubId: user.githubId }`; **ignore any
+    body `username`** (verified wins, non-spoofable).
+  - else → insert `{ username: sanitized free-text name or null }`, `githubId` null.
+- Clear the pending cookie (**single-use** → no double-record; re-POST after clear → 400).
+- Compute + return `{ recorded: true, leaderboardPosition, username }` (final rank via the existing
+  count query). Preserve the finish endpoint's defensive try/catch around the DB block.
+
+### D. OAuth `return_to` (modify login + callback) — seamless login-after-finish
+
+- `GET /api/auth/github/login` accepts `?return_to=<local-path>`. **Open-redirect guard:** accept only
+  same-origin **paths** — must start with a single `/`, reject `//`, `/\`, or anything with a scheme/host;
+  otherwise fall back to the default. Stash the sanitized value in a short-lived httpOnly cookie
+  (`OAUTH_RETURN_COOKIE_NAME`, lax, ~10 min) set next to the state cookie.
+- `GET /api/auth/github/callback` reads + clears that cookie and, on success, `redirect(302, return_to
+  ?? '/?signed_in=1')`. Unchanged otherwise (state/CSRF, token exchange, session cookie).
+- The completion screen's "Sign in with GitHub" button links to
+  `/api/auth/github/login?return_to=/challenge/{index}?completed=1&record=1`. Because the pending-result
+  cookie is `lax`, it survives the round-trip; on return `locals.user` is set and the page auto-records.
+
+### E. Re-hydrate the completion screen server-side (modify challenge route)
+
+- `src/routes/challenge/[id]/+page.server.ts`: also return `user: locals.user` and, when the
+  pending-result cookie verifies **and its `challengeId` matches this route**, a
+  `pendingResult: { durationMs }` (else `null`). This makes the just-finished result durable across the
+  OAuth redirect independent of the ephemeral client store.
+- `src/routes/challenge/[id]/+page.svelte`:
+  - **Guard `onMount` auto-start:** if the URL has `?completed=1` **and** `data.pendingResult` exists,
+    do **not** `challenge.start(...)`; render the completion overlay hydrated from `data.pendingResult`
+    (time) + `data.user`.
+  - If `?record=1` **and** `data.user` is present (returned from OAuth), auto-`POST /api/challenge/record`
+    once, then show the confirmed rank + leaderboard.
+  - Strip the `completed/record` query params after handling (via `replaceState`) so a refresh/re-visit
+    starts a normal challenge.
+
+### F. Completion overlay UI (modify `challenge/[id]/+page.svelte`)
+
+Drive the overlay from a small view-model that unifies "fresh finish" (`challenge.result`) and
+"post-OAuth hydration" (`data.pendingResult`). States:
+
+- **Unrecorded (anonymous):** Time + "You'd place **#N**". Then:
+  - Free-text **username input** (optional) + **"Save time"** button → `POST /api/challenge/record`
+    `{ username }`. Blank name → recorded as Anonymous. One click = low friction (req #3).
+  - An **"or"** divider + **"Sign in with GitHub to save a verified ✓ time"** button →
+    `/api/auth/github/login?return_to=/challenge/{index}?completed=1&record=1` (req #1, #4).
+- **Recorded (either path):** show "Saved as **{username}** {✓ if verified}" and the **final rank**.
+- **Leaderboard panel (req #2):** after recording — and immediately for the already-signed-in path —
+  fetch `/api/leaderboard`, show the top entries **for this challenge**, and **highlight the user's
+  placement** (by rank; if their entry is outside the top 10, show a trailing "… you: #N" row).
+- Keep "Back to Home" / "Try Again".
+
+### G. Client store + service (modify)
+
+- `ChallengeResult` (`src/lib/client/challenge.ts`) gains `recorded: boolean` and keeps
+  `leaderboardPosition` as provisional-or-final. Add `ChallengeSession.record({ username })` → POST
+  `/api/challenge/record`, returning the final `{ recorded, leaderboardPosition, username }`.
+- `challenge-store.svelte.ts`: add a `record(username?)` action that calls the service, updates
+  `result`/`status`, and exposes `recorded` + the resolved `username`. Add a way to seed the store's
+  completion view from server `pendingResult` for the hydration path (or handle hydration purely in the
+  page component — implementer's choice; keep the store the single source for `result`).
+
+### H. Leaderboard `verified` flag (modify `/api/leaderboard`)
+
+- Select `githubId` too and add `verified: entry.githubId != null` to each `LeaderboardEntry`. The UI
+  badges verified entries (✓ / GitHub mark) so a free-text name cannot visually impersonate a verified
+  identity. Existing `username ?? 'Anonymous'` fallback unchanged. Existing consumers (`tsr lb`) ignore
+  the new field harmlessly.
+
+### I. Free-text username schema (modify `src/lib/server/challenges/schemas.ts`)
+
+- `recordChallengeRequestSchema = z.object({ username: z.string().trim().min(1).max(32).optional() })`
+  plus a sanitize step stripping control characters; empty/whitespace → treated as absent (Anonymous).
+  Export `parseRecordRequest`. Svelte auto-escapes on render, so display is XSS-safe; the length cap
+  keeps the leaderboard tidy.
+
+## Files to change / add (iteration 2)
+
+Create:
+- `src/lib/server/challenges/pending.ts` (signed pending-result cookie helpers)
+- `src/routes/api/challenge/record/+server.ts`
+
+Modify:
+- `src/routes/api/challenge/finish/+server.ts` (defer when anonymous; record immediately when signed in)
+- `src/lib/server/env.ts` (pending-result + OAuth return cookie constants)
+- `src/routes/api/auth/github/login/+server.ts` (validated `return_to` → return cookie)
+- `src/routes/api/auth/github/callback/+server.ts` (redirect to `return_to`)
+- `src/routes/api/leaderboard/+server.ts` (`verified` flag)
+- `src/lib/server/challenges/schemas.ts` (`parseRecordRequest`)
+- `src/routes/challenge/[id]/+page.server.ts` (return `user` + `pendingResult`)
+- `src/routes/challenge/[id]/+page.svelte` (completion overlay: record form, sign-in prompt,
+  leaderboard + highlight, OAuth re-hydration + auto-record, guarded auto-start)
+- `src/lib/client/challenge.ts` + `src/lib/client/challenge-store.svelte.ts` (`recorded`, `record()`)
+
+## Risks & edge cases (iteration 2)
+
+- **Verified-username invariant (must not regress).** `/api/challenge/record` ignores a body `username`
+  whenever `locals.user` is set → the reviewer-praised spoof-resistance holds. Add an explicit test for
+  "signed-in + body username → verified used, body ignored".
+- **Time forgery.** Pending-result cookie is HMAC-signed; `durationMs`/`challengeId` cannot be altered
+  client-side. Username is never in the cookie.
+- **Double / replay recording.** Pending cookie is single-use (cleared on record) and expires in 1h;
+  finish sets it only for anonymous finishes. Signed-in finishes record once, no pending cookie.
+- **Open redirect.** `return_to` accepted only as a same-origin path (leading single `/`, reject `//`,
+  `/\`, scheme/host). Test the guard.
+- **SPA re-hydration.** Completion survives OAuth via server `pendingResult`; `onMount` must not
+  auto-start when `?completed=1` + pending result present. Clear the query params after handling.
+- **Free-text safety.** trim + length cap + control-char strip; Svelte escaping prevents XSS; verified
+  badge disambiguates impersonation. Blank → Anonymous.
+- **Abandoned completion.** Deferring means a user who finishes and leaves without clicking "Save" is
+  not recorded (a change from today's silent auto-record). This is the intended trade for letting them
+  choose a name / sign in (req #3); "Save time" is one click with an optional name, keeping friction low.
+- **Unconfigured OAuth.** The "Sign in" button still routes through `/api/auth/github/login`, which
+  already redirects home with `auth_error=not_configured`; the free-text "Save time" path is fully
+  independent, so anonymous recording works with OAuth unconfigured.
+- **Existing test churn.** `src/routes/api/challenge/finish/finish.test.ts` currently asserts an
+  immediate insert for anonymous finishes — that behavior moves to `/record`. The tdd stage must update
+  those expectations (finish now defers + sets pending cookie for anonymous; still records for signed-in)
+  and add `record`/`pending`/`return_to`/`verified-flag` coverage. Flag this so it isn't read as a
+  regression.
+- **Clean tree.** No new migration needed (schema already has `username` + `githubId`). No `db:push`.
+  Remove any test artifacts before finishing.
+
+## How it will be tested (iteration 2)
+
+- **pending.ts:** sign/verify round-trip; tamper (flipped byte / wrong secret / truncated) → `null`;
+  `iat` older than 1h → `null`; garbage/empty → `null`.
+- **`/api/challenge/record`:** signed-in → verified `username`/`githubId`, **body username ignored**;
+  anonymous → free-text name sanitized (trim/length/blank→Anonymous); missing/expired/tampered pending
+  cookie → 400; single-use (cookie cleared, second POST → 400); returns correct final rank.
+- **`/api/challenge/finish`:** anonymous → no row inserted, pending cookie set, `recorded:false`,
+  provisional rank correct; signed-in → row inserted (verified), `recorded:true`, no pending cookie.
+- **login `return_to`:** only local paths accepted (open-redirect guard cases); callback redirects to
+  the stashed path and clears the return cookie.
+- **`/api/leaderboard`:** `verified` reflects `githubId != null`; anonymous/free-text entries `false`.
+- **UI** (browser test if it fits the existing `*.browser.test.ts` pattern; else manual, documented):
+  completion overlay shows record form when anonymous, leaderboard + highlighted rank after recording,
+  and the seamless login-after-finish path attaches the verified name to the just-completed time.
+- Existing `pnpm test` / `check` / `lint` stay green (with the finish-test updates above).
+
+## Scope flags (iteration 2 — active)
+
+- `needs_frontend: true` — completion overlay redesign (record form, GitHub prompt, leaderboard +
+  placement highlight, OAuth re-hydration), client store/service changes.
+- `needs_backend: true` — pending-result cookie helper, `/api/challenge/record`, finish-endpoint
+  deferral, OAuth `return_to`, leaderboard `verified` flag, record schema.
