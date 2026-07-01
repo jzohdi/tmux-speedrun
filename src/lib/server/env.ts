@@ -69,3 +69,63 @@ export const COOKIE_OPTIONS = {
 	path: '/',
 	maxAge: 60 * 60 // 1 hour TTL
 };
+
+// ---------------------------------------------------------------------------
+// GitHub OAuth / auth session configuration.
+//
+// SCAFFOLD ONLY — constants and getter signatures added by the tdd stage so the
+// failing auth tests fail on assertions rather than import errors. The getter
+// bodies are NOT implemented; the implementation stage fills them in per
+// `.agent/interface.md` §1.
+// ---------------------------------------------------------------------------
+
+/** Auth session cookie name. */
+export const SESSION_COOKIE_NAME = 'tmux_session';
+
+/** OAuth CSRF state cookie name. */
+export const OAUTH_STATE_COOKIE_NAME = 'tmux_oauth_state';
+
+/** Long-lived auth session cookie (30 days). sameSite 'lax' so it survives the GitHub redirect. */
+export const SESSION_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 60 * 24 * 30 // 30 days
+};
+
+/** Short-lived CSRF state cookie (10 min). */
+export const OAUTH_STATE_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 10 // 10 minutes
+};
+
+/** Fixed OAuth callback path. The GitHub OAuth App callback URL must be `${ORIGIN}` + this. */
+export const GITHUB_CALLBACK_PATH = '/api/auth/github/callback';
+
+export type GitHubOAuthConfig = { clientId: string; clientSecret: string };
+
+/**
+ * Reads GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET from $env/dynamic/private.
+ * Throws a clear Error if either is missing/empty.
+ * NOT IMPLEMENTED YET.
+ */
+export function getGitHubOAuthConfig(): GitHubOAuthConfig {
+	throw new Error('not implemented');
+}
+
+/** true when both GitHub OAuth env vars are present (non-empty). NOT IMPLEMENTED YET. */
+export function isGitHubOAuthConfigured(): boolean {
+	return false;
+}
+
+/**
+ * Resolve the absolute OAuth redirect URI. NOT IMPLEMENTED YET.
+ */
+export function getGitHubRedirectUri(requestUrl: URL): string {
+	void requestUrl;
+	return '';
+}
