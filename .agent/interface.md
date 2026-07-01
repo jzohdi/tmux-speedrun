@@ -905,3 +905,260 @@ rank after recording, and the seamless login-after-finish path attaching the ver
 just-completed time.
 
 Existing `pnpm test` / `check` / `lint` stay green (with the finish-test updates above).
+
+---
+---
+
+# Interface Spec — Iteration 3 (PR #36 feedback)
+
+> Sections 0–13 above (iterations 1 & 2) are **shipped and approved** — do **not** re-implement them.
+> This block is the active scope. The reviewer approved iteration 2, then asked for two focused
+> changes (verbatim): *"there should not be an input for adding any chosen name when completing a
+> challenge. The user should only have two choices: 1. Save time as 'Anonymous' 2. Login to github
+> (save time using username) — they don't need to log in again if they already logged in to github.
+> Also make sure that there is a way to log out on the app."* See `.agent/plan.md` › "Revision — PR
+> #36 feedback (iteration 3)". Names/paths/signatures below are normative unless marked
+> "(illustrative)". **Pure edits/removals — no new files, no schema/migration, no new routes.**
+
+## II0. Core invariants (iteration 3 — must hold end-to-end)
+
+1. **No client-supplied username reaches the leaderboard, anywhere.** Iteration 2 allowed a free-text
+   `username` on the anonymous record path. Iteration 3 removes it end-to-end. `POST
+   /api/challenge/record` no longer reads the request body for a name. Identity is:
+   - `locals.user` set → verified `{ username, githubId }` from the session (unchanged).
+   - `locals.user` null → `{ username: null, githubId: null }` (Anonymous).
+   There is **no** code path by which a client value becomes `leaderboard.username`. This *strengthens*
+   invariant §0.1 / §I0.1 — it is not weakened.
+2. **An already-signed-in user is never prompted to sign in again.** The completion overlay must branch
+   on sign-in state and never show the GitHub sign-in button to an authenticated user.
+3. **Sign-out is reachable from the challenge page.** A visible sign-out affordance exists on the
+   challenge page (in addition to the existing home `auth-bar` and terminal `tsr logout`), reusing the
+   existing `POST /api/auth/logout` endpoint. No new logout endpoint.
+4. **Everything else is unchanged.** Deferral / pending-result cookie / OAuth `return_to` / verified
+   badge / single-use recording / `?completed=1`&`?record=1` hydration all behave exactly as in
+   iteration 2. Clean tree — no migrations, no artifacts, no `pnpm-workspace.yaml`/lockfile churn.
+
+---
+
+## II1. Record endpoint — drop free-text — `src/routes/api/challenge/record/+server.ts` (modify)
+
+Remove the request-body username entirely. Concretely:
+
+- **Remove** the `import { parseRecordRequest } from '$lib/server/challenges/schemas'`.
+- **Remove** the body-parse block (the `let username …; try { const body = await request.json()…;
+  ({ username } = parseRecordRequest(body ?? {})); } catch { error(400, …) }`).
+- Drop `request` from the handler destructure — signature becomes:
+  ```ts
+  export const POST: RequestHandler = async ({ cookies, locals }) => { ... };
+  ```
+- Identity resolution reduces to:
+  ```ts
+  const user = locals.user;
+  const insertValues = user
+  	? { challengeId: String(challengeId), durationMs, username: user.username, githubId: user.githubId }
+  	: { challengeId: String(challengeId), durationMs, username: null };
+  ```
+
+Everything else is **unchanged**: pending-cookie verify (`verifyPendingResultToken`, `400` on
+missing/expired/tampered), single-use `clearPendingResultCookie`, the rank count query, the defensive
+DB try/catch, and the response shape:
+```ts
+type RecordResponse = { recorded: true; leaderboardPosition?: number; username: string | null };
+```
+`username` in the response is now always the verified name or `null` — never a free-text value.
+
+Invariants (normative, for tdd):
+- Anonymous record → row inserted with `username: null`, `githubId` null, correct final rank.
+- Signed-in record → verified `username`/`githubId` from `locals.user`.
+- **A `username` in the request body is ignored in both branches** (no longer read at all).
+- Missing/expired/tampered pending cookie → `400`; single-use (replay after clear → `400`) — unchanged.
+
+---
+
+## II2. Record schema — remove the free-text validator — `src/lib/server/challenges/schemas.ts` (modify)
+
+Delete the now-dead free-text machinery; keep every other export intact.
+
+- **Remove** `recordChallengeRequestSchema` (the `z.object({ username: z.string().optional() })`).
+- **Remove** the `parseRecordRequest` function.
+- **Remove** the `RecordChallengeRequestBody` type export.
+
+Keep unchanged: `jwkPublicKeySchema`, `startChallengeRequestSchema`, `finishChallengeRequestSchema`,
+`challengeSessionSchema`, `parseStartRequest`, `parseFinishRequest`, `parseSessionCookie`, and the
+`StartChallengeRequestBody` / `FinishChallengeRequestBody` / `ChallengeSessionCookie` types.
+
+---
+
+## II3. Client service — `record()` takes no argument — `src/lib/client/challenge.ts` (modify)
+
+- `ChallengeSession.record()` — **remove** the `username?: string` parameter:
+  ```ts
+  async record(): Promise<RecordResult> {
+  	return recordChallenge();
+  }
+  ```
+- `recordChallenge()` (standalone) — **remove** the `username?: string` parameter; the POST body
+  becomes a constant empty object:
+  ```ts
+  export async function recordChallenge(): Promise<RecordResult> {
+  	const response = await fetch('/api/challenge/record', {
+  		method: 'POST',
+  		credentials: 'include',
+  		headers: { 'Content-Type': 'application/json' },
+  		body: JSON.stringify({})
+  	});
+  	if (!response.ok) { /* throw, unchanged */ }
+  	return response.json();
+  }
+  ```
+- `credentials: 'include'` and the non-ok `throw` are **unchanged**.
+- `RecordResult` and `ChallengeResult` types are **unchanged** (`username` may still be `null`). Update
+  the doc-comments that mention "free-text name" to reflect the two-choice (Anonymous / verified) model.
+
+---
+
+## II4. Client store — `record()` drops its param — `src/lib/client/challenge-store.svelte.ts` (modify)
+
+- The `record` action loses its `username?: string` parameter and calls `recordChallenge()` with no
+  argument:
+  ```ts
+  async function record(): Promise<boolean> {
+  	if (!result || !result.valid || result.recorded) return false;
+  	try {
+  		const recordResult = await recordChallenge();
+  		result = { ...result, recorded: true, leaderboardPosition: recordResult.leaderboardPosition, username: recordResult.username };
+  		return true;
+  	} catch (err) { error = err instanceof Error ? err.message : 'Failed to record time'; return false; }
+  }
+  ```
+- The guard, the `result` update, the returned getter surface (`recorded`, `recordedUsername`), and
+  `hydratePending` are **unchanged**.
+
+---
+
+## II5. Completion overlay — two choices, no input — `src/routes/challenge/[id]/+page.svelte` (modify)
+
+### Remove
+- The `usernameInput` state (`let usernameInput = $state('')`).
+- The `handleSaveTime` handler.
+- The `<input class="username-input">` + the `.record-row` wrapper + the "Save time" `<button>`.
+- The `.username-input` and `.record-row` CSS rules (now dead).
+
+### Add / change (the unrecorded block)
+Replace the current `{:else}` (unrecorded) sub-tree with a branch on `isSignedIn` (`data.user != null`,
+already derived at line 38). Two handlers drive it:
+
+```ts
+// Anonymous "Save as Anonymous" — record with no name.
+async function handleSaveAnonymous() {
+	if (recording || challenge.recorded) return;
+	recording = true;
+	const ok = await challenge.record();       // no arg — server records username: null
+	recording = false;
+	if (ok) await loadLeaderboard();
+}
+// Signed-in edge (hydrated but not yet recorded) — record verified.
+async function handleSaveVerified() {
+	if (recording || challenge.recorded) return;
+	recording = true;
+	const ok = await challenge.record();       // no arg — server uses locals.user
+	recording = false;
+	if (ok) await loadLeaderboard();
+}
+```
+(One shared handler taking no arg is acceptable — `handleSaveAnonymous` and `handleSaveVerified` may be
+the same function; the split is illustrative. The point: `challenge.record()` is always called with no
+argument.)
+
+Markup states (inside `{#if challenge.result.valid}` → `{#if challenge.recorded}…{:else}`):
+- **`isSignedIn === false` (anonymous):** two stacked affordances —
+  1. **"Save as Anonymous"** button (`onclick={handleSaveAnonymous}`, `disabled={recording}`).
+  2. An **"or"** divider (`.or-divider`, kept) + the existing **"Sign in with GitHub to save a verified
+     time"** button (`onclick={handleSignIn}`, `signInHref` unchanged — §I10 / lines 44–51).
+- **`isSignedIn === true` (rare unrecorded edge, hydration without `?record=1`):** a **single "Save my
+  time"** button (`onclick={handleSaveVerified}`). **Never** render the GitHub sign-in button here
+  (invariant II0.2).
+
+### Unchanged
+- Recorded state (`{#if challenge.recorded}` → "Saved as … ✓ verified" line), the leaderboard panel
+  (req #2, `.leaderboard-panel` + highlight + "… you: #N"), the verified badge, "Back to Home" / "Try
+  Again", the invalid-proof branch, and the `onMount` hydration / auto-record / `stripCompletionParams`
+  logic. Keep the `.record-form`, `.or-divider`, `.github-button`, `.saved-line`, `.verified-badge`,
+  and button styles.
+
+### Note on `record`-flow entry
+The normal signed-in finish records immediately at `/api/challenge/finish` (§I5) — such a user reaches
+the overlay already `recorded` and never sees the choice. The signed-in "Save my time" button covers
+only the hydrated-but-unrecorded edge (a signed-in user landing on `?completed=1` without `?record=1`).
+
+---
+
+## II6. Logout on the challenge page — `src/routes/challenge/[id]/+page.svelte` (modify)
+
+The load already exposes `data.user` (`+page.server.ts` line 63). Add a compact auth control to the
+`.challenge-header` (lines 294–302), reusing the home page's pattern (`src/routes/+page.svelte`
+`signOut`, lines 16–20):
+
+```ts
+async function signOut() {
+	await fetch('/api/auth/logout', { method: 'POST' });
+	window.location.reload(); // drops back to anonymous state
+}
+```
+
+Header markup (illustrative — fit the existing terminal aesthetic):
+- When `data.user`: `● signed in as {data.user.username}` + a **Sign out** `<button onclick={signOut}>`.
+- When signed out: a small **Sign in** link `href="/api/auth/github/login"` (parity/discoverability).
+
+Place it in the header (e.g. after the `.timer` or in a right-aligned group). Add matching header
+styles; do not disturb the existing back-link / label / config-link / timer layout. `POST
+/api/auth/logout` and `clearSessionCookie` are unchanged — no backend change for logout.
+
+---
+
+## II7. Files summary (iteration 3)
+
+Modify only (no new files, no schema/migration, no new routes):
+- `src/routes/api/challenge/record/+server.ts` (§II1 — stop reading body username)
+- `src/lib/server/challenges/schemas.ts` (§II2 — remove `recordChallengeRequestSchema` /
+  `parseRecordRequest` / `RecordChallengeRequestBody`)
+- `src/lib/client/challenge.ts` (§II3 — `record()` / `recordChallenge()` take no arg)
+- `src/lib/client/challenge-store.svelte.ts` (§II4 — `record()` drops `username` param)
+- `src/routes/challenge/[id]/+page.svelte` (§II5 — two-choice overlay, remove input; §II6 — header
+  sign-out/-in)
+
+Unchanged: home `auth-bar`, terminal `tsr login|logout|whoami`, `/api/auth/*` routes,
+`/api/challenge/finish`, pending-result cookie helpers, leaderboard `verified` flag, DB schema.
+
+---
+
+## II8. Test surface (for the tdd stage)
+
+> **Existing-test churn (not a regression):** `record.test.ts` cases asserting a free-text / sanitized
+> username on the anonymous path must change to assert `username: null`. `schemas.test.ts` cases for
+> `parseRecordRequest` must be **removed** (the function no longer exists). Any browser/UI test
+> asserting the username `<input>` must move to the two-button overlay.
+
+Unit (vitest `server` project):
+- **`/api/challenge/record`:** anonymous → row inserted with `username: null`, `githubId` null, correct
+  final rank; **a body `username` is ignored in both the anonymous and signed-in branches** (explicit
+  test — the endpoint no longer reads the body); signed-in → verified `username`/`githubId`;
+  missing/expired/tampered pending cookie → `400`; single-use (replay → `400`) — unchanged.
+- **schemas:** the `parseRecordRequest` suite is deleted; remaining schema tests (`parseStartRequest`,
+  `parseFinishRequest`, `parseSessionCookie`) stay green.
+
+UI (browser test only if it fits `*.browser.test.ts`; else manual, documented):
+- Anonymous completion overlay shows **no text input** — only "Save as Anonymous" + "Sign in with
+  GitHub"; a signed-in unrecorded overlay shows a single "Save my time" and **no** sign-in button.
+- The challenge-page header exposes a working **Sign out** (and a Sign in link when signed out).
+
+Existing `pnpm test` / `check` / `lint` stay green (with the churn updates above).
+
+---
+
+## II9. Scope flags (iteration 3 — active)
+
+- `needs_frontend: true` — two-choice completion overlay (remove input), challenge-page header
+  sign-out/-in, client store/service `record()` signature change.
+- `needs_backend: true` — `/api/challenge/record` stops honoring a body username; record schema
+  removed.
