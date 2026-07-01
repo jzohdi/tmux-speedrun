@@ -1,134 +1,57 @@
-# Plan: Clickable home-page command-hint labels
+# Plan analysis: `swap-window` command (issue jzohdi/tmux-speedrun#16)
 
-Issue: jzohdi/tmux-speedrun#31 — Make home-page command-hint labels clickable to run the command in the terminal.
+## Conclusion: already implemented — escalating
 
-## Goal (restated)
+Issue #16 requests adding a `swap-window` command. **This feature is already fully
+implemented and merged into `main`** (commit `9914ea8` "implemented code for swap window
+command", now an ancestor of `main`'s tip `3473726`). There is no implementation work left
+to plan, so this run is escalated for a human decision (close the issue as already-done, or
+clarify what additional behavior is wanted).
 
-On the home page (`/`), the row of command hints above the terminal (e.g. `tsr ls`, `tsr practice`,
-`man tmux`) currently renders as non-interactive `<div>`s. Make each hint a clickable, keyboard-
-accessible button. Clicking a hint must run its command in the on-page terminal exactly as if the
-user typed it and pressed Enter, then move focus to the terminal. Existing appearance/layout must be
-preserved.
+## Evidence — every checklist item in the issue is already present
 
-## How it works today
+| # | Checklist item | Location | Status |
+|---|----------------|----------|--------|
+| 1 | `CommandId.SWAP_WINDOW = 'swap-window'` | `src/lib/utils/tmux-commands.ts:67` | done |
+| 2 | `WindowOperation` `{ type: 'swap'; source?: number; target: number }` | `src/lib/utils/tmux-commands.ts:172` | done |
+| 2 | Command registered `matchPatterns: ['swap-window','swapw']`, `matchMode: 'prefix'`, `-s`/`-t` parsing (via `getFlagValue`) | `src/lib/utils/tmux-commands.ts:1172-1198` | done |
+| 3 | `handleWindowOperation` `'swap'` case → validates indices, emits `can't find window: <n>`, calls `swapWindows` | `src/lib/stores/tmux-state.svelte.ts:1126-1141` | done |
+| 3 | `swapWindows(source, target)` mutation (distinct from `reorderWindows`; exchanges two indices, recomputes `activeWindowIndex` so the active window follows its content) + exported | `src/lib/stores/tmux-state.svelte.ts:1507-1539`, export at `:3034` | done |
+| 4 | No default keybinding | (none added) | done |
+| 5 | `TMUX_COMMANDS` entry (difficulty `advanced`, category `window`) | `src/lib/data/tmux-commands.ts:126-130` | done |
+| 6 | `PROMPT_VARIATIONS['swap-window']` (5 fixed-form prompts, no `requiresInput`) | `src/lib/server/challenges/prompt-variations.ts:111-117` | done |
+| 7 | Store unit tests | `src/lib/stores/tmux-state.test.ts:1021-1158` (+ last-window-by-id survives swap `:1348-1353`) | done |
 
-- `src/routes/+page.svelte` renders the hint row (`.command-hints` containing five `.hint` divs,
-  each with a `<code>` command and a `<span>` description) and, separately, mounts
-  `<Terminal />` in the terminal section. The two do not communicate.
-- `src/lib/components/Terminal.svelte` is the on-page terminal. Relevant internals:
-  - `processCommand(cmd: string)` — parses and executes a command line, exactly the path used when
-    the user presses Enter (`handleKeyDown` calls `processCommand(inputValue)` then clears input).
-    It already handles `tsr ls`, `tsr lb <n>`, `tsr start <n>`, `tsr free-play`, `tsr practice`,
-    `tsr config`, `man tmux`, `help`, `clear`, and unknown-command errors.
-  - `focusInput()` — focuses the correct element for the current mode (default → text input,
-    `man` → manpage container, list/leaderboard → container).
-  - `inputValue` state holds the input box contents; mode changes (`list`/`man`/etc.) are driven by
-    the command handlers.
-- The current five hints (command → description):
-  - `tsr ls` → list challenges
-  - `tsr start <id>` → begin a challenge
-  - `tsr practice` → learn step by step
-  - `tsr config` → customize tmux.conf
-  - `man tmux` → command reference
+### Test coverage present
+- Swap two non-active windows → active window unchanged.
+- Swap that includes the active window → active follows to its new position.
+- `swap-window -t Y` (no `-s`) → swaps the active window with target.
+- Invalid / out-of-range index → `can't find window: <n>` error, no state change.
+- Non-numeric `-t` and missing `-t` → `usage: swap-window [-s src] -t dst`.
+- Same source/target → no-op, no error.
+- `swapw` alias resolves.
+- Direct `swapWindows` index-math unit tests (exchange + active-follows; out-of-range no-op).
 
-## Approach
+All edge cases and mode-interaction requirements from the issue are covered by the existing
+implementation.
 
-Add a small public API to `Terminal.svelte` and call it from the page on hint click. Single source
-of truth for each hint's command string (no separate mapping), per the issue.
+## Git state note (why this run is confusing)
 
-### 1. Expose a run API from `Terminal.svelte`
+- `main` tip = `3473726`; it already contains `9914ea8` (swap-window).
+- This branch `agent/run-1-71bc34` = `main` + unrelated leftover work: issue #31/#33
+  "clickable home-page command hints" (`Terminal.svelte`, `+page.svelte`, browser tests) and
+  stale `.agent/interface.md` (also for #31). `git diff main...HEAD` shows **only** those
+  files — nothing swap-window related, because swap-window is already in the merge base.
+- The `.agent/interface.md` and the #31 source changes on this branch are contamination from a
+  prior run and are unrelated to issue #16.
 
-Use a Svelte 5 component-level `export function` so the parent can invoke it via `bind:this`:
+## Recommended human action
 
-```ts
-export function runCommand(cmd: string) {
-  processCommand(cmd);   // same execution path as pressing Enter
-  inputValue = '';       // mirror Enter handling, which clears the input
-  tick().then(() => focusInput()); // focus after any mode-change DOM update settles
-}
-```
+1. Close issue #16 as already-implemented (feature shipped in `9914ea8`), **or** amend the
+   issue if some additional/changed behavior is actually desired (in which case a fresh,
+   specific plan can be written).
+2. Separately, note the stale/contaminated worktree state (leftover #31 artifacts on this
+   branch) so the pipeline's branch bookkeeping can be corrected.
 
-Notes:
-- `processCommand` already no-ops on empty/whitespace input, so guarding isn't required but is cheap.
-- `focusInput()` is awaited via `tick()` so that when a command changes the mode (e.g. `tsr ls`
-  enters list mode, `man tmux` enters man mode) we focus the element that actually exists after the
-  DOM updates — satisfying "focus moves to the terminal" for every command, not just default mode.
-- No change to existing keyboard/typed behavior; `runCommand` reuses the same code path.
-
-### 2. Make the hints interactive in `+page.svelte`
-
-- Bind the terminal instance: `<Terminal bind:this={terminal} />`.
-- Replace the hardcoded `.hint` divs with a loop over a single in-component array so the displayed
-  command and the executed command are the same string:
-
-  ```ts
-  const hints = [
-    { command: 'tsr ls', description: 'list challenges' },
-    { command: 'tsr start <id>', description: 'begin a challenge' },
-    { command: 'tsr practice', description: 'learn step by step' },
-    { command: 'tsr config', description: 'customize tmux.conf' },
-    { command: 'man tmux', description: 'command reference' }
-  ];
-  ```
-
-- Render each as a `<button class="hint" type="button">` with the same inner
-  `<code>{command}</code>` + `<span>{description}</span>` markup, an `onclick` that calls
-  `terminal?.runCommand(command)`, and `aria-label={`Run command: ${command}`}`. A native `<button>`
-  is focusable and Enter/Space-activatable out of the box, satisfying the keyboard-accessibility
-  criteria without manual `role`/`tabindex`/keydown wiring.
-
-### 3. Preserve styling
-
-The `.hint` CSS targets the class, not the element, so most styling carries over. Add a button reset
-so the `<button>` looks identical to the old `<div>`:
-
-- `font-family: inherit; color: inherit; text-align: left;`
-- `background`/`border`/`border-radius`/`padding`/`gap`/`display:flex`/`align-items` — already on
-  `.hint`; ensure the button doesn't override them (remove UA button background/border by keeping the
-  existing `.hint` declarations).
-- Interactivity affordance (new): `cursor: pointer;` and a `.hint:hover` / `.hint:focus-visible`
-  state (subtle border/background brighten, consistent with the existing `.badge:hover` treatment) to
-  satisfy "visually indicates it is interactive." Keep the resting appearance unchanged.
-- The existing mobile `@media (max-width: 640px)` rules for `.hint` continue to apply unchanged.
-
-## Files to change
-
-- `src/lib/components/Terminal.svelte` — add exported `runCommand(cmd)` (and ensure `tick` import,
-  already present).
-- `src/routes/+page.svelte` — bind terminal instance, convert hint row to looped `<button>`s, add
-  hover/focus/cursor styling and button reset.
-
-## Risks & edge cases
-
-- **`tsr start <id>` hint is not a runnable command as displayed.** Typing/running `tsr start <id>`
-  literally yields the terminal's existing "Usage: tsr start <number>" error (parseInt of `<id>` is
-  NaN). This is the faithful "run exactly the label text" behavior and matches current typed
-  behavior, but it produces an error rather than starting a challenge. Per the issue, command ==
-  label text with no new mapping, so we keep it as-is. **Flag for review:** if a friendlier result is
-  desired (e.g. route this hint to `tsr ls`, or change the label), that needs a product decision.
-- **Open decision in the issue (run vs. pre-fill).** This plan implements **execute on click** (the
-  issue's chosen default). If reviewers prefer pre-fill-only, `runCommand` would instead set
-  `inputValue = cmd` and focus the input without calling `processCommand`.
-- **Navigation commands** (`tsr practice`, `tsr config`) call `goto(...)`, navigating away from the
-  home page — same as typing them. Expected and acceptable.
-- **Focus across mode changes** — handled by awaiting `tick()` before `focusInput()` (see §1).
-- **Visual regression** — the `<div>`→`<button>` swap is the main appearance risk; mitigated by the
-  button reset and by keeping all styling on the `.hint` class. Verify resting state is pixel-stable.
-
-## Testing
-
-- **Browser test** (Vitest browser project, following `*.browser.test.ts` convention used by
-  `ChallengeTerminal.browser.test.ts`): render `Terminal`, call the exported `runCommand('tsr ls')`
-  (or, preferably, render the home page and click the `tsr ls` button), and assert the terminal
-  shows the executed command / list mode and that focus lands in the terminal. A non-navigating
-  command like `tsr ls` is best for assertions (avoids `goto`).
-- **Manual/`/run` check:** load `/`, hover a hint (cursor + affordance), click `tsr ls` → terminal
-  runs it and enters list mode with focus in the terminal; Tab to a hint and press Enter/Space →
-  same result; confirm the hint row looks unchanged at rest on desktop and mobile widths.
-- **Regression:** `npm run check` (svelte-check) and `npm run lint` (prettier + eslint) pass; typed
-  terminal input still works.
-
-## Scope flags
-
-- Frontend: **yes** (UI/component change only).
-- Backend: **no**.
+## Scope (nature of the feature, for reference)
+- Backend / store-logic only (command parsing + state mutation + tests). No UI work.
