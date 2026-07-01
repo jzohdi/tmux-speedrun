@@ -72,7 +72,7 @@ beforeEach(() => {
 });
 
 describe('POST /api/challenge/finish — signed in (records immediately)', () => {
-	it("stamps the verified GitHub username/id and returns recorded: true", async () => {
+	it('stamps the verified GitHub username/id and returns recorded: true', async () => {
 		const event = makeEvent({ githubId: 12345, username: 'octocat' });
 		const res = await POST(event as never);
 

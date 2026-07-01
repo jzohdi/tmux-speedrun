@@ -76,7 +76,9 @@ describe('createPendingResultToken / verifyPendingResultToken', () => {
 		const [payloadPart, sigPart] = token.split('.');
 		const flipped = sigPart[0] === 'A' ? 'B' : 'A';
 
-		expect(await verifyPendingResultToken(`${payloadPart}.${flipped}${sigPart.slice(1)}`)).toBeNull();
+		expect(
+			await verifyPendingResultToken(`${payloadPart}.${flipped}${sigPart.slice(1)}`)
+		).toBeNull();
 	});
 
 	it('rejects a token signed under a different secret', async () => {

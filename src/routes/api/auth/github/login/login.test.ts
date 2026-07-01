@@ -22,7 +22,9 @@ import { OAUTH_RETURN_COOKIE_NAME, OAUTH_STATE_COOKIE_NAME } from '$lib/server/e
 
 function makeEvent(returnTo: string | null) {
 	const base = 'http://localhost:5173/api/auth/github/login';
-	const url = new URL(returnTo === null ? base : `${base}?return_to=${encodeURIComponent(returnTo)}`);
+	const url = new URL(
+		returnTo === null ? base : `${base}?return_to=${encodeURIComponent(returnTo)}`
+	);
 	return {
 		url,
 		cookies: { set: vi.fn(), get: vi.fn(), delete: vi.fn() }
