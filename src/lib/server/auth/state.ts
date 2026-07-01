@@ -1,24 +1,25 @@
 /**
  * OAuth CSRF `state` helpers.
  *
- * SCAFFOLD ONLY — signatures created by the tdd stage; see `.agent/interface.md` §3.
- * The implementation stage fills these in.
+ * See `.agent/interface.md` §3. The authorize step sets a random `state` cookie;
+ * the callback rejects unless the `state` query param equals the cookie.
  */
 
-/** Cryptographically-random state token, URL-safe. NOT IMPLEMENTED YET. */
+import { randomBytes, bytesToBase64, stringToBytes, constantTimeEqual } from '$lib/crypto';
+
+/** Cryptographically-random state token, URL-safe. */
 export function generateOAuthState(): string {
-	return '';
+	return bytesToBase64(randomBytes(32)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /**
  * Constant-time compare of the callback's state param against the cookie value.
- * NOT IMPLEMENTED YET.
+ * Returns false if either input is missing/empty.
  */
 export function verifyOAuthState(
 	fromQuery: string | null,
 	fromCookie: string | undefined
 ): boolean {
-	void fromQuery;
-	void fromCookie;
-	return false;
+	if (!fromQuery || !fromCookie) return false;
+	return constantTimeEqual(stringToBytes(fromQuery), stringToBytes(fromCookie));
 }

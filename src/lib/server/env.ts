@@ -73,10 +73,9 @@ export const COOKIE_OPTIONS = {
 // ---------------------------------------------------------------------------
 // GitHub OAuth / auth session configuration.
 //
-// SCAFFOLD ONLY — constants and getter signatures added by the tdd stage so the
-// failing auth tests fail on assertions rather than import errors. The getter
-// bodies are NOT implemented; the implementation stage fills them in per
-// `.agent/interface.md` §1.
+// See `.agent/interface.md` §1. All values come from $env/dynamic/private —
+// nothing is hardcoded, and the id/secret getter is called lazily inside OAuth
+// route handlers so app startup / anonymous play work when unconfigured.
 // ---------------------------------------------------------------------------
 
 /** Auth session cookie name. */
@@ -110,22 +109,33 @@ export type GitHubOAuthConfig = { clientId: string; clientSecret: string };
 
 /**
  * Reads GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET from $env/dynamic/private.
- * Throws a clear Error if either is missing/empty.
- * NOT IMPLEMENTED YET.
+ * Throws a clear Error if either is missing/empty. Call only inside OAuth route
+ * handlers (lazily), never at module load, so app startup works when unconfigured.
  */
 export function getGitHubOAuthConfig(): GitHubOAuthConfig {
-	throw new Error('not implemented');
+	const clientId = env.GITHUB_CLIENT_ID;
+	const clientSecret = env.GITHUB_CLIENT_SECRET;
+
+	if (!clientId || !clientSecret) {
+		throw new Error(
+			'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.'
+		);
+	}
+
+	return { clientId, clientSecret };
 }
 
-/** true when both GitHub OAuth env vars are present (non-empty). NOT IMPLEMENTED YET. */
+/** true when both GitHub OAuth env vars are present (non-empty). */
 export function isGitHubOAuthConfigured(): boolean {
-	return false;
+	return Boolean(env.GITHUB_CLIENT_ID) && Boolean(env.GITHUB_CLIENT_SECRET);
 }
 
 /**
- * Resolve the absolute OAuth redirect URI. NOT IMPLEMENTED YET.
+ * Resolve the absolute OAuth redirect URI.
+ * Prefer env ORIGIN (trailing '/' trimmed); fall back to the request URL's origin.
+ * Returns `${origin}${GITHUB_CALLBACK_PATH}`.
  */
 export function getGitHubRedirectUri(requestUrl: URL): string {
-	void requestUrl;
-	return '';
+	const origin = env.ORIGIN ? env.ORIGIN.replace(/\/+$/, '') : requestUrl.origin;
+	return `${origin}${GITHUB_CALLBACK_PATH}`;
 }

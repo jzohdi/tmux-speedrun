@@ -26,7 +26,7 @@ import { leaderboard } from '$lib/server/db/schema';
  */
 const MAX_CHALLENGE_DURATION_MS = 60 * 60 * 1000;
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async ({ request, cookies, locals }) => {
 	// Parse and validate request body
 	let requestData;
 	try {
@@ -84,13 +84,17 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	// Clear the session cookie (challenge completed)
 	cookies.delete(CHALLENGE_COOKIE_NAME, { path: '/' });
 
-	// Record to leaderboard
+	// Record to leaderboard. The verified GitHub identity comes ONLY from the
+	// server-verified session (locals.user) — never from the request body — so a
+	// client cannot spoof a username. Anonymous submissions omit these fields.
+	const user = locals.user;
 	let leaderboardPosition: number | undefined;
 	try {
 		// Insert the result
 		await db.insert(leaderboard).values({
 			challengeId: String(challengeId),
-			durationMs
+			durationMs,
+			...(user ? { username: user.username, githubId: user.githubId } : {})
 		});
 
 		// Get leaderboard position (count of entries with faster times + 1)
