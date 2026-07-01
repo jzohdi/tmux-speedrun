@@ -1,134 +1,112 @@
-# Plan: Clickable home-page command-hint labels
-
-Issue: jzohdi/tmux-speedrun#31 — Make home-page command-hint labels clickable to run the command in the terminal.
+# Plan: Add `swap-window` command (issue #16)
 
 ## Goal (restated)
 
-On the home page (`/`), the row of command hints above the terminal (e.g. `tsr ls`, `tsr practice`,
-`man tmux`) currently renders as non-interactive `<div>`s. Make each hint a clickable, keyboard-
-accessible button. Clicking a hint must run its command in the on-page terminal exactly as if the
-user typed it and pressed Enter, then move focus to the terminal. Existing appearance/layout must be
-preserved.
+Add a `swap-window` tmux command to the speedrun trainer that swaps the **positions** of two
+windows in the current session's window list.
 
-## How it works today
+- `swap-window -s X -t Y` → swap windows at indices X and Y.
+- `swap-window -t Y` (no `-s`) → swap the current/active window with the window at index Y.
+- Active window **follows its content**: after the swap `activeWindowIndex` still points at the
+  originally-active window's new position.
+- Fixed-form command (NOT `requiresInput`), canonical answer `swap-window`, category `window`,
+  difficulty `advanced`, no default keybinding.
 
-- `src/routes/+page.svelte` renders the hint row (`.command-hints` containing five `.hint` divs,
-  each with a `<code>` command and a `<span>` description) and, separately, mounts
-  `<Terminal />` in the terminal section. The two do not communicate.
-- `src/lib/components/Terminal.svelte` is the on-page terminal. Relevant internals:
-  - `processCommand(cmd: string)` — parses and executes a command line, exactly the path used when
-    the user presses Enter (`handleKeyDown` calls `processCommand(inputValue)` then clears input).
-    It already handles `tsr ls`, `tsr lb <n>`, `tsr start <n>`, `tsr free-play`, `tsr practice`,
-    `tsr config`, `man tmux`, `help`, `clear`, and unknown-command errors.
-  - `focusInput()` — focuses the correct element for the current mode (default → text input,
-    `man` → manpage container, list/leaderboard → container).
-  - `inputValue` state holds the input box contents; mode changes (`list`/`man`/etc.) are driven by
-    the command handlers.
-- The current five hints (command → description):
-  - `tsr ls` → list challenges
-  - `tsr start <id>` → begin a challenge
-  - `tsr practice` → learn step by step
-  - `tsr config` → customize tmux.conf
-  - `man tmux` → command reference
+## Current state of the repository (IMPORTANT)
 
-## Approach
+While studying the code I found that **this feature is already fully implemented and tested in the
+working tree** on this branch. Every item on the issue's implementation checklist is present:
 
-Add a small public API to `Terminal.svelte` and call it from the page on hint click. Single source
-of truth for each hint's command string (no separate mapping), per the issue.
+1. `CommandId.SWAP_WINDOW = 'swap-window'` — `src/lib/utils/tmux-commands.ts:67`.
+2. `WindowOperation` extended with `{ type: 'swap'; source?: number; target: number }` —
+   `tmux-commands.ts:172`. Command registered with `matchPatterns: ['swap-window', 'swapw']`,
+   `matchMode: 'prefix'`, parsing `-s`/`-t` via the shared `getFlagValue` helper —
+   `tmux-commands.ts:1172-1198`. On a bad/absent `-t` (or non-numeric `-s`) it returns
+   `error: 'usage: swap-window [-s src] -t dst'`.
+3. `handleWindowOperation` `'swap'` case — `src/lib/stores/tmux-state.svelte.ts:1126-1141`.
+   It defaults `source` to `activeWindowIndex`, validates both indices, on failure adds an
+   `error` history line `can't find window: <n>`, otherwise calls a dedicated
+   `swapWindows(a, b)` mutation (`tmux-state.svelte.ts:1507-1539`). `swapWindows` exchanges
+   exactly two indices (distinct from `reorderWindows`, which *moves*) and recomputes
+   `activeWindowIndex` so the active window follows its content. Pane trees / `focusedPaneId`
+   are preserved because only array positions are swapped.
+4. No default keybinding — `swap-window` does not appear in `src/lib/data/keybindings.ts`.
+5. `TMUX_COMMANDS` entry — `src/lib/data/tmux-commands.ts:125-131` (difficulty `advanced`,
+   category `window`, shortcut `swap-window -s X -t Y, swapw -s X -t Y`). It is NOT in the
+   `requiresInput` set, so it is treated as fixed-form per the resolved decision.
+6. `PROMPT_VARIATIONS['swap-window']` — `src/lib/server/challenges/prompt-variations.ts:111-117`
+   (5 variations).
+7. Store unit tests — `src/lib/stores/tmux-state.test.ts`,
+   `describe('createTmuxStore swap-window command')` (~lines 1021-1160): swap two non-active
+   windows, swap including the active window (active follows), no-`-s` uses active window,
+   invalid/out-of-range index → no-op, same-src==dst → no-op, missing `-t` → usage error,
+   non-numeric `-t` → usage error, plus direct `swapWindows` index-math tests and an
+   out-of-range no-op test. A `last-window` interaction test also exercises `swapWindows`.
 
-### 1. Expose a run API from `Terminal.svelte`
+## Approach for the implementation stage
 
-Use a Svelte 5 component-level `export function` so the parent can invoke it via `bind:this`:
+Because the code already exists, the implementation stage's job is **verification and closing any
+residual gaps**, not re-writing the feature. Concretely:
 
-```ts
-export function runCommand(cmd: string) {
-  processCommand(cmd);   // same execution path as pressing Enter
-  inputValue = '';       // mirror Enter handling, which clears the input
-  tick().then(() => focusInput()); // focus after any mode-change DOM update settles
-}
-```
+1. **Verify the suite is green.** Run the unit tests, type-check, and lint:
+   - `pnpm vitest run src/lib/stores/tmux-state.test.ts` (or the full `pnpm test`).
+   - `pnpm check` (svelte-check / tsc) to confirm the `WindowOperation` union change type-checks.
+   - `pnpm lint`.
+   Confirm the `swap-window` describe block passes and there are no type errors from the added
+   `'swap'` variant.
 
-Notes:
-- `processCommand` already no-ops on empty/whitespace input, so guarding isn't required but is cheap.
-- `focusInput()` is awaited via `tick()` so that when a command changes the mode (e.g. `tsr ls`
-  enters list mode, `man tmux` enters man mode) we focus the element that actually exists after the
-  DOM updates — satisfying "focus moves to the terminal" for every command, not just default mode.
-- No change to existing keyboard/typed behavior; `runCommand` reuses the same code path.
+2. **Re-read each checklist item against the code** (list above) and confirm behavior matches the
+   issue, paying attention to the edge cases:
+   - Invalid index (out of range / non-numeric) → error, no state change.
+   - Same source and target → no-op, no error.
+   - Only one window → any target other than 0 is out of range → error/no-op.
+   - Active window in the swapped pair → `activeWindowIndex` recomputed to follow content.
+   - Active window NOT in the pair → `activeWindowIndex` unchanged.
+   - `focusedPaneId` / pane trees preserved.
 
-### 2. Make the hints interactive in `+page.svelte`
+3. **Optional refinement (low priority, only for tighter alignment with the issue wording):** the
+   issue suggests prompts "asking to swap two specific window numbers." The current
+   `PROMPT_VARIATIONS['swap-window']` are generic ("Swap the positions of two windows by their
+   indices") rather than naming concrete numbers. This is acceptable under the resolved decision
+   (canonical answer is just `swap-window`, no per-instruction random input, so the prompt need not
+   embed specific numbers), so **treat this as optional polish, not a required change.** If touched,
+   keep 4–6 variations and do NOT introduce `{input}` placeholders or set `requiresInput`.
 
-- Bind the terminal instance: `<Terminal bind:this={terminal} />`.
-- Replace the hardcoded `.hint` divs with a loop over a single in-component array so the displayed
-  command and the executed command are the same string:
+## Files (already changed on this branch; areas to re-verify)
 
-  ```ts
-  const hints = [
-    { command: 'tsr ls', description: 'list challenges' },
-    { command: 'tsr start <id>', description: 'begin a challenge' },
-    { command: 'tsr practice', description: 'learn step by step' },
-    { command: 'tsr config', description: 'customize tmux.conf' },
-    { command: 'man tmux', description: 'command reference' }
-  ];
-  ```
-
-- Render each as a `<button class="hint" type="button">` with the same inner
-  `<code>{command}</code>` + `<span>{description}</span>` markup, an `onclick` that calls
-  `terminal?.runCommand(command)`, and `aria-label={`Run command: ${command}`}`. A native `<button>`
-  is focusable and Enter/Space-activatable out of the box, satisfying the keyboard-accessibility
-  criteria without manual `role`/`tabindex`/keydown wiring.
-
-### 3. Preserve styling
-
-The `.hint` CSS targets the class, not the element, so most styling carries over. Add a button reset
-so the `<button>` looks identical to the old `<div>`:
-
-- `font-family: inherit; color: inherit; text-align: left;`
-- `background`/`border`/`border-radius`/`padding`/`gap`/`display:flex`/`align-items` — already on
-  `.hint`; ensure the button doesn't override them (remove UA button background/border by keeping the
-  existing `.hint` declarations).
-- Interactivity affordance (new): `cursor: pointer;` and a `.hint:hover` / `.hint:focus-visible`
-  state (subtle border/background brighten, consistent with the existing `.badge:hover` treatment) to
-  satisfy "visually indicates it is interactive." Keep the resting appearance unchanged.
-- The existing mobile `@media (max-width: 640px)` rules for `.hint` continue to apply unchanged.
-
-## Files to change
-
-- `src/lib/components/Terminal.svelte` — add exported `runCommand(cmd)` (and ensure `tick` import,
-  already present).
-- `src/routes/+page.svelte` — bind terminal instance, convert hint row to looped `<button>`s, add
-  hover/focus/cursor styling and button reset.
+- `src/lib/utils/tmux-commands.ts` — `CommandId`, `WindowOperation`, command registration.
+- `src/lib/stores/tmux-state.svelte.ts` — `handleWindowOperation` swap case, `swapWindows` helper,
+  and its export in the returned store object.
+- `src/lib/data/tmux-commands.ts` — `TMUX_COMMANDS` metadata entry.
+- `src/lib/server/challenges/prompt-variations.ts` — `PROMPT_VARIATIONS['swap-window']`.
+- `src/lib/stores/tmux-state.test.ts` — swap-window unit tests.
 
 ## Risks & edge cases
 
-- **`tsr start <id>` hint is not a runnable command as displayed.** Typing/running `tsr start <id>`
-  literally yields the terminal's existing "Usage: tsr start <number>" error (parseInt of `<id>` is
-  NaN). This is the faithful "run exactly the label text" behavior and matches current typed
-  behavior, but it produces an error rather than starting a challenge. Per the issue, command ==
-  label text with no new mapping, so we keep it as-is. **Flag for review:** if a friendlier result is
-  desired (e.g. route this hint to `tsr ls`, or change the label), that needs a product decision.
-- **Open decision in the issue (run vs. pre-fill).** This plan implements **execute on click** (the
-  issue's chosen default). If reviewers prefer pre-fill-only, `runCommand` would instead set
-  `inputValue = cmd` and focus the input without calling `processCommand`.
-- **Navigation commands** (`tsr practice`, `tsr config`) call `goto(...)`, navigating away from the
-  home page — same as typing them. Expected and acceptable.
-- **Focus across mode changes** — handled by awaiting `tick()` before `focusInput()` (see §1).
-- **Visual regression** — the `<div>`→`<button>` swap is the main appearance risk; mitigated by the
-  button reset and by keeping all styling on the `.hint` class. Verify resting state is pixel-stable.
+- **move vs swap:** must not reuse `reorderWindows` semantics — a swap exchanges exactly two
+  indices and leaves all others fixed. Already handled by the dedicated `swapWindows` helper;
+  verify the index math via the existing direct `swapWindows` tests.
+- **Active-index recomputation:** double-check the two branches (`active === source` →
+  `target`, `active === target` → `source`) and that an active window outside the pair is
+  untouched. Covered by tests; re-confirm.
+- **Validation order:** the handler validates both indices before mutating; ensure the error path
+  emits `can't find window: <n>` and leaves state unchanged.
+- **Mode gate:** command runs via CLI / command-prompt through `executeTmuxCommand`; independent
+  of focused pane mode. No change needed here.
 
-## Testing
+## How the result is tested
 
-- **Browser test** (Vitest browser project, following `*.browser.test.ts` convention used by
-  `ChallengeTerminal.browser.test.ts`): render `Terminal`, call the exported `runCommand('tsr ls')`
-  (or, preferably, render the home page and click the `tsr ls` button), and assert the terminal
-  shows the executed command / list mode and that focus lands in the terminal. A non-navigating
-  command like `tsr ls` is best for assertions (avoids `goto`).
-- **Manual/`/run` check:** load `/`, hover a hint (cursor + affordance), click `tsr ls` → terminal
-  runs it and enters list mode with focus in the terminal; Tab to a hint and press Enter/Space →
-  same result; confirm the hint row looks unchanged at rest on desktop and mobile widths.
-- **Regression:** `npm run check` (svelte-check) and `npm run lint` (prettier + eslint) pass; typed
-  terminal input still works.
+- Existing Vitest store tests in `tmux-state.test.ts` cover swap of non-active windows, swap
+  including the active window, no-`-s` default-to-active, invalid index, and same-src/dst no-op.
+- Type-check (`pnpm check`) validates the `WindowOperation` union extension end-to-end.
+- Lint ensures style compliance.
+
+If all of the above pass unchanged, the feature is complete and the change is ready to proceed; no
+new production code is required beyond confirming/polishing what is already on the branch.
 
 ## Scope flags
 
-- Frontend: **yes** (UI/component change only).
-- Backend: **no**.
+- `needs_frontend`: **false** — no UI/component work; the command flows through existing
+  CLI/command-prompt plumbing and store logic.
+- `needs_backend`: **true** — command logic, store mutation, command metadata, prompt data, and
+  unit tests (the app's non-UI logic layer).
