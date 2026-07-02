@@ -1,7 +1,23 @@
 <script lang="ts">
 	import Terminal from '$lib/components/Terminal.svelte';
+	import type { PageData } from './$types';
+
+	// `data` is always supplied by +layout.server.ts in the app; default it so the
+	// component can also be rendered standalone (e.g. in unit/browser tests).
+	let { data = { user: null } }: { data?: PageData } = $props();
 
 	type Hint = { command: string; description: string };
+
+	function signIn() {
+		// Full navigation — this is a server redirect to an external origin (GitHub).
+		window.location.href = '/api/auth/github/login';
+	}
+
+	async function signOut() {
+		await fetch('/api/auth/logout', { method: 'POST' });
+		// Reload so the layout re-loads without a session (anonymous state).
+		window.location.reload();
+	}
 
 	// Single source of truth for the command-hint row: the string shown IS the
 	// string executed when the hint is clicked — no separate mapping (per #31).
@@ -87,6 +103,32 @@
 				<span>Open Source</span>
 			</a>
 
+			<div class="auth-bar">
+				{#if data.user}
+					<span class="signed-in" title="Verified GitHub identity">
+						<span class="dot" aria-hidden="true">●</span>
+						signed in as {data.user.username}
+					</span>
+					<button type="button" class="auth-btn" onclick={signOut}>Sign out</button>
+				{:else}
+					<button type="button" class="auth-btn signin" onclick={signIn}>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							aria-hidden="true"
+						>
+							<path
+								d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+							/>
+						</svg>
+						Sign in with GitHub
+					</button>
+				{/if}
+			</div>
+
 			<h1 class="title">
 				<span class="title-accent">tmux</span>-speedrun
 			</h1>
@@ -111,7 +153,7 @@
 
 	<!-- Terminal Section -->
 	<section class="terminal-section">
-		<Terminal bind:this={terminal} />
+		<Terminal bind:this={terminal} user={data.user} />
 	</section>
 
 	<!-- Features Section -->
@@ -222,6 +264,65 @@
 	}
 
 	.badge svg {
+		flex-shrink: 0;
+	}
+
+	/* Auth bar (signed-in indicator / sign-in button) */
+	.auth-bar {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-wrap: wrap;
+		gap: 12px;
+		margin-bottom: 24px;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 13px;
+	}
+
+	.signed-in {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		color: #a0a0a0;
+	}
+
+	.signed-in .dot {
+		color: #50fa7b;
+		font-size: 10px;
+		line-height: 1;
+	}
+
+	.auth-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 14px;
+		border-radius: 8px;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		background: rgba(255, 255, 255, 0.03);
+		color: #e0e0e0;
+		font-family: inherit;
+		font-size: 13px;
+		cursor: pointer;
+		text-decoration: none;
+		transition:
+			background 0.2s ease,
+			border-color 0.2s ease,
+			transform 0.2s ease;
+	}
+
+	.auth-btn:hover {
+		background: rgba(50, 255, 150, 0.1);
+		border-color: rgba(50, 255, 150, 0.3);
+		transform: translateY(-1px);
+	}
+
+	.auth-btn.signin {
+		color: #50fa7b;
+		border-color: rgba(50, 255, 150, 0.25);
+	}
+
+	.auth-btn.signin svg {
 		flex-shrink: 0;
 	}
 

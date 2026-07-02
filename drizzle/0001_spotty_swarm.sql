@@ -1,0 +1,1 @@
+ALTER TABLE "leaderboard" ADD COLUMN "github_id" bigint;

@@ -6,6 +6,9 @@ import {
 	getDifficultyLabel,
 	type Challenge
 } from '$lib/data/challenges';
+import { PENDING_RESULT_COOKIE_NAME } from '$lib/server/env';
+import { verifyPendingResultToken } from '$lib/server/challenges/pending';
+import type { SessionUser } from '$lib/server/auth/session';
 import type { PageServerLoad } from './$types';
 
 export type ChallengePageData = {
@@ -13,9 +16,17 @@ export type ChallengePageData = {
 	challengeIndex: number;
 	totalChallenges: number;
 	difficultyLabel: string;
+	// Iteration 2 (PR #36 feedback): make the completion flow durable across the
+	// full-page GitHub OAuth round-trip.
+	user: SessionUser | null;
+	pendingResult: { durationMs: number } | null;
 };
 
-export const load: PageServerLoad = async ({ params }): Promise<ChallengePageData> => {
+export const load: PageServerLoad = async ({
+	params,
+	cookies,
+	locals
+}): Promise<ChallengePageData> => {
 	const id = params.id;
 	const numericId = parseInt(id, 10);
 
@@ -35,10 +46,21 @@ export const load: PageServerLoad = async ({ params }): Promise<ChallengePageDat
 		});
 	}
 
+	// Re-hydrate a just-finished (deferred) result across the OAuth redirect: if a
+	// signed pending-result cookie verifies AND belongs to this challenge, expose
+	// its time so the completion overlay can be rebuilt server-side.
+	let pendingResult: { durationMs: number } | null = null;
+	const pending = await verifyPendingResultToken(cookies.get(PENDING_RESULT_COOKIE_NAME) ?? '');
+	if (pending && pending.challengeId === numericId) {
+		pendingResult = { durationMs: pending.durationMs };
+	}
+
 	return {
 		challenge,
 		challengeIndex: numericId,
 		totalChallenges: getChallengeCount(),
-		difficultyLabel: getDifficultyLabel(challenge.difficulty)
+		difficultyLabel: getDifficultyLabel(challenge.difficulty),
+		user: locals.user,
+		pendingResult
 	};
 };

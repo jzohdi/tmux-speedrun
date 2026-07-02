@@ -69,3 +69,105 @@ export const COOKIE_OPTIONS = {
 	path: '/',
 	maxAge: 60 * 60 // 1 hour TTL
 };
+
+// ---------------------------------------------------------------------------
+// GitHub OAuth / auth session configuration.
+//
+// See `.agent/interface.md` §1. All values come from $env/dynamic/private —
+// nothing is hardcoded, and the id/secret getter is called lazily inside OAuth
+// route handlers so app startup / anonymous play work when unconfigured.
+// ---------------------------------------------------------------------------
+
+/** Auth session cookie name. */
+export const SESSION_COOKIE_NAME = 'tmux_session';
+
+/** OAuth CSRF state cookie name. */
+export const OAUTH_STATE_COOKIE_NAME = 'tmux_oauth_state';
+
+/** Long-lived auth session cookie (30 days). sameSite 'lax' so it survives the GitHub redirect. */
+export const SESSION_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 60 * 24 * 30 // 30 days
+};
+
+/** Short-lived CSRF state cookie (10 min). */
+export const OAUTH_STATE_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 10 // 10 minutes
+};
+
+/** Fixed OAuth callback path. The GitHub OAuth App callback URL must be `${ORIGIN}` + this. */
+export const GITHUB_CALLBACK_PATH = '/api/auth/github/callback';
+
+// ---------------------------------------------------------------------------
+// Iteration 2 (PR #36 feedback): deferred-result + OAuth return-path cookies.
+// See `.agent/interface.md` §I1.
+// ---------------------------------------------------------------------------
+
+/** Deferred (anonymous) challenge result cookie name. */
+export const PENDING_RESULT_COOKIE_NAME = 'tmux_pending_result';
+
+/** OAuth post-login return-path cookie name. */
+export const OAUTH_RETURN_COOKIE_NAME = 'tmux_oauth_return';
+
+/**
+ * Pending-result cookie (1h). sameSite 'lax' so it survives the GitHub redirect,
+ * matching the existing challenge-session TTL.
+ */
+export const PENDING_RESULT_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 60 // 1 hour
+};
+
+/** Short-lived return-path cookie (10 min). */
+export const OAUTH_RETURN_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 10 // 10 minutes
+};
+
+export type GitHubOAuthConfig = { clientId: string; clientSecret: string };
+
+/**
+ * Reads GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET from $env/dynamic/private.
+ * Throws a clear Error if either is missing/empty. Call only inside OAuth route
+ * handlers (lazily), never at module load, so app startup works when unconfigured.
+ */
+export function getGitHubOAuthConfig(): GitHubOAuthConfig {
+	const clientId = env.GITHUB_CLIENT_ID;
+	const clientSecret = env.GITHUB_CLIENT_SECRET;
+
+	if (!clientId || !clientSecret) {
+		throw new Error(
+			'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.'
+		);
+	}
+
+	return { clientId, clientSecret };
+}
+
+/** true when both GitHub OAuth env vars are present (non-empty). */
+export function isGitHubOAuthConfigured(): boolean {
+	return Boolean(env.GITHUB_CLIENT_ID) && Boolean(env.GITHUB_CLIENT_SECRET);
+}
+
+/**
+ * Resolve the absolute OAuth redirect URI.
+ * Prefer env ORIGIN (trailing '/' trimmed); fall back to the request URL's origin.
+ * Returns `${origin}${GITHUB_CALLBACK_PATH}`.
+ */
+export function getGitHubRedirectUri(requestUrl: URL): string {
+	const origin = env.ORIGIN ? env.ORIGIN.replace(/\/+$/, '') : requestUrl.origin;
+	return `${origin}${GITHUB_CALLBACK_PATH}`;
+}

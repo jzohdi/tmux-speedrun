@@ -8,6 +8,13 @@
       "when": 1766851257888,
       "tag": "0000_absent_black_bolt",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782923531888,
+      "tag": "0001_spotty_swarm",
+      "breakpoints": true
     }
   ]
 }

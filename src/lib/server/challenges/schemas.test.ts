@@ -301,6 +301,14 @@ describe('Challenge Session Cookie Schema', () => {
 	});
 });
 
+// Iteration 3 (PR #36 feedback): the free-text record username is removed
+// end-to-end — `recordChallengeRequestSchema` / `parseRecordRequest` no longer
+// exist. The record endpoint no longer reads the request body for a name, so
+// there is nothing to validate here. Anonymous entries are always `username:
+// null`; named entries come only from a verified GitHub session. The behavioral
+// coverage lives in `src/routes/api/challenge/record/record.test.ts`. See
+// `.agent/interface.md` §II1 / §II2.
+
 describe('Schema Type Inference', () => {
 	it('startChallengeRequestSchema has correct shape', () => {
 		const shape = startChallengeRequestSchema.shape;

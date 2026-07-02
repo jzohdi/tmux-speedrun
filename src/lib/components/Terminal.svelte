@@ -9,6 +9,11 @@
 	import { createLeaderboardQuery, getEntriesForChallenge } from '$lib/queries/leaderboard';
 	import Manpage from './Manpage.svelte';
 
+	/** Mirrors the server `SessionUser` shape; kept local so the component pulls no server code. */
+	type SessionUser = { githubId: number; username: string };
+
+	let { user = null }: { user?: SessionUser | null } = $props();
+
 	type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man';
 
 	type HistoryEntry = {
@@ -76,10 +81,38 @@
 		addOutput('  tsr free-play       Practice keybindings in free play mode');
 		addOutput('  tsr practice        Learn tmux commands step by step');
 		addOutput('  tsr config          Edit and apply tmux.conf');
+		addOutput('  tsr login           Sign in with GitHub');
+		addOutput('  tsr logout          Sign out');
+		addOutput('  tsr whoami          Show your signed-in GitHub username');
 		addOutput('  man tmux            Show tmux command reference');
 		addOutput('  clear               Clear the terminal');
 		addOutput('  help                Show this help message');
 		addOutput('');
+	}
+
+	function loginWithGitHub() {
+		addOutput('Redirecting to GitHub...');
+		// Full navigation (not goto) — this is a server redirect to an external origin.
+		window.location.href = '/api/auth/github/login';
+	}
+
+	async function logout() {
+		try {
+			await fetch('/api/auth/logout', { method: 'POST' });
+			addOutput('Signed out.');
+			// Reload so the layout re-loads with no session (anonymous state).
+			window.location.reload();
+		} catch {
+			addOutput('Sign out failed. Please try again.', 'error');
+		}
+	}
+
+	function whoami() {
+		if (user) {
+			addOutput(`Signed in as ${user.username}`);
+		} else {
+			addOutput('Not signed in.');
+		}
 	}
 
 	function showChallengeList() {
@@ -241,8 +274,26 @@
 				return;
 			}
 
+			if (subcommand === 'login') {
+				loginWithGitHub();
+				return;
+			}
+
+			if (subcommand === 'logout') {
+				logout();
+				return;
+			}
+
+			if (subcommand === 'whoami') {
+				whoami();
+				return;
+			}
+
 			addOutput(`Unknown subcommand: ${subcommand}`, 'error');
-			addOutput('Available: ls, lb, start, free-play, practice, config', 'error');
+			addOutput(
+				'Available: ls, lb, start, free-play, practice, config, login, logout, whoami',
+				'error'
+			);
 			return;
 		}
 
