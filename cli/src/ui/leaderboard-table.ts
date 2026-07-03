@@ -44,7 +44,11 @@ function renderChallenge(challengeId: string, entries: LeaderboardEntry[]): stri
 	);
 
 	const formatRow = (cells: string[]): string =>
-		'  ' + cells.map((cell, column) => padRight(cell, widths[column])).join('  ').trimEnd();
+		'  ' +
+		cells
+			.map((cell, column) => padRight(cell, widths[column]))
+			.join('  ')
+			.trimEnd();
 
 	const lines = [heading, formatRow([...HEADERS]), ...rows.map(formatRow)];
 	return lines.join('\n');

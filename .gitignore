@@ -21,3 +21,8 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# CLI package (issue #35)
+/cli/dist
+/cli/node_modules
+/cli/coverage

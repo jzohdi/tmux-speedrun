@@ -1,0 +1,33 @@
+{
+	"name": "tmux-speedrun",
+	"version": "0.1.0",
+	"description": "Run tmux-speedrun challenges and practice against your own native tmux, with a GitHub-authenticated leaderboard.",
+	"type": "module",
+	"bin": {
+		"tmux-speedrun": "./dist/index.js"
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "tsup",
+		"test": "vitest --run",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": [
+		"tmux",
+		"cli",
+		"challenge",
+		"speedrun"
+	],
+	"license": "MIT",
+	"devDependencies": {
+		"tsup": "^8.0.0",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.5"
+	}
+}
