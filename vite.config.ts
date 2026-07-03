@@ -17,7 +17,9 @@ export default defineConfig({
 				test: {
 					name: 'server',
 					environment: 'node',
-					include: ['src/**/*.{test,spec}.{js,ts}'],
+					// Includes the `cli/` workspace package's node unit tests (issue #35) so
+					// `npm run test:unit` covers them alongside the app's server-side tests.
+					include: ['src/**/*.{test,spec}.{js,ts}', 'cli/**/*.{test,spec}.{js,ts}'],
 					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}', 'src/**/*.browser.{test,spec}.{js,ts}']
 				}
 			},
