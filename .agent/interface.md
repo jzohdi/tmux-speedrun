@@ -1,1164 +1,669 @@
-# Interface Spec: GitHub sign-in + verified username on leaderboard entries
+# Interface: `tmux-speedrun` CLI (native tmux, GitHub-authenticated leaderboard)
 
-Issue: jzohdi/tmux-speedrun#34 · Plan: `.agent/plan.md`
+Issue: jzohdi/tmux-speedrun#35 · Plan: `.agent/plan.md`
 
-This spec pins down the exact types, signatures, module boundaries, data shapes, and invariants the
-`tdd` and implementation stages build against. Names, paths, and signatures below are normative
-unless marked "(illustrative)". Reuse existing crypto (`$lib/crypto`) and env (`$lib/server/env`)
-helpers — do not add dependencies.
+> This spec **replaces** the previous `.agent/interface.md` (which documented the shipped #34/#36
+> GitHub sign-in work). It pins the types, signatures, module boundaries, data shapes, and invariants
+> the `tdd` and implementation stages build against. Where an existing module is quoted, its current
+> behaviour is normative and must not change unless this spec says "adapt"/"new".
 
----
-
-## 0. Core invariants (must hold end-to-end)
-
-1. **Verified-only username.** The `username` (and `githubId`) stamped on a leaderboard row comes
-   **only** from a server-verified session (`event.locals.user`), never from the request body. The
-   finish request body remains `{ proofB64 }` exactly as today. There is no code path by which a
-   client-supplied value reaches `leaderboard.username`.
-2. **Secret never reaches the browser.** `GITHUB_CLIENT_SECRET`, token exchange, and the session
-   HMAC key live only in `*.server.ts` / `+server.ts` / `hooks.server.ts` modules. Client code must
-   never import `$lib/server/*` (type-only imports are the sole exception — see §10).
-3. **Session cookie is tamper-proof.** The session cookie is HMAC-signed with the existing
-   `SESSION_SECRET`. A modified payload or signature verifies as invalid → treated as anonymous.
-   Signature comparison uses `constantTimeEqual`.
-4. **CSRF-guarded OAuth.** The authorize step sets a random `state` cookie; the callback rejects
-   unless the `state` query param equals the cookie. Sign-out is `POST`-only.
-5. **Optional auth / graceful when unconfigured.** Anonymous play and every existing route keep
-   working when `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` are unset. Only the OAuth routes error, and
-   they error gracefully (redirect home with an error signal, never a stack trace / 500).
-6. **Cookie flags survive the GitHub redirect.** Session and state cookies use `sameSite: 'lax'`,
-   `httpOnly: true`, `secure: !dev`, `path: '/'`.
-7. **Clean tree.** No `db:push`/`db:migrate` against a real DB; commit only the generated migration.
-   No test artifact churn.
+Legend: **NEW** = create · **ADAPT** = modify existing (keep old behaviour on the non-CLI path) ·
+**REUSE** = import unchanged.
 
 ---
 
-## 1. Configuration — `src/lib/server/env.ts` (modify)
-
-Add to the existing module (keep everything currently exported unchanged).
-
-### Constants
-
-```ts
-export const SESSION_COOKIE_NAME = 'tmux_session';
-export const OAUTH_STATE_COOKIE_NAME = 'tmux_oauth_state';
-
-/** Long-lived auth session cookie (30 days). sameSite 'lax' so it survives the GitHub redirect. */
-export const SESSION_COOKIE_OPTIONS = {
-	httpOnly: true,
-	secure: !dev,
-	sameSite: 'lax' as const,
-	path: '/',
-	maxAge: 60 * 60 * 24 * 30 // 30 days
-};
-
-/** Short-lived CSRF state cookie (10 min). */
-export const OAUTH_STATE_COOKIE_OPTIONS = {
-	httpOnly: true,
-	secure: !dev,
-	sameSite: 'lax' as const,
-	path: '/',
-	maxAge: 60 * 10 // 10 minutes
-};
-
-/** Fixed OAuth callback path. The GitHub OAuth App callback URL must be `${ORIGIN}` + this. */
-export const GITHUB_CALLBACK_PATH = '/api/auth/github/callback';
-```
-
-### Getters
-
-```ts
-export type GitHubOAuthConfig = { clientId: string; clientSecret: string };
-
-/**
- * Reads GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET from $env/dynamic/private.
- * Throws a clear Error if either is missing/empty. MUST be called only inside OAuth route handlers
- * (lazily), never at module load — so app startup / anonymous play work when unconfigured.
- */
-export function getGitHubOAuthConfig(): GitHubOAuthConfig;
-
-/** true when both GitHub OAuth env vars are present (non-empty). Used to short-circuit gracefully. */
-export function isGitHubOAuthConfigured(): boolean;
-
-/**
- * Resolve the absolute OAuth redirect URI.
- * Prefer env ORIGIN (trailing '/' trimmed); fall back to the request URL's origin in dev.
- * Returns `${origin}${GITHUB_CALLBACK_PATH}`.
- */
-export function getGitHubRedirectUri(requestUrl: URL): string;
-```
-
-- `getGitHubOAuthConfig()` treats an empty string as missing.
-- `getGitHubRedirectUri`: `env.ORIGIN` if set (trim trailing `/`), else `requestUrl.origin`.
-
-### `.env.example` (modify)
-
-Replace the commented GitHub block with active (empty) entries and document the callback URL:
+## 0. Module map
 
 ```
-# GitHub OAuth (optional — enables verified sign-in on the leaderboard)
-# Callback URL to register in the GitHub OAuth App: ${ORIGIN}/api/auth/github/callback
-GITHUB_CLIENT_ID=""
-GITHUB_CLIENT_SECRET=""
+cli/                                   NEW pnpm workspace package, name "tmux-speedrun"
+  package.json  tsconfig.json  tsup.config.ts  README.md
+  src/
+    index.ts                           arg routing + dispatch + help
+    args.ts                            parseArgs(): GlobalOptions + command + positionals
+    config.ts                          runtime config (API base URL, paths, constants)
+    commands/{help,login,logout,whoami,leaderboard,practice,challenge}.ts
+    api/
+      client.ts                        ApiClient: fetch wrapper + in-memory CookieJar
+      cookie-jar.ts                    CookieJar: parse Set-Cookie, emit Cookie header
+      challenge-session.ts             CliChallengeSession (transport over challenge-core)
+    auth/
+      token-store.ts                   read/write ~/.config/tmux-speedrun/session.json (0600)
+      loopback-server.ts               localhost OAuth callback receiver
+    tmux/
+      server.ts                        IsolatedTmuxServer: socket lifecycle + teardown
+      config.ts                        generate isolated tmux.conf (+ hooks)
+      client.ts                        low-level `tmux -L <sock> ...` exec helpers
+      observer.ts                      TmuxObserver: query state, diff → StateDelta
+      detector.ts                      deriveCandidates(delta, step) → string[]
+      controller.ts                    ChallengeController / PracticeController run loops
+    engine/types.ts                    TmuxState, PaneInfo, StateDelta, etc.
+    ui/{status-line,leaderboard-table,prompts,output}.ts
+
+src/lib/client/challenge-core.ts       NEW pure key-chain/step helpers (extracted)
+src/lib/client/challenge.ts            ADAPT to import from challenge-core (no behaviour change)
+src/lib/server/auth/cli-login.ts       NEW sign/verify CLI-login state + loopback URL guard
+src/routes/api/auth/cli/login/+server.ts   NEW GET endpoint
+src/routes/api/auth/github/callback/+server.ts  ADAPT for CLI loopback branch
+src/lib/server/env.ts                  ADAPT add CLI_LOGIN_COOKIE_* constants
+src/routes/cli/+page.svelte            NEW docs page
+src/routes/+layout.svelte              ADAPT add nav link
+pnpm-workspace.yaml                    ADAPT add `cli`
 ```
 
 ---
 
-## 2. Session helper — `src/lib/server/auth/session.ts` (new)
+## 1. Shared crypto core — `src/lib/client/challenge-core.ts` (NEW, refactor)
 
-Stateless, signed, cookie-based session. No DB session table.
+Extract the **pure** key-chain/step functions from `challenge.ts` so both the web `ChallengeSession`
+and the CLI import identical logic. **No behaviour change**: `challenge.ts` re-imports these and keeps
+its own `fetch(..., credentials:'include')` transport. Existing `challenge.test.ts` and
+`crypto.test.ts` must still pass.
 
-### Types
-
-```ts
-/** The session payload embedded in the signed cookie. */
-export type SessionPayload = {
-	githubId: number;   // stable numeric GitHub id
-	username: string;   // GitHub login (verified)
-	iat: number;        // issued-at, epoch ms
-};
-
-/** The subset exposed to the app as event.locals.user. */
-export type SessionUser = {
-	githubId: number;
-	username: string;
-};
-```
-
-### Functions
+Types (moved verbatim from `challenge.ts`):
 
 ```ts
-import type { Cookies } from '@sveltejs/kit';
-
-/**
- * Serialize + sign a session payload into a cookie string value.
- * Format: `${base64url(JSON(payload))}.${base64url(hmacSha256(payloadB64))}`.
- * HMAC key derived from getSessionSecret() (reuse hkdf/sha256 from $lib/crypto — no new deps).
- */
-export function createSessionToken(payload: SessionPayload): Promise<string>;
-
-/**
- * Verify signature + parse. Returns the SessionUser on success, or null on any failure
- * (bad format, signature mismatch via constantTimeEqual, malformed JSON, missing/typed-wrong fields).
- * Never throws for invalid input.
- */
-export function verifySessionToken(raw: string): Promise<SessionUser | null>;
-
-/** Set the signed session cookie (SESSION_COOKIE_NAME + SESSION_COOKIE_OPTIONS). */
-export function setSessionCookie(cookies: Cookies, payload: SessionPayload): Promise<void>;
-
-/** Delete the session cookie (path '/'). */
-export function clearSessionCookie(cookies: Cookies): void;
+export type DecryptedStep = { prompt: string; requiredInput?: string; seedInput?: string };
+export type EncryptedStep = { index: number; nonceB64: string; ciphertextB64: string };
 ```
 
-Invariants:
-- Round-trip: `verifySessionToken(await createSessionToken(p))` resolves to
-  `{ githubId: p.githubId, username: p.username }`.
-- Flipping any byte of payload or signature, or verifying under a different secret → `null`.
-- `verifySessionToken('')`/garbage → `null`, no throw.
-- Uses a URL/cookie-safe base64 (base64url: `+/` → `-_`, padding stripped) so the `.` separator is
-  unambiguous. Provide small internal encode/decode helpers if reusing `bytesToBase64`.
+Functions (exported; signatures preserve current semantics — see `challenge.ts:333-384`):
+
+```ts
+// K0 = HKDF(sharedSecret, sessionSalt, "k0", 32)
+export function deriveK0(sharedSecret: ArrayBuffer, sessionSalt: Uint8Array): Promise<ArrayBuffer>;
+
+// K(n+1) = HKDF(Kn, SHA256(answer), `step-${stepIndex+1}`, 32)
+export function deriveNextKey(currentKey: ArrayBuffer, answer: string, stepIndex: number): Promise<ArrayBuffer>;
+
+// AES-GCM decrypt + JSON.parse → DecryptedStep. Throws on wrong key (auth-tag failure).
+export function decryptStep(key: ArrayBuffer, step: EncryptedStep): Promise<DecryptedStep>;
+
+export function formatDuration(ms: number): string; // "12.3s" | "1m 23.4s"
+```
+
+`challenge.ts` after refactor: imports `deriveK0`/`deriveNextKey`/`decryptStep`/`formatDuration` and
+the two types from `./challenge-core`, deletes its local copies, and re-exports the types + the moved
+symbols it previously exported (`DecryptedStep`, `EncryptedStep`, `formatDuration`) so no other
+importer breaks. `ChallengeState`, `ChallengeResult`, `RecordResult`, `ChallengeSession`,
+`recordChallenge` **stay** in `challenge.ts` (browser transport).
+
+Crypto primitives (`src/lib/crypto/**`: `hkdf`, `sha256`, `aesGcmDecrypt`, ECDH, base64 utils) are
+**REUSE**d unchanged — all Web-Crypto globals available in Node ≥ 20.
+
+**Invariant CC1 — byte-parity.** The CLI's derived `Kfinal` must equal the server's expected proof
+byte-for-byte; achieved solely by reusing these functions + `src/lib/crypto`. Any divergence is a bug.
 
 ---
 
-## 3. OAuth state (CSRF) — colocated in `session.ts` or `src/lib/server/auth/state.ts` (new)
+## 2. CLI API client + cookie jar — `cli/src/api/`
+
+### 2.1 `cookie-jar.ts` (NEW)
 
 ```ts
-/** Cryptographically-random state token, URL-safe (reuse randomBytes + base64url). */
-export function generateOAuthState(): string;
+export type StoredCookie = { name: string; value: string };
 
-/** Constant-time compare of the callback's state param against the cookie value. */
-export function verifyOAuthState(fromQuery: string | null, fromCookie: string | undefined): boolean;
-```
-
-`verifyOAuthState` returns `false` if either input is missing/empty, else a constant-time equality.
-
----
-
-## 4. GitHub OAuth client — `src/lib/server/auth/github.ts` (new)
-
-Thin `fetch` wrappers. **No secret in `buildAuthorizeUrl`** (that URL is client-visible).
-
-```ts
-import type { GitHubOAuthConfig } from '$lib/server/env';
-
-export const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
-export const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
-export const GITHUB_USER_URL = 'https://api.github.com/user';
-
-/**
- * Build the authorize redirect URL.
- * Query params: client_id, redirect_uri, state, scope (EMPTY — public profile only), allow_signup.
- * MUST NOT include client_secret.
- */
-export function buildAuthorizeUrl(params: {
-	clientId: string;
-	redirectUri: string;
-	state: string;
-}): string;
-
-/** Verified GitHub identity we care about. */
-export type GitHubUser = { id: number; login: string };
-
-/**
- * Exchange the OAuth code for an access token (server-side; uses the secret).
- * POST GITHUB_TOKEN_URL with { client_id, client_secret, code, redirect_uri },
- * Accept: application/json. Returns the access token string.
- * Throws Error on non-200, GitHub error payload, or missing access_token.
- */
-export function exchangeCodeForToken(params: {
-	config: GitHubOAuthConfig;
-	code: string;
-	redirectUri: string;
-}): Promise<string>;
-
-/**
- * Fetch the authenticated user. GET GITHUB_USER_URL with
- * Authorization: `Bearer ${accessToken}`, Accept: application/vnd.github+json,
- * User-Agent: 'tmux-speedrun' (GitHub requires a UA).
- * Returns { id, login }. Throws on non-200 or missing id/login.
- */
-export function fetchGitHubUser(accessToken: string): Promise<GitHubUser>;
-```
-
-These functions use only global `fetch` and web APIs (adapter-auto / Neon serverless compatible).
-All tests mock `globalThis.fetch`.
-
----
-
-## 5. Request-scoped user — `src/hooks.server.ts` (new) + `src/app.d.ts` (modify)
-
-### `src/app.d.ts`
-
-```ts
-declare global {
-	namespace App {
-		interface Locals {
-			user: import('$lib/server/auth/session').SessionUser | null;
-		}
-		interface PageData {
-			user?: import('$lib/server/auth/session').SessionUser | null;
-		}
-	}
+export class CookieJar {
+  /** Ingest a response's Set-Cookie headers. Use response.headers.getSetCookie() (Node ≥ 20). */
+  storeFromResponse(res: Response): void;
+  /** Ingest raw Set-Cookie header lines (testable entry point). */
+  storeSetCookies(setCookieLines: string[]): void;
+  /** Serialize all live cookies as a single Cookie request-header value, or undefined if empty. */
+  header(): string | undefined;
+  get(name: string): string | undefined;
+  set(name: string, value: string): void;   // manual seed (e.g. tmux_session from token store)
+  clear(): void;
 }
-export {};
 ```
 
-### `src/hooks.server.ts`
+Parsing rules: split each Set-Cookie on `;`; the first `k=v` pair is the cookie. A cookie whose
+attributes include `Max-Age=0` or an already-past `Expires` is treated as a **delete** (remove from
+jar). Ignore `Domain`/`Path`/`Secure`/`HttpOnly`/`SameSite` for matching (single-origin client). A
+later Set-Cookie for the same name overwrites. No persistence — memory only for one command run.
+
+### 2.2 `client.ts` (NEW)
 
 ```ts
-import type { Handle } from '@sveltejs/kit';
-import { SESSION_COOKIE_NAME } from '$lib/server/env';
-import { verifySessionToken } from '$lib/server/auth/session';
+export type ApiClientOptions = { baseUrl: string; jar?: CookieJar; sessionToken?: string };
 
-export const handle: Handle = async ({ event, resolve }) => {
-	const raw = event.cookies.get(SESSION_COOKIE_NAME);
-	event.locals.user = raw ? await verifySessionToken(raw) : null;
-	return resolve(event);
+export class ApiClient {
+  constructor(opts: ApiClientOptions);
+  readonly jar: CookieJar;
+
+  /** JSON POST/GET. Attaches Cookie header from jar (+ tmux_session when sessionToken set),
+   *  stores Set-Cookie from the response, parses JSON. Throws ApiError on non-2xx. */
+  postJson<T>(path: string, body: unknown): Promise<T>;
+  getJson<T>(path: string): Promise<T>;
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly serverMessage?: string;   // from response body { message } when present
+}
+```
+
+- `baseUrl` from `resolveConfig` (§10). All paths join onto it (`/api/...`).
+- When `sessionToken` is set, the request sends `Cookie: tmux_session=<token>` merged with jar
+  cookies — this carries `locals.user` for authenticated `finish`/`record` with **no server change**
+  (plan §4.1).
+- `secure` cookies require an `https` base in prod; `http://localhost` for dev works (non-secure).
+
+---
+
+## 3. CLI challenge session — `cli/src/api/challenge-session.ts` (NEW)
+
+Node/CLI analogue of the browser `ChallengeSession`, using `challenge-core` + `ApiClient`. Mirrors the
+crypto flow in `challenge.ts:121-283` exactly; differs only in transport (explicit base URL + cookie
+jar instead of `credentials:'include'`).
+
+```ts
+export type StartResponse = {
+  serverPublicKeyJwk: JsonWebKey;
+  sessionSaltB64: string;
+  steps: EncryptedStep[];
+};
+
+// Finish/record shapes mirror the server (finish/+server.ts, record/+server.ts):
+export type FinishResponse = {
+  valid: boolean; durationMs: number;
+  recorded?: boolean; leaderboardPosition?: number; username?: string | null; message?: string;
+};
+export type RecordResponse = { recorded: true; leaderboardPosition?: number; username: string | null };
+
+export class CliChallengeSession {
+  /** POST /api/challenge/start { challengeId, clientPublicKeyJwk }; derive K0; capture cookies. */
+  static start(api: ApiClient, challengeId: number): Promise<CliChallengeSession>;
+
+  /** Decrypt the current (not-yet-solved) step for prompting. */
+  decryptCurrentStep(): Promise<DecryptedStep>;
+
+  /** Trial-decrypt step n+1 with K(n+1)=deriveNextKey(Kn, answer, n). On success advance + return
+   *  true; on the LAST step accept without a trial-decrypt (mirrors challenge.ts:204-210) and store
+   *  Kfinal. On failure return false and stay put. Pure-local; no network. */
+  submitAnswer(answer: string): Promise<boolean>;
+
+  isComplete(): boolean;
+  currentStepIndex(): number;
+  totalSteps(): number;
+
+  /** POST /api/challenge/finish { proofB64 = base64(Kfinal) }. Requires isComplete(). */
+  finish(): Promise<FinishResponse>;
+
+  /** POST /api/challenge/record (empty body). Identity resolved server-side from tmux_session. */
+  record(): Promise<RecordResponse>;
+}
+```
+
+`challengeId` validity: 0–5 (`isValidChallengeId`; server also enforces zod `min(0).max(5)`).
+
+**Invariant CS1 — server-authoritative timing.** Duration comes only from the server (`start` cookie
+`startTime` → `finish`); the CLI never computes or submits a duration.
+
+---
+
+## 4. Auth: loopback OAuth exchange
+
+### 4.1 Server env additions — `src/lib/server/env.ts` (ADAPT)
+
+```ts
+export const CLI_LOGIN_COOKIE_NAME = 'tmux_cli_login';
+export const CLI_LOGIN_COOKIE_OPTIONS = {
+  httpOnly: true, secure: !dev, sameSite: 'lax' as const, path: '/', maxAge: 60 * 10 // 10 min
 };
 ```
 
-Invariant: absent/invalid cookie → `event.locals.user === null`. The hook never throws on a bad
-cookie (relies on `verifySessionToken` returning `null`).
+### 4.2 CLI-login state helper — `src/lib/server/auth/cli-login.ts` (NEW)
 
----
-
-## 6. Expose user to UI — `src/routes/+layout.server.ts` (new)
-
-```ts
-import type { LayoutServerLoad } from './$types';
-export const load: LayoutServerLoad = async ({ locals }) => {
-	return { user: locals.user };
-};
-```
-
-Returns `{ user: SessionUser | null }`. This makes `data.user` available to `+layout.svelte`,
-`+page.svelte`, and (via prop) the `Terminal` component without an extra fetch.
-
-Optional (only if the Terminal needs to re-read after login without full navigation):
-`GET /api/auth/session/+server.ts` returning `json({ user: locals.user })`. Prefer the layout load;
-implement the endpoint only if needed.
-
----
-
-## 7. OAuth routes — `src/routes/api/auth/...` (new)
-
-All are SvelteKit `+server.ts` handlers. Redirects use SvelteKit `redirect(302, location)` from
-`@sveltejs/kit` (which throws a `Redirect` — do not catch/swallow it).
-
-### `GET /api/auth/github/login/+server.ts`
+HMAC-signed state carried through the OAuth round-trip, plus the security-critical loopback guard.
+Mirror `session.ts`'s sign/verify shape (base64url payload `.` base64url HMAC-SHA256, key
+`getSessionSecret()`).
 
 ```ts
-export const GET: RequestHandler = async ({ cookies, url }) => { ... };
-```
+export type CliLoginState = { port: number; cliState: string };
 
-Behavior:
-1. If `!isGitHubOAuthConfigured()` → `redirect(302, '/?auth_error=not_configured')`.
-2. `state = generateOAuthState()`; set `OAUTH_STATE_COOKIE_NAME` = state with
-   `OAUTH_STATE_COOKIE_OPTIONS`.
-3. `redirectUri = getGitHubRedirectUri(url)`;
-   `authorizeUrl = buildAuthorizeUrl({ clientId, redirectUri, state })`.
-4. `redirect(302, authorizeUrl)`.
+/** Sign {port, cliState} into the tmux_cli_login cookie value. */
+export function signCliLoginState(state: CliLoginState): Promise<string>;
 
-### `GET /api/auth/github/callback/+server.ts`
-
-```ts
-export const GET: RequestHandler = async ({ url, cookies }) => { ... };
-```
-
-Query params read: `code`, `state`. Behavior:
-1. `verifyOAuthState(url.searchParams.get('state'), cookies.get(OAUTH_STATE_COOKIE_NAME))` — on
-   false → clear state cookie, `redirect(302, '/?auth_error=state')`.
-2. Clear the state cookie.
-3. Missing `code` → `redirect(302, '/?auth_error=oauth')`.
-4. `token = exchangeCodeForToken({ config, code, redirectUri })`;
-   `ghUser = fetchGitHubUser(token)`. Wrap the network calls in try/catch → on error
-   `redirect(302, '/?auth_error=oauth')`. **Re-throw** any thrown `Redirect` (do not treat it as a
-   fetch failure).
-5. `setSessionCookie(cookies, { githubId: ghUser.id, username: ghUser.login, iat: Date.now() })`.
-6. `redirect(302, '/?signed_in=1')`.
-
-### `POST /api/auth/logout/+server.ts`
-
-```ts
-export const POST: RequestHandler = async ({ cookies }) => { ... };
-```
-
-`clearSessionCookie(cookies)` then return `json({ ok: true })` (the Terminal issues a `fetch` and
-reloads). No `GET` export (POST-only, CSRF-safe). Normative outcome: the session cookie is cleared.
-
-`auth_error` query values (enum): `not_configured` | `state` | `oauth`. The home page may surface
-these; minimal handling is acceptable.
-
----
-
-## 8. Attach verified username on submit — `src/routes/api/challenge/finish/+server.ts` (modify)
-
-- Add `locals` to the handler signature: `async ({ request, cookies, locals }) => { ... }`.
-- Request body validation is **unchanged** (`parseFinishRequest` → `{ proofB64 }`).
-- At the leaderboard insert, derive identity from `locals.user` only:
-
-```ts
-const user = locals.user; // App.Locals.user: SessionUser | null
-await db.insert(leaderboard).values({
-	challengeId: String(challengeId),
-	durationMs,
-	...(user ? { username: user.username, githubId: user.githubId } : {})
-});
-```
-
-Invariants:
-- `locals.user === null` → row inserted with `username`/`githubId` null (identical to today).
-- `locals.user` set → row carries the verified `username` and `githubId`.
-- No request field can influence `username`/`githubId`.
-- Existing try/catch around the DB block is preserved (a DB error must not fail a valid run).
-
----
-
-## 9. Database — `src/lib/server/db/schema.ts` (modify) + new migration
-
-Add one nullable column to `leaderboard`; leave existing columns (incl. `userId` uuid) untouched.
-
-```ts
-import { pgTable, uuid, text, integer, timestamp, bigint } from 'drizzle-orm/pg-core';
-
-export const leaderboard = pgTable('leaderboard', {
-	id: uuid('id').primaryKey().defaultRandom(),
-	challengeId: text('challenge_id').notNull(),
-	userId: uuid('user_id'),
-	username: text('username'),
-	githubId: bigint('github_id', { mode: 'number' }), // NEW: nullable, GitHub numeric id
-	durationMs: integer('duration_ms').notNull(),
-	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
-});
-```
-
-- Import `bigint` from `drizzle-orm/pg-core` (alongside existing imports).
-- `mode: 'number'` so it maps to a JS `number` (GitHub ids fit in JS safe-integer range).
-- Generate the migration with `pnpm db:generate`; commit the new `drizzle/00xx_*.sql` and updated
-  `drizzle/meta/*`. Do **not** run `db:push`/`db:migrate`. No backfill.
-- Fallback if adding a column proves problematic: `username`-only (drop `githubId` from schema and
-  the finish insert). `githubId` is preferred but not required for acceptance.
-
----
-
-## 10. UI — `Terminal.svelte`, `+page.svelte` / `+layout.svelte` (modify)
-
-### `src/lib/components/Terminal.svelte`
-
-Extend the command dispatcher (the `if (command === 'tsr')` block near line 196) with three new
-subcommands; add them to `showHelp()`:
-
-- `tsr login` → `addOutput('Redirecting to GitHub...')` then full navigation
-  `window.location.href = '/api/auth/github/login'` (not SvelteKit `goto` — it's a server redirect to
-  an external origin).
-- `tsr logout` → `await fetch('/api/auth/logout', { method: 'POST' })`, then reflect signed-out state
-  (`window.location.reload()` or invalidate layout data) and print `Signed out.`.
-- `tsr whoami` → print `Signed in as <username>` when a user is present, else `Not signed in.`.
-
-Help lines to add (mirroring existing formatting):
-```
-tsr login           Sign in with GitHub
-tsr logout          Sign out
-tsr whoami          Show your signed-in GitHub username
-```
-
-**User source for the Terminal.** Add an optional prop so the component stays testable:
-```ts
-let { user = null /* , ...existing props */ } = $props<{ user?: SessionUser | null }>();
-```
-`+page.svelte` passes `data.user` down. `SessionUser` may be a **type-only** import
-(`import type { SessionUser } from '$lib/server/auth/session'`) — safe because types are erased and
-pull no server code into the bundle. If a type-only import from `$lib/server` is undesirable, define
-a local `type SessionUser = { githubId: number; username: string }` in the component.
-
-### `src/routes/+page.svelte` (and/or `+layout.svelte`)
-
-- Receive `data.user` (`+page.svelte` gets it from `+layout.server.ts` via `$props()` `data`).
-- Render a minimal signed-in indicator when `data.user`: e.g. `● signed in as {data.user.username}`
-  with a sign-out affordance (button → `POST /api/auth/logout`, then reload).
-- When signed out, render a "Sign in with GitHub" link/button → `href="/api/auth/github/login"`.
-- Pass `user={data.user}` into `<Terminal ... />`.
-
-Keep styling within the existing terminal aesthetic. Leaderboard rendering already displays
-`username` (`entry.username ?? 'Anonymous'` in `/api/leaderboard`) — no change needed there; verified
-entries now show the real GitHub login. Marking verified entries visually is optional and out of the
-required scope.
-
----
-
-## 11. Files summary
-
-Create:
-- `src/lib/server/auth/session.ts`
-- `src/lib/server/auth/github.ts`
-- (optional) `src/lib/server/auth/state.ts` (else colocate state helpers in `session.ts`)
-- `src/routes/api/auth/github/login/+server.ts`
-- `src/routes/api/auth/github/callback/+server.ts`
-- `src/routes/api/auth/logout/+server.ts`
-- (optional) `src/routes/api/auth/session/+server.ts`
-- `src/hooks.server.ts`
-- `src/routes/+layout.server.ts`
-- `drizzle/00xx_*.sql` + `drizzle/meta/*` (generated)
-
-Modify:
-- `src/lib/server/env.ts`
-- `src/app.d.ts`
-- `src/lib/server/db/schema.ts`
-- `src/routes/api/challenge/finish/+server.ts`
-- `src/lib/components/Terminal.svelte`
-- `src/routes/+page.svelte` and/or `src/routes/+layout.svelte`
-- `.env.example`
-
----
-
-## 12. Test surface (for the tdd stage)
-
-Unit (vitest `server` project):
-- **session**: round-trip `createSessionToken`→`verifySessionToken` returns the user; tamper (flipped
-  byte, wrong secret, truncated) → `null`; garbage/empty input → `null`.
-- **state**: `verifyOAuthState` true only when both present and equal; false on missing/empty/mismatch.
-- **github**: `buildAuthorizeUrl` includes `client_id`, `redirect_uri`, `state`, empty `scope`, and
-  **no** `client_secret`. `exchangeCodeForToken` / `fetchGitHubUser` with mocked `fetch` — success
-  path returns token / `{ id, login }`; non-200 or error payload throws.
-- **env**: `isGitHubOAuthConfigured()` reflects presence; `getGitHubRedirectUri` prefers `ORIGIN`,
-  falls back to request origin; `getGitHubOAuthConfig` throws when unset.
-- **finish endpoint**: with `locals.user` set, inserted row carries `username`/`githubId`; with
-  `locals.user` null, row is anonymous; a body carrying an extra `username` field cannot inject it.
-
-Existing suites (`pnpm test`, `pnpm check`, `pnpm lint`) stay green. Browser test for the signed-in
-indicator only if it fits the existing `*.browser.test.ts` pattern. Manual OAuth flow is documented,
-not run in CI.
-
----
----
-
-# Interface Spec — Iteration 2 (PR #36 feedback)
-
-> Sections 0–12 above describe the **shipped and approved** sign-in feature — do **not** re-implement
-> them. This block is the active scope: the reviewer approved sign-in, then asked for a better
-> **challenge-completion flow**. See `.agent/plan.md` › "Revision — PR #36 feedback (iteration 2)".
-> Names/paths/signatures below are normative unless marked "(illustrative)". Reuse existing crypto
-> (`$lib/crypto`), env (`$lib/server/env`), and the HMAC pattern of `src/lib/server/auth/session.ts` —
-> no new dependencies.
-
-## I0. Core invariants (iteration 2 — must hold end-to-end)
-
-1. **Verified-username invariant is preserved (must not regress).** When a user records a time while
-   signed in, the leaderboard `username`/`githubId` come **only** from `event.locals.user`. Any
-   `username` in the record request body is **ignored** whenever `locals.user` is set. A free-text
-   body `username` may be used **only** for the anonymous (signed-out) path, and such entries have
-   `githubId === null` (i.e. `verified === false`).
-2. **Time/challenge cannot be forged between finish and record.** The deferred result (`challengeId`,
-   `durationMs`) travels in an **HMAC-signed** pending-result cookie (same signing scheme as the
-   session cookie). A tampered/expired/garbage cookie verifies as `null` → nothing to record → `400`.
-   The username is **never** stored in this cookie; identity is always resolved at record time.
-3. **Single-use recording.** The pending-result cookie is cleared on a successful record. A second
-   `POST /api/challenge/record` with no valid pending cookie → `400`. `finish` sets the pending cookie
-   **only** for anonymous finishes; a signed-in finish records immediately and sets no pending cookie.
-4. **No login required to see the leaderboard or record a time.** The free-text record path works with
-   OAuth fully unconfigured; it is independent of `/api/auth/*`.
-5. **`return_to` is same-origin only (open-redirect guard).** OAuth `return_to` accepts only a
-   local path (leading single `/`; reject `//`, `/\`, any scheme/host/backslash tricks); otherwise
-   fall back to the default.
-6. **Pending-result + return cookies survive the GitHub redirect.** Both use `sameSite: 'lax'`,
-   `httpOnly: true`, `secure: !dev`, `path: '/'`.
-7. **Clean tree.** No schema/migration change needed — `leaderboard` already has `username` +
-   `githubId`. No `db:push`/`db:migrate`. No test-artifact churn.
-
----
-
-## I1. Configuration — `src/lib/server/env.ts` (modify)
-
-Add alongside the existing cookie constants (keep everything currently exported unchanged):
-
-```ts
-/** Deferred (anonymous) challenge result cookie name. */
-export const PENDING_RESULT_COOKIE_NAME = 'tmux_pending_result';
-
-/** OAuth post-login return-path cookie name. */
-export const OAUTH_RETURN_COOKIE_NAME = 'tmux_oauth_return';
+/** Verify + parse. null on bad signature / malformed / wrong field types (never throws). */
+export function verifyCliLoginState(raw: string): Promise<CliLoginState | null>;
 
 /**
- * Pending-result cookie (1h). sameSite 'lax' so it survives the GitHub redirect,
- * matching the existing challenge-session TTL.
+ * Return the loopback callback URL ONLY when every constraint holds, else null:
+ *   host is 127.0.0.1 or localhost, scheme http, path /callback,
+ *   port an integer in [1024, 65535].
+ * token + cliState are URL-encoded into the query: ?token=<t>&state=<cliState>.
+ * A null return means the callback must fall back to the normal home redirect (never open-redirect).
  */
-export const PENDING_RESULT_COOKIE_OPTIONS = {
-	httpOnly: true,
-	secure: !dev,
-	sameSite: 'lax' as const,
-	path: '/',
-	maxAge: 60 * 60 // 1 hour
-};
-
-/** Short-lived return-path cookie (10 min). */
-export const OAUTH_RETURN_COOKIE_OPTIONS = {
-	httpOnly: true,
-	secure: !dev,
-	sameSite: 'lax' as const,
-	path: '/',
-	maxAge: 60 * 10 // 10 minutes
-};
+export function buildLoopbackCallbackUrl(args: { port: number; cliState: string; token: string }): string | null;
 ```
 
----
+Input validation for `cliState`: opaque, `[A-Za-z0-9_-]{16,128}`; reject control chars. `port`:
+integer string only.
 
-## I2. Signed pending-result cookie — `src/lib/server/challenges/pending.ts` (new)
+### 4.3 New endpoint — `GET /api/auth/cli/login/+server.ts` (NEW)
 
-Mirrors `src/lib/server/auth/session.ts` (base64url payload + HMAC-SHA-256 over the payload keyed by
-`getSessionSecret()`, `constantTimeEqual` on verify). Reuse `$lib/crypto` helpers — no new deps.
+Query: `?port=<int>&state=<cliState>`. Steps:
+1. Validate `port` (integer in `[1024,65535]`) and `state` (matches `cliState` charset/length). Invalid
+   → `redirect(302, '/?auth_error=cli')`.
+2. `isGitHubOAuthConfigured()` guard → `redirect(302, '/?auth_error=not_configured')` when false.
+3. Set `OAUTH_STATE_COOKIE_NAME` = `generateOAuthState()` (reuse existing OAuth CSRF).
+4. Set `CLI_LOGIN_COOKIE_NAME` = `await signCliLoginState({ port, cliState })`.
+5. `buildAuthorizeUrl({ clientId, redirectUri: getGitHubRedirectUri(url), state })` → `redirect(302,…)`.
 
-### Types & constants
+Same fixed callback path (`GITHUB_CALLBACK_PATH`) as the web flow — no new GitHub OAuth App entry.
+
+### 4.4 Adapted callback — `src/routes/api/auth/github/callback/+server.ts` (ADAPT)
+
+After the **existing** state check + code→token exchange + `fetchGitHubUser` + `setSessionCookie(...)`
+(all unchanged), insert a CLI branch **before** the final home/return redirect:
 
 ```ts
-/** Payload embedded in the signed pending-result cookie. */
-export type PendingResultPayload = {
-	challengeId: number; // challenge index (0-based), matches the route param
-	durationMs: number;
-	iat: number;         // issued-at, epoch ms
-};
-
-/** What verify returns to callers (iat dropped). */
-export type PendingResult = {
-	challengeId: number;
-	durationMs: number;
-};
-
-/** Single source of truth for pending-result expiry (1h) — equals the challenge TTL. */
-export const MAX_PENDING_RESULT_AGE_MS = 60 * 60 * 1000;
-```
-
-### Functions
-
-```ts
-import type { Cookies } from '@sveltejs/kit';
-
-/** Serialize + sign: `${base64url(JSON(payload))}.${base64url(hmacSha256(payloadB64))}`. */
-export function createPendingResultToken(payload: PendingResultPayload): Promise<string>;
-
-/**
- * Verify signature + parse. Returns { challengeId, durationMs } on success, else null.
- * Returns null for: bad format, signature mismatch, malformed JSON, wrong field types,
- * and when `now - iat > MAX_PENDING_RESULT_AGE_MS`. Never throws on invalid input.
- * (Reads the current time internally, e.g. Date.now(), to enforce expiry.)
- */
-export function verifyPendingResultToken(raw: string): Promise<PendingResult | null>;
-
-/** Set the signed pending-result cookie (PENDING_RESULT_COOKIE_NAME + PENDING_RESULT_COOKIE_OPTIONS). */
-export function setPendingResultCookie(cookies: Cookies, payload: PendingResultPayload): Promise<void>;
-
-/** Delete the pending-result cookie (path '/'). */
-export function clearPendingResultCookie(cookies: Cookies): void;
-```
-
-Invariants: round-trip returns `{ challengeId, durationMs }`; flipping any byte of payload or
-signature, wrong secret, truncation, empty/garbage, or `iat` older than 1h → `null`.
-
----
-
-## I3. Return-path guard — `src/lib/server/auth/return-to.ts` (new)
-
-Small, pure, unit-testable helper (kept separate from routes so tdd can test it directly).
-
-```ts
-/**
- * Sanitize an OAuth `return_to` value. Returns the path only when it is a safe,
- * same-origin local path; otherwise null.
- * Accept: starts with a single '/', is not '//' or '/\', contains no scheme (no ':'),
- *   no backslashes, no whitespace/control chars. Reject everything else.
- * Callers fall back to a default ('/?signed_in=1') when this returns null.
- */
-export function sanitizeReturnPath(raw: string | null | undefined): string | null;
-```
-
-Test cases (normative): `'/challenge/2?completed=1&record=1'` → returned as-is;
-`'//evil.com'`, `'/\\evil.com'`, `'https://evil.com'`, `'javascript:alert(1)'`, `'foo'` (no leading
-slash), `''`, `null` → `null`.
-
----
-
-## I4. Free-text record schema — `src/lib/server/challenges/schemas.ts` (modify)
-
-Add to the existing schema module (keep all current exports):
-
-```ts
-/** Request body for POST /api/challenge/record. */
-export const recordChallengeRequestSchema = z.object({
-	username: z.string().max(64).optional()
-});
-
-export type RecordChallengeRequestBody = z.infer<typeof recordChallengeRequestSchema>;
-
-/**
- * Parse + sanitize the record request. Trims, strips control chars, caps length at 32.
- * An empty/whitespace-only name normalizes to `undefined` (→ Anonymous).
- * Returns `{ username: string | undefined }`. Throws ZodError on shape violations.
- */
-export function parseRecordRequest(data: unknown): { username: string | undefined };
-```
-
-- `username` displayed length cap: **32** chars after trim (the `.max(64)` on the raw schema just
-  bounds input size; the sanitizer enforces the final 32-char cap).
-- Sanitize = trim → strip control characters (`/[ -]/g`) → collapse to `undefined`
-  if empty. Svelte auto-escapes on render, so display is XSS-safe.
-
----
-
-## I5. `POST /api/challenge/finish` (modify) — defer when anonymous
-
-Signature unchanged (`async ({ request, cookies, locals })`). Body validation unchanged
-(`parseFinishRequest` → `{ proofB64 }`). Proof validation + `durationMs` computation unchanged. After a
-**valid** proof and clearing `CHALLENGE_COOKIE_NAME`, branch on `locals.user`:
-
-- **Signed in** (`locals.user` set): insert immediately with verified `username`/`githubId` (exactly
-  as today), compute final rank, **set no pending cookie**, return:
-  ```ts
-  { valid: true, durationMs, recorded: true, leaderboardPosition, username: user.username }
-  ```
-- **Anonymous** (`locals.user === null`): **do not insert**. Call
-  `setPendingResultCookie(cookies, { challengeId, durationMs, iat: Date.now() })`, compute the
-  **provisional** rank with the existing "count of faster entries + 1" query (no insert), return:
-  ```ts
-  { valid: true, durationMs, recorded: false, leaderboardPosition /* provisional */ }
-  ```
-
-Invalid-proof path unchanged: `{ valid: false, durationMs: 0, message }`. Preserve the existing
-try/catch around the DB block. `recorded` is **required** in the valid-proof response.
-
-Normative response type (shared with the client `ChallengeResult`, §I8):
-```ts
-type FinishResponse = {
-	valid: boolean;
-	durationMs: number;
-	recorded?: boolean;              // present on the valid path
-	leaderboardPosition?: number;    // provisional (anon) or final (signed-in)
-	username?: string | null;        // present when recorded === true & signed-in
-	message?: string;                // present on the invalid path
-};
-```
-
----
-
-## I6. `POST /api/challenge/record` (new) — `src/routes/api/challenge/record/+server.ts`
-
-```ts
-export const POST: RequestHandler = async ({ request, cookies, locals }) => { ... };
-```
-
-Behavior:
-1. `verifyPendingResultToken(cookies.get(PENDING_RESULT_COOKIE_NAME) ?? '')` →
-   `{ challengeId, durationMs }`. Missing/expired/tampered → `error(400, { message: 'No result to record.' })`.
-2. Parse body with `parseRecordRequest` → `{ username }` (may be `undefined`). Missing/empty body is
-   allowed (treated as `{}`); malformed JSON → `400`.
-3. **Identity resolution (invariant I0.1):**
-   - `locals.user` set → insert `{ challengeId: String(challengeId), durationMs, username: user.username, githubId: user.githubId }`; the body `username` is **ignored**.
-   - else → insert `{ challengeId: String(challengeId), durationMs, username: body.username ?? null }`; `githubId` stays null.
-4. `clearPendingResultCookie(cookies)` (single-use).
-5. Compute final rank via the existing count query (faster entries + 1) and return:
-   ```ts
-   { recorded: true, leaderboardPosition, username: <inserted username or null> }
-   ```
-   Preserve a defensive try/catch around the DB block (a DB hiccup must not throw a 500 at the user;
-   still return `recorded: true` with a best-effort/undefined position, matching the finish endpoint's
-   resilience) — but the cookie is cleared regardless so recording stays single-use.
-
-Response type:
-```ts
-type RecordResponse = {
-	recorded: true;
-	leaderboardPosition?: number;
-	username: string | null;
-};
-```
-
----
-
-## I7. OAuth `return_to` — login + callback (modify)
-
-### `GET /api/auth/github/login/+server.ts`
-- Read `url.searchParams.get('return_to')`; `const safe = sanitizeReturnPath(raw)`.
-- When `safe` is non-null, set `OAUTH_RETURN_COOKIE_NAME = safe` with `OAUTH_RETURN_COOKIE_OPTIONS`
-  (next to the existing state cookie). Everything else (config check, state cookie, authorize
-  redirect) unchanged.
-
-### `GET /api/auth/github/callback/+server.ts`
-- After successfully setting the session cookie, read + **clear** `OAUTH_RETURN_COOKIE_NAME`, run its
-  value through `sanitizeReturnPath` again (defense-in-depth), and
-  `redirect(302, safeReturn ?? '/?signed_in=1')`. State/CSRF, token exchange, and error handling
-  (`auth_error=state|oauth`) are otherwise unchanged. On any error path, clear the return cookie too.
-
-The completion overlay's "Sign in with GitHub" button links to
-`/api/auth/github/login?return_to=/challenge/{challengeIndex}?completed=1&record=1` (URL-encoded).
-Because the pending-result cookie is `lax`, it survives the round-trip; on return `locals.user` is set
-and the page auto-records (§I9).
-
----
-
-## I8. Leaderboard `verified` flag — `src/routes/api/leaderboard/+server.ts` (modify)
-
-- Also `select({ ..., githubId: leaderboard.githubId })`.
-- Add `verified: entry.githubId != null` to each mapped entry. `username ?? 'Anonymous'` fallback
-  unchanged.
-
-```ts
-export type LeaderboardEntry = {
-	rank: number;
-	username: string;
-	time: string;
-	durationMs: number;
-	verified: boolean; // NEW: true iff githubId != null (a verified GitHub identity)
-};
-```
-
-Existing consumers (`tsr lb`) ignore the new field harmlessly. The UI badges verified entries so a
-free-text name cannot visually impersonate a verified identity.
-
----
-
-## I9. Challenge route — hydrate + auto-record (modify)
-
-### `src/routes/challenge/[id]/+page.server.ts`
-Extend the load to also return `user` and (when a pending result matches this route) `pendingResult`.
-`ChallengePageData` gains:
-
-```ts
-user: import('$lib/server/auth/session').SessionUser | null;
-pendingResult: { durationMs: number } | null;
-```
-
-Load logic (added to the existing validation):
-- `const user = locals.user;`
-- Verify the pending-result cookie; if it verifies **and** its `challengeId === numericId`, set
-  `pendingResult = { durationMs }`, else `null`. (Add `cookies`/`locals` to the load signature.)
-
-### `src/routes/challenge/[id]/+page.svelte`
-- **Guard `onMount` auto-start:** if `new URL(location.href).searchParams.get('completed') === '1'`
-  **and** `data.pendingResult` exists, do **not** `challenge.start(...)`; instead render the completion
-  overlay hydrated from `data.pendingResult.durationMs` + `data.user`.
-- **Auto-record after OAuth:** if `?record=1` **and** `data.user` is present, `POST /api/challenge/record`
-  once (empty body — the server uses the verified identity), then show the confirmed rank + leaderboard.
-- **Strip query params** (`completed`, `record`) after handling via `replaceState`/`goto(..., { replaceState:true })`
-  so a refresh/re-visit starts a normal challenge.
-- Normal (fresh finish, no query params) flow is unchanged except the completion overlay now uses the
-  states below.
-
----
-
-## I10. Completion overlay UI — `src/routes/challenge/[id]/+page.svelte` (modify)
-
-Drive the overlay from a small view-model unifying "fresh finish" (`challenge.result`) and "post-OAuth
-hydration" (`data.pendingResult`). Overlay shows when there is a result to display (fresh finish
-complete, or hydrated pending result). States:
-
-- **Unrecorded / anonymous** (`result.valid && !result.recorded`, or hydrated pending result while
-  signed-out): show **Time** + "You'd place **#N**" (provisional). Then two affordances:
-  1. Free-text **username `<input>`** (optional, maxlength 32) + **"Save time"** button →
-     `challenge.record(username)` → `POST /api/challenge/record { username }`. Blank → Anonymous. One
-     click, low friction (req #3).
-  2. An **"or"** divider + **"Sign in with GitHub to save a verified ✓ time"** button (anchor) →
-     `href="/api/auth/github/login?return_to=/challenge/{challengeIndex}?completed=1&record=1"` (req #1, #4).
-     If OAuth is unconfigured the login route already redirects home with `auth_error=not_configured`;
-     the free-text path is independent and still works.
-- **Recorded** (either path, `recorded === true`): show "Saved as **{username || 'Anonymous'}**"
-  with a **✓ verified** badge iff signed-in, plus the **final rank**.
-- **Leaderboard panel (req #2):** after recording — and immediately for the already-signed-in path —
-  fetch `/api/leaderboard`, show this challenge's top entries (`data[String(challengeIndex)]`), and
-  **highlight the user's placement** by rank. If the user's rank is outside the shown top-10, append a
-  trailing "… you: #N" row. Verified entries render a ✓ badge (from `entry.verified`).
-- Keep **"Back to Home"** / **"Try Again"**.
-
-Invalid-proof state (`result.valid === false`) is unchanged (message + actions).
-
----
-
-## I11. Client store + service (modify)
-
-### `src/lib/client/challenge.ts`
-- Extend `ChallengeResult`:
-  ```ts
-  export type ChallengeResult = {
-  	valid: boolean;
-  	durationMs: number;
-  	recorded?: boolean;           // NEW: false for a deferred anonymous finish
-  	leaderboardPosition?: number; // provisional (anon finish) or final
-  	username?: string | null;     // NEW: present when recorded by the server
-  	message?: string;
-  };
-  ```
-- Add a record result type + a session method:
-  ```ts
-  export type RecordResult = {
-  	recorded: true;
-  	leaderboardPosition?: number;
-  	username: string | null;
-  };
-
-  // On ChallengeSession — POST /api/challenge/record with the optional free-text name.
-  // The server ignores `username` when the user is signed in (verified identity wins).
-  async record(username?: string): Promise<RecordResult>;
-  ```
-  `record` uses `fetch('/api/challenge/record', { method: 'POST', credentials: 'include', headers:
-  { 'Content-Type': 'application/json' }, body: JSON.stringify(username ? { username } : {}) })` and
-  throws on non-ok (mirroring `finish()`).
-
-### `src/lib/client/challenge-store.svelte.ts`
-- Add a `record(username?: string)` action that calls the service, updates `result` (set
-  `recorded: true`, `leaderboardPosition`, `username`) and status, and exposes `recorded` +
-  the resolved `username` via getters.
-- Provide a way to seed the completion view from server `pendingResult` for the hydration path
-  (either a small `hydratePending({ challengeId, durationMs })` action on the store, or handle
-  hydration in the page component — implementer's choice; the store remains the single source for
-  `result`). The pending finish that seeds hydration is `{ valid: true, recorded: false, durationMs }`.
-
----
-
-## I12. Files summary (iteration 2)
-
-Create:
-- `src/lib/server/challenges/pending.ts` (§I2)
-- `src/lib/server/auth/return-to.ts` (§I3)
-- `src/routes/api/challenge/record/+server.ts` (§I6)
-
-Modify:
-- `src/lib/server/env.ts` (§I1 — pending + return cookie constants)
-- `src/lib/server/challenges/schemas.ts` (§I4 — `parseRecordRequest`)
-- `src/routes/api/challenge/finish/+server.ts` (§I5 — defer when anonymous)
-- `src/routes/api/auth/github/login/+server.ts` (§I7 — `return_to` cookie)
-- `src/routes/api/auth/github/callback/+server.ts` (§I7 — redirect to `return_to`)
-- `src/routes/api/leaderboard/+server.ts` (§I8 — `verified` flag)
-- `src/routes/challenge/[id]/+page.server.ts` (§I9 — `user` + `pendingResult`)
-- `src/routes/challenge/[id]/+page.svelte` (§I9, §I10 — overlay redesign, hydration, auto-record)
-- `src/lib/client/challenge.ts` + `src/lib/client/challenge-store.svelte.ts` (§I11)
-
-No DB/migration change (`leaderboard` already has `username` + `githubId`).
-
----
-
-## I13. Test surface (for the tdd stage)
-
-> **Existing-test churn (not a regression):** `src/routes/api/challenge/finish/finish.test.ts`
-> asserts an immediate insert for anonymous finishes. That behavior **moves to `/record`**. Update
-> those expectations: anonymous finish now **defers** (no insert, sets pending cookie, `recorded:false`,
-> provisional rank), signed-in finish still records immediately (`recorded:true`, no pending cookie).
-
-Unit (vitest `server` project):
-- **pending.ts:** sign/verify round-trip returns `{ challengeId, durationMs }`; tamper (flipped byte /
-  wrong secret / truncated), empty/garbage, and `iat` older than 1h → `null`.
-- **return-to.ts:** `sanitizeReturnPath` accepts a leading-single-slash local path; rejects `//`, `/\`,
-  scheme URLs, `javascript:`, no-leading-slash, empty, null (§I3 cases).
-- **schemas:** `parseRecordRequest` trims/strips control chars/caps at 32; blank/whitespace →
-  `undefined`.
-- **`/api/challenge/finish`:** anonymous → **no** row inserted, pending cookie set, `recorded:false`,
-  provisional rank correct; signed-in → row inserted (verified `username`/`githubId`), `recorded:true`,
-  **no** pending cookie.
-- **`/api/challenge/record`:** signed-in → verified `username`/`githubId`, **body `username` ignored**
-  (explicit spoof test); anonymous → sanitized free-text name (blank → Anonymous/null, `githubId`
-  null); missing/expired/tampered pending cookie → `400`; **single-use** (cookie cleared, second POST →
-  `400`); returns correct final rank.
-- **login `return_to`:** safe path stashed in the return cookie; unsafe values not stashed. **callback**
-  redirects to the stashed path and clears the return cookie; falls back to `/?signed_in=1` when absent.
-- **`/api/leaderboard`:** `verified` reflects `githubId != null`; anonymous/free-text entries `false`.
-
-UI (browser test only if it fits the existing `*.browser.test.ts` pattern; else manual, documented):
-completion overlay shows the record form + provisional rank when anonymous, the leaderboard + highlighted
-rank after recording, and the seamless login-after-finish path attaching the verified name to the
-just-completed time.
-
-Existing `pnpm test` / `check` / `lint` stay green (with the finish-test updates above).
-
----
----
-
-# Interface Spec — Iteration 3 (PR #36 feedback)
-
-> Sections 0–13 above (iterations 1 & 2) are **shipped and approved** — do **not** re-implement them.
-> This block is the active scope. The reviewer approved iteration 2, then asked for two focused
-> changes (verbatim): *"there should not be an input for adding any chosen name when completing a
-> challenge. The user should only have two choices: 1. Save time as 'Anonymous' 2. Login to github
-> (save time using username) — they don't need to log in again if they already logged in to github.
-> Also make sure that there is a way to log out on the app."* See `.agent/plan.md` › "Revision — PR
-> #36 feedback (iteration 3)". Names/paths/signatures below are normative unless marked
-> "(illustrative)". **Pure edits/removals — no new files, no schema/migration, no new routes.**
-
-## II0. Core invariants (iteration 3 — must hold end-to-end)
-
-1. **No client-supplied username reaches the leaderboard, anywhere.** Iteration 2 allowed a free-text
-   `username` on the anonymous record path. Iteration 3 removes it end-to-end. `POST
-   /api/challenge/record` no longer reads the request body for a name. Identity is:
-   - `locals.user` set → verified `{ username, githubId }` from the session (unchanged).
-   - `locals.user` null → `{ username: null, githubId: null }` (Anonymous).
-   There is **no** code path by which a client value becomes `leaderboard.username`. This *strengthens*
-   invariant §0.1 / §I0.1 — it is not weakened.
-2. **An already-signed-in user is never prompted to sign in again.** The completion overlay must branch
-   on sign-in state and never show the GitHub sign-in button to an authenticated user.
-3. **Sign-out is reachable from the challenge page.** A visible sign-out affordance exists on the
-   challenge page (in addition to the existing home `auth-bar` and terminal `tsr logout`), reusing the
-   existing `POST /api/auth/logout` endpoint. No new logout endpoint.
-4. **Everything else is unchanged.** Deferral / pending-result cookie / OAuth `return_to` / verified
-   badge / single-use recording / `?completed=1`&`?record=1` hydration all behave exactly as in
-   iteration 2. Clean tree — no migrations, no artifacts, no `pnpm-workspace.yaml`/lockfile churn.
-
----
-
-## II1. Record endpoint — drop free-text — `src/routes/api/challenge/record/+server.ts` (modify)
-
-Remove the request-body username entirely. Concretely:
-
-- **Remove** the `import { parseRecordRequest } from '$lib/server/challenges/schemas'`.
-- **Remove** the body-parse block (the `let username …; try { const body = await request.json()…;
-  ({ username } = parseRecordRequest(body ?? {})); } catch { error(400, …) }`).
-- Drop `request` from the handler destructure — signature becomes:
-  ```ts
-  export const POST: RequestHandler = async ({ cookies, locals }) => { ... };
-  ```
-- Identity resolution reduces to:
-  ```ts
-  const user = locals.user;
-  const insertValues = user
-  	? { challengeId: String(challengeId), durationMs, username: user.username, githubId: user.githubId }
-  	: { challengeId: String(challengeId), durationMs, username: null };
-  ```
-
-Everything else is **unchanged**: pending-cookie verify (`verifyPendingResultToken`, `400` on
-missing/expired/tampered), single-use `clearPendingResultCookie`, the rank count query, the defensive
-DB try/catch, and the response shape:
-```ts
-type RecordResponse = { recorded: true; leaderboardPosition?: number; username: string | null };
-```
-`username` in the response is now always the verified name or `null` — never a free-text value.
-
-Invariants (normative, for tdd):
-- Anonymous record → row inserted with `username: null`, `githubId` null, correct final rank.
-- Signed-in record → verified `username`/`githubId` from `locals.user`.
-- **A `username` in the request body is ignored in both branches** (no longer read at all).
-- Missing/expired/tampered pending cookie → `400`; single-use (replay after clear → `400`) — unchanged.
-
----
-
-## II2. Record schema — remove the free-text validator — `src/lib/server/challenges/schemas.ts` (modify)
-
-Delete the now-dead free-text machinery; keep every other export intact.
-
-- **Remove** `recordChallengeRequestSchema` (the `z.object({ username: z.string().optional() })`).
-- **Remove** the `parseRecordRequest` function.
-- **Remove** the `RecordChallengeRequestBody` type export.
-
-Keep unchanged: `jwkPublicKeySchema`, `startChallengeRequestSchema`, `finishChallengeRequestSchema`,
-`challengeSessionSchema`, `parseStartRequest`, `parseFinishRequest`, `parseSessionCookie`, and the
-`StartChallengeRequestBody` / `FinishChallengeRequestBody` / `ChallengeSessionCookie` types.
-
----
-
-## II3. Client service — `record()` takes no argument — `src/lib/client/challenge.ts` (modify)
-
-- `ChallengeSession.record()` — **remove** the `username?: string` parameter:
-  ```ts
-  async record(): Promise<RecordResult> {
-  	return recordChallenge();
+const cliRaw = cookies.get(CLI_LOGIN_COOKIE_NAME);
+if (cliRaw) {
+  cookies.delete(CLI_LOGIN_COOKIE_NAME, { path: '/' });        // single-use
+  const cli = await verifyCliLoginState(cliRaw);
+  if (cli) {
+    const token = await createSessionToken({ githubId: ghUser.id, username: ghUser.login, iat: Date.now() });
+    const loopback = buildLoopbackCallbackUrl({ port: cli.port, cliState: cli.cliState, token });
+    if (loopback) redirect(302, loopback);                     // only path the token leaves over
   }
-  ```
-- `recordChallenge()` (standalone) — **remove** the `username?: string` parameter; the POST body
-  becomes a constant empty object:
-  ```ts
-  export async function recordChallenge(): Promise<RecordResult> {
-  	const response = await fetch('/api/challenge/record', {
-  		method: 'POST',
-  		credentials: 'include',
-  		headers: { 'Content-Type': 'application/json' },
-  		body: JSON.stringify({})
-  	});
-  	if (!response.ok) { /* throw, unchanged */ }
-  	return response.json();
-  }
-  ```
-- `credentials: 'include'` and the non-ok `throw` are **unchanged**.
-- `RecordResult` and `ChallengeResult` types are **unchanged** (`username` may still be `null`). Update
-  the doc-comments that mention "free-text name" to reflect the two-choice (Anonymous / verified) model.
-
----
-
-## II4. Client store — `record()` drops its param — `src/lib/client/challenge-store.svelte.ts` (modify)
-
-- The `record` action loses its `username?: string` parameter and calls `recordChallenge()` with no
-  argument:
-  ```ts
-  async function record(): Promise<boolean> {
-  	if (!result || !result.valid || result.recorded) return false;
-  	try {
-  		const recordResult = await recordChallenge();
-  		result = { ...result, recorded: true, leaderboardPosition: recordResult.leaderboardPosition, username: recordResult.username };
-  		return true;
-  	} catch (err) { error = err instanceof Error ? err.message : 'Failed to record time'; return false; }
-  }
-  ```
-- The guard, the `result` update, the returned getter surface (`recorded`, `recordedUsername`), and
-  `hydratePending` are **unchanged**.
-
----
-
-## II5. Completion overlay — two choices, no input — `src/routes/challenge/[id]/+page.svelte` (modify)
-
-### Remove
-- The `usernameInput` state (`let usernameInput = $state('')`).
-- The `handleSaveTime` handler.
-- The `<input class="username-input">` + the `.record-row` wrapper + the "Save time" `<button>`.
-- The `.username-input` and `.record-row` CSS rules (now dead).
-
-### Add / change (the unrecorded block)
-Replace the current `{:else}` (unrecorded) sub-tree with a branch on `isSignedIn` (`data.user != null`,
-already derived at line 38). Two handlers drive it:
-
-```ts
-// Anonymous "Save as Anonymous" — record with no name.
-async function handleSaveAnonymous() {
-	if (recording || challenge.recorded) return;
-	recording = true;
-	const ok = await challenge.record();       // no arg — server records username: null
-	recording = false;
-	if (ok) await loadLeaderboard();
-}
-// Signed-in edge (hydrated but not yet recorded) — record verified.
-async function handleSaveVerified() {
-	if (recording || challenge.recorded) return;
-	recording = true;
-	const ok = await challenge.record();       // no arg — server uses locals.user
-	recording = false;
-	if (ok) await loadLeaderboard();
-}
-```
-(One shared handler taking no arg is acceptable — `handleSaveAnonymous` and `handleSaveVerified` may be
-the same function; the split is illustrative. The point: `challenge.record()` is always called with no
-argument.)
-
-Markup states (inside `{#if challenge.result.valid}` → `{#if challenge.recorded}…{:else}`):
-- **`isSignedIn === false` (anonymous):** two stacked affordances —
-  1. **"Save as Anonymous"** button (`onclick={handleSaveAnonymous}`, `disabled={recording}`).
-  2. An **"or"** divider (`.or-divider`, kept) + the existing **"Sign in with GitHub to save a verified
-     time"** button (`onclick={handleSignIn}`, `signInHref` unchanged — §I10 / lines 44–51).
-- **`isSignedIn === true` (rare unrecorded edge, hydration without `?record=1`):** a **single "Save my
-  time"** button (`onclick={handleSaveVerified}`). **Never** render the GitHub sign-in button here
-  (invariant II0.2).
-
-### Unchanged
-- Recorded state (`{#if challenge.recorded}` → "Saved as … ✓ verified" line), the leaderboard panel
-  (req #2, `.leaderboard-panel` + highlight + "… you: #N"), the verified badge, "Back to Home" / "Try
-  Again", the invalid-proof branch, and the `onMount` hydration / auto-record / `stripCompletionParams`
-  logic. Keep the `.record-form`, `.or-divider`, `.github-button`, `.saved-line`, `.verified-badge`,
-  and button styles.
-
-### Note on `record`-flow entry
-The normal signed-in finish records immediately at `/api/challenge/finish` (§I5) — such a user reaches
-the overlay already `recorded` and never sees the choice. The signed-in "Save my time" button covers
-only the hydrated-but-unrecorded edge (a signed-in user landing on `?completed=1` without `?record=1`).
-
----
-
-## II6. Logout on the challenge page — `src/routes/challenge/[id]/+page.svelte` (modify)
-
-The load already exposes `data.user` (`+page.server.ts` line 63). Add a compact auth control to the
-`.challenge-header` (lines 294–302), reusing the home page's pattern (`src/routes/+page.svelte`
-`signOut`, lines 16–20):
-
-```ts
-async function signOut() {
-	await fetch('/api/auth/logout', { method: 'POST' });
-	window.location.reload(); // drops back to anonymous state
+  // guard failed / invalid → fall through to normal home redirect (NO token leak)
 }
 ```
 
-Header markup (illustrative — fit the existing terminal aesthetic):
-- When `data.user`: `● signed in as {data.user.username}` + a **Sign out** `<button onclick={signOut}>`.
-- When signed out: a small **Sign in** link `href="/api/auth/github/login"` (parity/discoverability).
+Notes: the browser session cookie is still set (user is logged into the website too — acceptable).
+`token` = the same signed session-token type the site uses; `hooks.server.ts`/`finish`/`record`
+already trust it (plan §4.2). The non-CLI path (no `tmux_cli_login` cookie) is **byte-identical** to
+today. `ghUser` here is the existing local from the callback's `try` block; the CLI branch must sit
+inside that scope (after `setSessionCookie`).
 
-Place it in the header (e.g. after the `.timer` or in a right-aligned group). Add matching header
-styles; do not disturb the existing back-link / label / config-link / timer layout. `POST
-/api/auth/logout` and `clearSessionCookie` are unchanged — no backend change for logout.
+**Invariant AUTH1.** The minted token leaves the server only via `buildLoopbackCallbackUrl` returning
+non-null (loopback host + http + /callback + valid port). Any other outcome → home redirect. No
+client-supplied username ever reaches the leaderboard (identity is `ghUser` from the verified token
+exchange).
+
+### 4.5 CLI loopback receiver — `cli/src/auth/loopback-server.ts` (NEW)
+
+```ts
+export type LoopbackResult = { token: string };
+
+export type LoopbackServer = {
+  port: number;                          // ephemeral port actually bound
+  cliState: string;                      // random CSRF, [A-Za-z0-9_-]{32}
+  /** Resolves when GET /callback?token=&state= arrives with state === cliState.
+   *  Rejects on timeout (default 300s) or state mismatch. Always closes the socket. */
+  waitForToken(timeoutMs?: number): Promise<LoopbackResult>;
+  close(): void;
+};
+
+/** Bind an http server on 127.0.0.1:<ephemeral>. Only GET /callback is handled;
+ *  respond with a friendly "You can close this tab" HTML page, then resolve. */
+export function startLoopbackServer(): Promise<LoopbackServer>;
+```
+
+Bind to `127.0.0.1` (never `0.0.0.0`). On `/callback`: verify `state` query === `cliState` (else 400 +
+reject); read `token`; respond 200 HTML; resolve. Reject any other path with 404.
+
+### 4.6 Token store — `cli/src/auth/token-store.ts` (NEW)
+
+```ts
+export type StoredSession = { token: string; username: string; githubId: number; savedAt: number };
+
+export function sessionFilePath(): string;                 // <configDir>/session.json
+export function loadSession(): StoredSession | null;       // null if absent/unreadable/malformed
+export function saveSession(s: StoredSession): void;       // write mode 0600, mkdir -p configDir
+export function clearSession(): void;                       // unlink if present (no error if absent)
+
+/** Decode username/githubId locally from a session token WITHOUT verifying the HMAC
+ *  (server verifies on use). Returns null on malformed token. */
+export function decodeSessionToken(token: string): { githubId: number; username: string } | null;
+```
+
+`login` flow (§9.2): start loopback server → open browser to
+`<base>/api/auth/cli/login?port=<port>&state=<cliState>` → `waitForToken()` → `decodeSessionToken` →
+`saveSession` → print username. If the browser can't open, print the URL to paste manually.
 
 ---
 
-## II7. Files summary (iteration 3)
+## 5. Isolated tmux — `cli/src/tmux/`
 
-Modify only (no new files, no schema/migration, no new routes):
-- `src/routes/api/challenge/record/+server.ts` (§II1 — stop reading body username)
-- `src/lib/server/challenges/schemas.ts` (§II2 — remove `recordChallengeRequestSchema` /
-  `parseRecordRequest` / `RecordChallengeRequestBody`)
-- `src/lib/client/challenge.ts` (§II3 — `record()` / `recordChallenge()` take no arg)
-- `src/lib/client/challenge-store.svelte.ts` (§II4 — `record()` drops `username` param)
-- `src/routes/challenge/[id]/+page.svelte` (§II5 — two-choice overlay, remove input; §II6 — header
-  sign-out/-in)
+### 5.1 Low-level client — `client.ts` (NEW)
 
-Unchanged: home `auth-bar`, terminal `tsr login|logout|whoami`, `/api/auth/*` routes,
-`/api/challenge/finish`, pending-result cookie helpers, leaderboard `verified` flag, DB schema.
+```ts
+/** Run `tmux -L <socket> [-f <conf>] <args...>`; resolves { stdout, stderr, code }.
+ *  Never throws on non-zero exit (callers decide); throws only if tmux is not spawnable. */
+export function tmuxExec(socket: string, args: string[], opts?: { conf?: string }): Promise<{ stdout: string; stderr: string; code: number }>;
+
+/** `tmux -V` → parsed { major, minor, raw }. Throws if tmux missing. */
+export function tmuxVersion(): Promise<{ major: number; minor: number; raw: string }>;
+```
+
+### 5.2 Isolated server lifecycle — `server.ts` (NEW)
+
+```ts
+export type IsolatedTmuxServer = {
+  socketName: string;                    // e.g. "tmux-speedrun-<random8>" (private, logged)
+  confPath: string;                      // generated conf file in a temp dir
+  exec(args: string[]): Promise<{ stdout: string; stderr: string; code: number }>;
+  /** Attach the user's TTY into the isolated server (blocks until detach). */
+  attach(target?: string): Promise<void>;
+  /** kill-server on THIS socket + remove temp conf/dir. Idempotent; ignores "no server" errors. */
+  teardown(): Promise<void>;
+};
+
+/** Create the temp conf (§5.3), a unique socket name, and an initial session.
+ *  Register teardown on SIGINT/SIGTERM/SIGHUP/exit/uncaughtException (idempotent). */
+export function createIsolatedTmuxServer(opts?: { initialSession?: string }): Promise<IsolatedTmuxServer>;
+```
+
+**Invariant ISO1 (hard requirement).** Every tmux invocation for a run uses `-L <socketName>` (unique
+per run) — the user's default socket is **never** referenced. A prompted `kill-session`/`kill-server`
+can only affect this socket. Teardown runs on every exit path (signal, crash, completion) via signal
+handlers + `try/finally`, is idempotent, and never touches the default server. Acceptance test:
+create a default-socket session, run the isolated server, `kill-server` inside it, assert the
+default-socket session survives (plan §5.1/R2).
+
+### 5.3 Generated config — `config.ts` (NEW)
+
+```ts
+export type GeneratedConfig = { text: string }; // full tmux.conf text
+/** eventSink = FIFO/socket path the hook notifier writes event lines to (§6.2). */
+export function buildIsolatedConfig(opts: { eventSink: string }): GeneratedConfig;
+```
+
+The conf is independent of the user's `~/.tmux.conf` (passed via `-f`), configures `status-left`/
+`status-right` for the prompt/progress/timer, a short `status-interval`, and installs the observer
+hooks (§6.2).
+
+### 5.4 tmux prerequisite — enforced in `challenge`/`practice` commands
+
+Require `tmux -V` ≥ **3.0** (hooks/format coverage). Missing/old → actionable message + non-zero exit.
+Non-TTY (`!process.stdout.isTTY`) → `challenge`/`practice` refuse with a clear message; `leaderboard`/
+`whoami`/`login` still work.
 
 ---
 
-## II8. Test surface (for the tdd stage)
+## 6. State observation — `cli/src/tmux/observer.ts` + `engine/types.ts`
 
-> **Existing-test churn (not a regression):** `record.test.ts` cases asserting a free-text / sanitized
-> username on the anonymous path must change to assert `username: null`. `schemas.test.ts` cases for
-> `parseRecordRequest` must be **removed** (the function no longer exists). Any browser/UI test
-> asserting the username `<input>` must move to the two-button overlay.
+### 6.1 State model — `engine/types.ts` (NEW)
 
-Unit (vitest `server` project):
-- **`/api/challenge/record`:** anonymous → row inserted with `username: null`, `githubId` null, correct
-  final rank; **a body `username` is ignored in both the anonymous and signed-in branches** (explicit
-  test — the endpoint no longer reads the body); signed-in → verified `username`/`githubId`;
-  missing/expired/tampered pending cookie → `400`; single-use (replay → `400`) — unchanged.
-- **schemas:** the `parseRecordRequest` suite is deleted; remaining schema tests (`parseStartRequest`,
-  `parseFinishRequest`, `parseSessionCookie`) stay green.
+```ts
+export type PaneInfo = {
+  paneId: string;          // #{pane_id}, stable e.g. "%3"
+  sessionName: string;     // #{session_name}
+  windowIndex: number;     // #{window_index}
+  windowName: string;      // #{window_name}
+  active: boolean;         // #{pane_active}
+  left: number; top: number; width: number; height: number; // #{pane_left/top/width/height}
+  zoomed: boolean;         // #{window_zoomed_flag}
+  inMode: boolean;         // #{pane_in_mode}
+};
 
-UI (browser test only if it fits `*.browser.test.ts`; else manual, documented):
-- Anonymous completion overlay shows **no text input** — only "Save as Anonymous" + "Sign in with
-  GitHub"; a signed-in unrecorded overlay shows a single "Save my time" and **no** sign-in button.
-- The challenge-page header exposes a working **Sign out** (and a Sign in link when signed out).
+export type TmuxState = {
+  sessions: string[];                 // session names present
+  windows: { session: string; index: number; name: string; active: boolean }[];
+  panes: PaneInfo[];
+  activePaneId: string | null;        // active pane of the active window/session
+  activeWindow: { session: string; index: number } | null;
+  buffers: string[];                  // list-buffers buffer names (most-recent first)
+  topBufferSample?: string;           // show-buffer of buffer 0 (copy-paste detection)
+};
 
-Existing `pnpm test` / `check` / `lint` stay green (with the churn updates above).
+export type StateDelta = {
+  prev: TmuxState;
+  next: TmuxState;
+  paneCountDelta: number;             // next.panes.length - prev.panes.length (whole server)
+  sessionCountDelta: number;
+  windowCountDelta: number;           // across all sessions
+  addedPanes: PaneInfo[];
+  removedPaneIds: string[];
+  renamedWindow?: { from: string; to: string };
+  renamedSession?: { from: string; to: string };
+  activePaneChanged: boolean;
+  activeWindowChanged: boolean;
+  activeSessionChanged: boolean;
+  zoomToggled: boolean;
+  enteredCopyMode: boolean;           // some pane inMode transitioned false→true
+  bufferAdded?: string;               // new/changed top buffer content
+  bufferRemoved: boolean;
+  pasteObserved?: boolean;            // focused pane content gained the step's seedInput
+};
+```
+
+### 6.2 Observer — `observer.ts` (NEW)
+
+```ts
+export class TmuxObserver {
+  constructor(server: IsolatedTmuxServer);
+
+  /** Query current state via list-sessions / list-windows -a / list-panes -a (-F formats above),
+   *  list-buffers, show-buffer, #{pane_in_mode}. */
+  snapshot(): Promise<TmuxState>;
+
+  /** Diff two snapshots into a StateDelta. Pure; testable with synthetic states. */
+  diff(prev: TmuxState, next: TmuxState, ctx?: { seedInput?: string }): StateDelta;
+
+  /** Change source: (1) tmux hooks (conf §5.3) write event lines to eventSink;
+   *  (2) a 100–200ms poll fallback. Each trigger → snapshot → diff → callback. */
+  watch(onDelta: (d: StateDelta) => void): { stop(): void };
+}
+```
+
+Hooks installed in the generated conf are **triggers only** ("state may have changed"); the observer
+always re-queries and diffs — so exhaustive hook coverage is not required (plan §5.3, R1). Poll is the
+safety net for informational/read-only commands that emit no hook.
 
 ---
 
-## II9. Scope flags (iteration 3 — active)
+## 7. Action detection — `cli/src/tmux/detector.ts` (NEW, core new work)
 
-- `needs_frontend: true` — two-choice completion overlay (remove input), challenge-page header
-  sign-out/-in, client store/service `record()` signature change.
-- `needs_backend: true` — `/api/challenge/record` stops honoring a body username; record schema
-  removed.
+Convert an observed `StateDelta` into the **candidate canonical answer strings** the key chain expects.
+The detector need only **include** the correct candidate; `CliChallengeSession.submitAnswer`'s
+trial-decrypt is the source of truth (plan §5.3, "detection only needs to include the right candidate").
+
+```ts
+/**
+ * Produce candidate canonical answers for a delta, given the current decrypted step.
+ * For input commands, `step.requiredInput` is known → candidates are fully formed
+ * (`rename-window:<requiredInput>`). For the copy-paste step, `step.seedInput` seeds
+ * `copy-paste-sequence:<seedInput>`. Ambiguous deltas emit ALL plausible candidates.
+ * Order best-guess first (optimization only; correctness is via trial-decrypt).
+ */
+export function deriveCandidates(delta: StateDelta, step: DecryptedStep): string[];
+```
+
+Canonical answer forms (authoritative — from `generator.ts` + `tmux-copy-sequence.ts`):
+- simple command → bare `cmd.name` (e.g. `split-vertical`, `kill-session`).
+- input command → `` `${cmd.name}:${requiredInput}` `` (e.g. `rename-window:swift-tiger-42`).
+- copy-paste step → `` `copy-paste-sequence:${seedInput}` `` (`COPY_PASTE_SEQUENCE_ACTION`).
+
+Delta → candidate mapping (the pool is the ~40 commands in `TMUX_COMMANDS`):
+
+| Observation | Candidate(s) |
+|---|---|
+| pane +1; new pane right of sibling (`left` increases, same `top`) | `split-vertical` |
+| pane +1; new pane below sibling (`top` increases, same `left`) | `split-horizontal` |
+| window +1, same session, no pane left source | `new-window` |
+| window +1 **and** a pane left/closed in the source window | `break-pane` |
+| pane −1 in a window that remains | `kill-pane` |
+| window −1 (window closed, session remains) | `kill-window` |
+| session +1 | `new-session` |
+| one session disappears (others remain) | `kill-session` |
+| all sessions disappear (server empty) | `kill-server` |
+| window name changed to `X` | `rename-window:<requiredInput>` (X == requiredInput) |
+| session name changed to `X` | `rename-session:<requiredInput>` |
+| active pane changed within window | `select-pane`, `last-pane` |
+| active window index changed | `select-window`, `next-window`, `previous-window`, `last-window` |
+| active session changed | `next-session`, `previous-session` |
+| `zoomed` toggled | `toggle-zoom` |
+| pane positions rotated | `rotate-panes` |
+| two panes swapped positions | `swap-pane` |
+| two windows swapped indices | `swap-window` |
+| pane +1 and another window lost a pane / closed (pane moved in) | `join-pane` |
+| entered copy mode (`inMode` false→true) | `copy-mode` |
+| buffer added / top buffer changed | `paste-buffer`, `capture-pane`, `show-buffer`, `list-buffers` |
+| buffer removed | `delete-buffer` |
+| focused pane gained `seedInput` after a paste (copy step) | `copy-paste-sequence:<seedInput>` |
+| detach observed (client detached) | `detach` |
+| no state delta (informational) | the specific command name via its hook/echo: `list-sessions`, `list-windows`, `list-keys`, `show-time`, `display-panes`, `capture-pane`, `command-prompt`, `attach-session`, `reload-config` |
+
+Rules:
+- Emit **every** plausible candidate for ambiguous deltas; trial-decrypt selects the right one.
+- Never invent input for input commands — always use `step.requiredInput`; if the step has
+  `requiredInput` but the delta shows no matching rename, emit nothing (wrong input typed).
+- Informational commands with no observable delta are the residual risk (R1): the impl stage must
+  build an empirically-verified table against real tmux ≥ 3.0, with an integration test per family.
+
+**Invariant DET1.** `deriveCandidates` is pure and deterministic over `(delta, step)` — unit-testable
+with synthetic states, no tmux/network.
+
+---
+
+## 8. Controllers — `cli/src/tmux/controller.ts` (NEW)
+
+```ts
+export type ChallengeRunResult = { completed: boolean; finish?: FinishResponse; aborted?: boolean };
+
+export class ChallengeController {
+  constructor(args: { server: IsolatedTmuxServer; observer: TmuxObserver; session: CliChallengeSession; ui: StatusLine });
+
+  /** Decrypt step 0, render prompt, attach user, and on each delta:
+   *  candidates = deriveCandidates(delta, currentStep); for each, session.submitAnswer(c);
+   *  first true → advance, decrypt next step, update status line. When isComplete():
+   *  session.finish(); detach; return result. Teardown handled by caller (finally). */
+  run(): Promise<ChallengeRunResult>;
+}
+
+export class PracticeController {
+  constructor(args: { server: IsolatedTmuxServer; observer: TmuxObserver; item: PracticeItem; ui: StatusLine });
+  /** Same detect loop, but "correct" = observed action matches the practice step's
+   *  commandName / CopyModeAction directly (no key chain, no network). Advances through steps. */
+  run(): Promise<{ completed: boolean; aborted?: boolean }>;
+}
+```
+
+The controller runs alongside the attached client (outside it), observing and advancing. On
+completion it submits the proof, detaches, and returns; the command layer prints results and runs
+teardown in `finally`.
+
+---
+
+## 9. CLI commands + entry — `cli/src/`
+
+### 9.1 Arg parsing — `args.ts` (NEW)
+
+```ts
+export type GlobalOptions = { server?: string; noColor: boolean; json: boolean; verbose: boolean };
+export type ParsedArgs = { command: string; positionals: string[]; options: GlobalOptions };
+
+/** Hand-rolled (no deps). Recognizes --server <url>, --no-color, --json, --verbose, --help/-h.
+ *  Unknown command or --help → command "help". Default (no args) → "help". */
+export function parseArgs(argv: string[]): ParsedArgs;
+```
+
+### 9.2 Command surface (`index.ts` dispatch)
+
+```
+tmux-speedrun help                 list commands (also default / --help / -h)
+tmux-speedrun login                browser OAuth via loopback; store verified session
+tmux-speedrun logout               clearSession() + best-effort POST /api/auth/logout
+tmux-speedrun whoami               print stored username or "anonymous" (--json supported)
+tmux-speedrun leaderboard [id]     GET /api/leaderboard; render table(s) (--json supported)
+tmux-speedrun practice [category]  offline practice vs isolated native tmux
+tmux-speedrun challenge <id>       run challenge 0–5 vs isolated native tmux
+```
+
+Each command module exports `run(ctx, positionals): Promise<number>` returning a process exit code:
+
+```ts
+export type CommandContext = { api: ApiClient; options: GlobalOptions; session: StoredSession | null };
+export type Command = { run(ctx: CommandContext, positionals: string[]): Promise<number> };
+```
+
+- `challenge <id>`: `id` must parse to 0–5 (`isValidChallengeId`) else usage error (exit 2). Loads the
+  stored session token → seeds `api` with `sessionToken`. On finish: signed-in → print recorded rank;
+  anonymous → prompt "Save your time?"; if the user is/becomes logged in → `session.record()`, else
+  offer Anonymous `record()` (server records `username:null`). Teardown in `finally`.
+- `leaderboard [id]`: no `id` → all challenges; with `id` → that block. `--json` prints raw
+  `LeaderboardResponse`.
+- Exit codes: `0` success, `1` runtime error, `2` usage error.
+
+### 9.3 `help` output must list all commands above and note the tmux/WSL prerequisite (acceptance: `help`).
+
+---
+
+## 10. Config & local state — `cli/src/config.ts` (NEW)
+
+```ts
+export type ResolvedConfig = { baseUrl: string; configDir: string };
+
+/** baseUrl precedence: --server flag > TMUX_SPEEDRUN_API env > pinned production origin constant.
+ *  configDir: $XDG_CONFIG_HOME/tmux-speedrun or ~/.config/tmux-speedrun. */
+export function resolveConfig(options: GlobalOptions): ResolvedConfig;
+
+export const DEFAULT_API_ORIGIN: string;   // pinned production site origin
+```
+
+`session.json` shape = `StoredSession` (§4.6), file mode `0600`. Challenge/pending cookies are
+in-memory only (CookieJar), never persisted.
+
+---
+
+## 11. Website docs page
+
+- `src/routes/cli/+page.svelte` (NEW): install (`npm i -g tmux-speedrun` / `npx tmux-speedrun`),
+  command list, `login` (browser OAuth) flow, the **isolation guarantee** (dedicated tmux server on a
+  private socket, torn down on exit; real sessions never touched), supported platforms (macOS, Linux,
+  WSL). Match existing Tailwind page structure (reference `src/routes/tmux-conf/+page.svelte`).
+- `src/routes/+layout.svelte` (ADAPT): add a nav link to `/cli` mirroring existing route links.
+
+---
+
+## 12. Practice data (REUSE / verify leaf imports)
+
+`src/lib/data/practice-flow.ts` (`PracticeStep`, `PracticeItem`, `createCopyPastePracticeItem`, the
+exported items array), `src/lib/data/tmux-commands.ts` (`TMUX_COMMANDS`, `TmuxCommand`),
+`src/lib/server/challenges/pools.ts`, `src/lib/utils/tmux-copy-sequence.ts` are imported by the CLI
+build. **R7 check:** `practice-flow.ts` imports types from `$lib/utils/tmux-commands` (`CommandIdType`)
+and `$lib/utils/tmux-conf` (`CopyModeAction`). Confirm these transitively pull **no** browser-only code
+into the Node bundle; if they do, split the needed leaf types into a dependency-free module. `tsup`
+resolves `$lib` aliases at build time so the published package is standalone.
+
+---
+
+## 13. Packaging & tree cleanliness
+
+- `cli/package.json`: `name: "tmux-speedrun"`, `type: "module"`,
+  `bin: { "tmux-speedrun": "./dist/index.js" }` (shebang `#!/usr/bin/env node`), `engines.node >= 20`,
+  build (`tsup`) + test scripts. Runtime deps minimal (ideally zero beyond Node built-ins; browser-open
+  is a 3-line `open`/`xdg-open`/`start` shim).
+- `pnpm-workspace.yaml`: add `cli` to `packages`.
+- `.gitignore`: add `cli/dist`, coverage, tmux temp artifacts. **Do not** commit build output or
+  lockfile churn beyond an intentional `cli` dependency addition (plan §R10).
+
+---
+
+## 14. Invariant summary (must hold end-to-end)
+
+- **CC1** crypto byte-parity via reuse of `challenge-core` + `src/lib/crypto`.
+- **CS1** duration is server-authoritative (never CLI-supplied).
+- **AUTH1** minted session token leaves the server only over the loopback guard; no client-supplied
+  username; non-CLI OAuth path unchanged.
+- **ISO1** all tmux ops on a unique private socket; bulletproof idempotent teardown on every exit
+  path; user's default server provably untouched (hard requirement).
+- **DET1** `deriveCandidates` pure/deterministic; trial-decrypt is the correctness authority.
+- **NOSPOOF** no request body ever supplies a leaderboard username (mirrors existing finish/record
+  server behaviour — unchanged).
+
+---
+
+## 15. Test surface handed to `tdd`
+
+Unit (no tmux/network): `challenge-core` key-chain parity; `deriveCandidates` over synthetic deltas
+(every §7 mapping incl. ambiguous multi-candidate + copy-paste); `CookieJar` parse/replay/delete;
+`buildLoopbackCallbackUrl` accept 127.0.0.1/localhost + valid port, reject absolute host / non-loopback
+/ bad scheme / bad port / control chars (analogous to `return-to.test.ts`); `parseArgs`; leaderboard
+table + `--json`; `decodeSessionToken`. Server (Vitest): `GET /api/auth/cli/login` sets both cookies +
+redirects to GitHub; callback with a valid `tmux_cli_login` → loopback redirect carrying the token,
+only for allowed targets, clears the cookie (single-use), disallowed target → home; non-CLI flow
+unchanged. Integration (tmux-gated): isolated-server lifecycle + teardown proves ISO1; detector per
+pool-command family; full challenge E2E against a local dev server.
