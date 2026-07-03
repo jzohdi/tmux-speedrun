@@ -6,6 +6,7 @@
 
 import type { TmuxCommand } from './tmux-commands';
 import { getCommandByName } from './tmux-commands';
+import { CHALLENGE_INSTRUCTION_COUNTS } from './challenge-scaling';
 
 export type Challenge = {
 	difficulty: number; // 0-30 scale
@@ -60,10 +61,10 @@ export const CHALLENGES: Challenge[] = [
 
 /**
  * Challenge metadata for the UI.
- * This mirrors the server-side pool configuration but is safe to use on the client.
+ * This mirrors the server-side pool configuration through the shared scaling module
+ * and is safe to use on the client.
  *
- * IMPORTANT: These values must match the server-side pools.ts configuration!
- * If you update the server pools, update this array as well.
+ * IMPORTANT: Update `challenge-scaling.ts` if the per-challenge counts change.
  */
 export type ChallengeMetadata = {
 	index: number;
@@ -71,48 +72,26 @@ export type ChallengeMetadata = {
 	difficultyLabel: string;
 };
 
-/**
- * Base instruction count for challenge 0.
- */
-const BASE_INSTRUCTION_COUNT = 25;
-
-/**
- * Instruction count increment per challenge level.
- */
-const INSTRUCTION_INCREMENT = 15;
+const CHALLENGE_DIFFICULTY_LABELS = [
+	'Beginner',
+	'Intermediate',
+	'Intermediate',
+	'Advanced',
+	'Advanced',
+	'Advanced'
+] as const;
 
 /**
  * Client-side challenge metadata.
- * These values match the server-side CHALLENGE_POOLS in pools.ts.
+ * These values read the shared scaling config so client and server stay aligned.
  */
-export const CHALLENGE_METADATA: ChallengeMetadata[] = [
-	{ index: 0, instructionCount: BASE_INSTRUCTION_COUNT, difficultyLabel: 'Beginner' },
-	{
-		index: 1,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT,
-		difficultyLabel: 'Intermediate'
-	},
-	{
-		index: 2,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 2,
-		difficultyLabel: 'Intermediate'
-	},
-	{
-		index: 3,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 3,
-		difficultyLabel: 'Advanced'
-	},
-	{
-		index: 4,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 4,
-		difficultyLabel: 'Advanced'
-	},
-	{
-		index: 5,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 5,
-		difficultyLabel: 'Advanced'
-	}
-];
+export const CHALLENGE_METADATA: ChallengeMetadata[] = CHALLENGE_INSTRUCTION_COUNTS.map(
+	(instructionCount, index) => ({
+		index,
+		instructionCount,
+		difficultyLabel: CHALLENGE_DIFFICULTY_LABELS[index]
+	})
+);
 
 /**
  * Get all challenge metadata for UI display.

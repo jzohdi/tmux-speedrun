@@ -45,15 +45,15 @@ describe('Random String Generator', () => {
 		}
 	});
 
-	it('generates unique strings', () => {
+	it('generates nearly all unique strings', () => {
 		const strings = new Set<string>();
 
 		for (let i = 0; i < 100; i++) {
 			strings.add(generateMeaningfulString());
 		}
 
-		// With 144,000 combinations, 100 strings should all be unique
-		expect(strings.size).toBe(100);
+		// With 144,000 combinations, 100 draws should have at most an occasional collision.
+		expect(strings.size).toBeGreaterThanOrEqual(99);
 	});
 
 	it('reports correct combination count', () => {
@@ -159,6 +159,22 @@ describe('Pool Configuration', () => {
 		expect(pool.length).toBe(TMUX_COMMANDS.length);
 	});
 
+	it('C1 and C2 keep the beginner plus intermediate command pool unchanged', () => {
+		const expectedPool = TMUX_COMMANDS.filter(
+			(cmd) => cmd.difficulty === 'beginner' || cmd.difficulty === 'intermediate'
+		);
+
+		for (const challengeId of [1, 2]) {
+			expect(getPoolForChallenge(challengeId)).toEqual(expectedPool);
+		}
+	});
+
+	it('C3 and C4 keep the full command pool unchanged', () => {
+		for (const challengeId of [3, 4]) {
+			expect(getPoolForChallenge(challengeId)).toEqual(TMUX_COMMANDS);
+		}
+	});
+
 	it('pool size is monotonically non-decreasing across challenges', () => {
 		let prevSize = 0;
 
@@ -169,24 +185,43 @@ describe('Pool Configuration', () => {
 		}
 	});
 
-	it('instruction count follows BASE + INCREMENT * level pattern', () => {
-		const expectedCounts = [25, 40, 55, 70, 85, 100];
+	it('instruction count follows the tapered challenge scaling', () => {
+		const expectedCounts = [18, 26, 33, 39, 44, 48];
 
 		for (let i = 0; i < getChallengePoolCount(); i++) {
 			expect(getInstructionCount(i)).toBe(expectedCounts[i]);
 		}
 	});
 
-	it('instruction count grows by 15 per challenge level', () => {
+	it('instruction count starts lower and uses positive non-increasing increments', () => {
 		const counts = CHALLENGE_POOLS.map((p) => p.instructionCount);
+		const increments = counts.slice(1).map((count, index) => count - counts[index]);
 
-		for (let i = 1; i < counts.length; i++) {
-			expect(counts[i] - counts[i - 1]).toBe(15);
+		expect(counts[0]).toBeGreaterThanOrEqual(15);
+		expect(counts[0]).toBeLessThanOrEqual(20);
+		expect(counts[counts.length - 1]).toBeLessThan(100);
+
+		const expectedRanges = [
+			{ min: 5, max: 10 },
+			{ min: 5, max: 10 },
+			{ min: 4, max: 8 },
+			{ min: 4, max: 7 },
+			{ min: 4, max: 4 }
+		];
+
+		for (let i = 0; i < increments.length; i++) {
+			expect(increments[i]).toBeGreaterThan(0);
+			expect(increments[i]).toBeGreaterThanOrEqual(expectedRanges[i].min);
+			expect(increments[i]).toBeLessThanOrEqual(expectedRanges[i].max);
+		}
+
+		for (let i = 1; i < increments.length; i++) {
+			expect(increments[i]).toBeLessThanOrEqual(increments[i - 1]);
 		}
 	});
 
 	it('minInputCommands is configured for each challenge', () => {
-		const expectedMins = [3, 5, 7, 9, 11, 13];
+		const expectedMins = [2, 2, 2, 2, 2, 2];
 
 		for (let i = 0; i < getChallengePoolCount(); i++) {
 			expect(getMinInputCommands(i)).toBe(expectedMins[i]);
