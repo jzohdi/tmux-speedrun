@@ -1,576 +1,501 @@
-# Plan: GitHub sign-in + verified username on leaderboard entries
+# Plan: `tmux-speedrun` CLI (native tmux, GitHub-authenticated leaderboard)
 
-Issue: jzohdi/tmux-speedrun#34
+Issue: jzohdi/tmux-speedrun#35
 
-> **Iteration 3 (PR #36 feedback) — ACTIVE SCOPE.** The sign-in feature (iteration 1) and the
-> completion-flow redesign (iteration 2) below are both **implemented and approved** on this branch.
-> The reviewer left a new `feedback:` comment (2026-07-01 23:26) asking for two changes: (a) drop the
-> free-text username input on completion — the only choices are **Save as Anonymous** or **Sign in with
-> GitHub** (already-signed-in users skip the sign-in step), and (b) ensure there is a visible way to
-> **log out** everywhere in the app. That work is specified in **"## Revision — PR #36 feedback
-> (iteration 3)"** at the end of this file; it is the active scope for this pass. Everything above it is
-> already-shipped context — do **not** re-implement it, only the deltas iteration 3 calls out.
-
-## Goal (restated)
-
-Let users authenticate with GitHub via OAuth (Authorization Code flow, token exchange
-server-side) and attach their **verified** GitHub username to the times they submit to the
-leaderboard. Sign-in is **optional** — anonymous submissions keep working exactly as today; signing
-in simply stamps a trustworthy, non-spoofable GitHub identity onto the entry. A signed-in state is
-visible and the user can sign out.
-
-## Current state of the code (grounding facts)
-
-- **Framework / serverless boundary.** SvelteKit (`@sveltejs/kit`, `adapter-auto`). The
-  "backend/serverless boundary" the issue asks about is SvelteKit server endpoints (`+server.ts`)
-  and `hooks.server.ts` / `+*.server.ts` load functions. These run server-side only, so the GitHub
-  client secret and token exchange live there and are never bundled to the browser. Server-only env
-  is read via `$env/dynamic/private` (see `src/lib/server/env.ts`).
-- **Leaderboard table already has identity columns but they are unused.**
-  `src/lib/server/db/schema.ts` defines `leaderboard` with nullable `userId` (uuid), `username`
-  (text), plus `challengeId`, `durationMs`, `createdAt`. Migration:
-  `drizzle/0000_absent_black_bolt.sql`.
-- **Submissions never attach a name today.** `src/routes/api/challenge/finish/+server.ts` validates
-  the crypto proof, then `db.insert(leaderboard).values({ challengeId, durationMs })` — `username`
-  is always left null. `/api/leaderboard/+server.ts` renders `entry.username ?? 'Anonymous'`. So the
-  entire "attach username" feature reduces to: stamp `username` on that insert **from a
-  server-verified session**, never from client input.
-- **No auth/session infrastructure exists yet.** There is no `src/hooks.server.ts`, no
-  `App.Locals` (`src/app.d.ts` is empty stubs), no `+layout.server.ts`. The only cookie today is the
-  unsigned challenge-session JSON cookie (`tmux_challenge_session`) set/read in the challenge start
-  and finish endpoints via `src/lib/server/env.ts` (`CHALLENGE_COOKIE_NAME`, `COOKIE_OPTIONS`,
-  `getSessionSecret()`). `SESSION_SECRET` (≥32 chars) is already required and available server-side.
-- **Env placeholders already anticipate this.** `.env.example` has commented
-  `# GITHUB_CLIENT_ID` / `# GITHUB_CLIENT_SECRET` ("for future authenticated leaderboards") and an
-  `ORIGIN` var. `ORIGIN` is not referenced in app code today (SvelteKit uses it internally).
-- **UI is terminal-centric.** The landing page (`src/routes/+page.svelte`) renders a `Terminal`
-  component (`src/lib/components/Terminal.svelte`) with a text command dispatcher (`help`, `clear`,
-  `man tmux`, `tsr ls|lb|start|free-play|practice|config`). The leaderboard is viewed in-terminal
-  (`tsr lb`) via `createLeaderboardQuery()` → `/api/leaderboard`. Challenge results render on
-  `src/routes/challenge/[id]/+page.svelte`. There is no top-level nav/header chrome — `+layout.svelte`
-  only wraps children in a TanStack `QueryClientProvider`.
-- **Crypto helpers exist** (`src/lib/crypto`: `hkdf`, `sha256`, base64 utils, `stringToBytes`) — reuse
-  these to HMAC-sign the session cookie rather than adding a dependency.
-
-## Approach & architecture
-
-Add a minimal, stateless, cookie-based session (no new DB session table) plus three OAuth endpoints,
-then wire the verified identity through `hooks.server.ts` → `event.locals.user` so both the UI and
-the finish endpoint can read it.
-
-### 1. Configuration (`src/lib/server/env.ts`, `.env.example`)
-
-- Add typed getters that read from `$env/dynamic/private`:
-  - `getGitHubOAuthConfig()` → `{ clientId, clientSecret }`, throwing a clear error if either is
-    missing **only when the OAuth routes are actually hit** (do not break app startup / anonymous
-    play when unconfigured).
-  - Resolve the redirect/callback URL from config: prefer an explicit `ORIGIN` env (already present)
-    joined with the fixed callback path, with a dev fallback derived from the request URL. Keep the
-    id/secret/redirect strictly out of any client-reachable module.
-- Add `SESSION_COOKIE_NAME` (e.g. `tmux_session`) and a cookie-options constant mirroring the
-  existing `COOKIE_OPTIONS` (`httpOnly`, `secure: !dev`, `sameSite: 'lax'`, `path: '/'`, a longer
-  `maxAge`). `sameSite: 'lax'` is required so the cookie survives the top-level GET redirect back
-  from GitHub.
-- Uncomment/expand `.env.example`: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and document that the
-  GitHub OAuth App callback URL must be `${ORIGIN}/api/auth/github/callback`. **All values via env,
-  nothing hardcoded** (acceptance criterion).
-
-### 2. Session helper (`src/lib/server/auth/session.ts` — new)
-
-- Session payload: `{ githubId: number, username: string, iat: number }` (the "lightweight session:
-  GitHub username + id" the issue asks for).
-- `createSessionCookieValue(payload)` / `readSessionCookieValue(raw)`: serialize as
-  `base64(json).base64(hmac)` where the HMAC is `SHA-256`/HKDF over the payload keyed by
-  `getSessionSecret()`. Verify the signature on read and reject on mismatch → tamper-proof, so a
-  client cannot forge a username. Use constant-time-ish comparison.
-- Export `SESSION_COOKIE_NAME` and helpers to set/clear via SvelteKit `cookies`.
-
-### 3. OAuth provider helper (`src/lib/server/auth/github.ts` — new)
-
-Thin wrappers around `fetch` (available in the SvelteKit server runtime / Neon serverless):
-- `buildAuthorizeUrl({ clientId, redirectUri, state, scope })` → GitHub
-  `https://github.com/login/oauth/authorize`. Use **empty scope** (public profile only — issue says
-  no extra scopes; no repo access).
-- `exchangeCodeForToken(code)` → POST `https://github.com/login/oauth/access_token` with
-  `client_id`, `client_secret`, `code`, `redirect_uri`, `Accept: application/json`. **Server-side
-  only** — this is where the secret is used.
-- `fetchGitHubUser(accessToken)` → GET `https://api.github.com/user` (Bearer + a User-Agent header,
-  which GitHub requires), returning `{ id, login }`. `login` is the verified username; `id` is the
-  stable numeric identity.
-
-### 4. OAuth routes (`src/routes/api/auth/...` — new)
-
-- `GET /api/auth/github/login/+server.ts`: generate a random `state`, store it in a short-lived
-  httpOnly cookie (CSRF protection), then 302-redirect to the GitHub authorize URL. If OAuth env is
-  missing, return a clear error/redirect rather than a stack trace.
-- `GET /api/auth/github/callback/+server.ts`: verify `state` param equals the state cookie (reject on
-  mismatch/missing → CSRF guard), clear the state cookie, `exchangeCodeForToken`, `fetchGitHubUser`,
-  build + set the signed session cookie, then 302-redirect back to `/` in a signed-in state. On any
-  failure (bad state, token/user fetch error) redirect home with a lightweight error signal (query
-  param) and no session.
-- `POST /api/auth/logout/+server.ts`: clear the session cookie and redirect/return to the anonymous
-  state. (POST to avoid trivial CSRF sign-out via `<img>`; the client button issues a POST.)
-
-### 5. Request-scoped user (`src/hooks.server.ts` — new, `src/app.d.ts`)
-
-- `handle` hook: read + verify the session cookie, set
-  `event.locals.user = { githubId, username } | null`. Invalid/absent cookie → `null`.
-- `src/app.d.ts`: declare `App.Locals { user: { githubId: number; username: string } | null }` and
-  `App.PageData { user: ... | null }`.
-
-### 6. Expose user to the UI (`src/routes/+layout.server.ts` — new)
-
-- `load` returns `{ user: locals.user }` so every page/component (Terminal) can render signed-in
-  state without an extra fetch. (A tiny `GET /api/auth/session` may be added if the Terminal needs to
-  re-read after login without a full navigation; prefer the layout load first.)
-
-### 7. Attach verified username on submission (`src/routes/api/challenge/finish/+server.ts`)
-
-- After proof validation, read `event.locals.user`. If present, insert
-  `{ challengeId, durationMs, username: user.username, githubId: user.githubId }`; otherwise insert
-  as today (anonymous). **The client body still only carries `proofB64`** — username is never taken
-  from the request, satisfying "cannot be set to an arbitrary value by the client." Keep the existing
-  try/catch so a DB hiccup never fails a valid run. (Add `locals` to the handler signature.)
-
-### 8. Database (`src/lib/server/db/schema.ts` + new drizzle migration)
-
-- The existing `username` column carries the GitHub login (server-stamped). To store the stable
-  verified identity alongside it, **add a nullable `githubId` column** (`bigint`/`text` — GitHub ids
-  are numeric and do not fit the existing `userId` uuid column, so leave `userId` untouched).
-- Run `pnpm db:generate` to produce a new migration under `drizzle/`; commit the generated SQL +
-  meta. Do **not** run `db:push`/`db:migrate` against any real DB here. No backfill of historical
-  rows (out of scope). If adding the column proves unnecessary for acceptance, `username`-only is a
-  viable fallback — but `githubId` is cheap and makes identity durable across username changes.
-
-### 9. Sign-in UI (`Terminal.svelte`, `+page.svelte`/`+layout.svelte`)
-
-Fit the terminal aesthetic and keep it minimal:
-- Add terminal commands to the dispatcher in `src/lib/components/Terminal.svelte`:
-  `tsr login` (navigate to `/api/auth/github/login`), `tsr logout` (POST `/api/auth/logout`),
-  `tsr whoami` (print current GitHub username or "not signed in"). Add them to `help`.
-- Add a small visible signed-in indicator (e.g. `● signed in as <username>` with a sign-out
-  affordance) — placed in the hero/header area of `src/routes/+page.svelte` or a shared spot in
-  `+layout.svelte`, fed by the `+layout.server.ts` `user` data. Provide a "Sign in with GitHub"
-  button for discoverability in addition to the terminal command.
-- The leaderboard rendering already shows `username`; verified entries now display the real GitHub
-  login. (Optional, low-risk: mark verified entries visually — keep minimal unless trivial.)
-
-## Files to change / add
-
-Create:
-- `src/lib/server/auth/session.ts`, `src/lib/server/auth/github.ts` (+ maybe `state.ts`)
-- `src/routes/api/auth/github/login/+server.ts`
-- `src/routes/api/auth/github/callback/+server.ts`
-- `src/routes/api/auth/logout/+server.ts`
-- `src/hooks.server.ts`
-- `src/routes/+layout.server.ts`
-- new `drizzle/00xx_*.sql` + meta (from `db:generate`)
-
-Modify:
-- `src/lib/server/env.ts` (OAuth config getters, session cookie constants)
-- `src/app.d.ts` (`App.Locals`, `App.PageData`)
-- `src/lib/server/db/schema.ts` (add `githubId`)
-- `src/routes/api/challenge/finish/+server.ts` (stamp verified username/id from `locals.user`)
-- `src/lib/components/Terminal.svelte` (login/logout/whoami commands + help)
-- `src/routes/+page.svelte` and/or `src/routes/+layout.svelte` (signed-in indicator + sign-in button)
-- `.env.example` (document GitHub OAuth vars + callback URL)
-
-## Risks & edge cases
-
-- **Secret exposure** — token exchange and secret use must stay in `*.server.ts` / `+server.ts`
-  only; never import auth/github or env secret getters into client code. Verify no secret leaks into
-  the client bundle.
-- **CSRF on OAuth** — always send + verify `state`; reject callback on mismatch/missing.
-- **Cookie tampering** — session cookie is HMAC-signed with `SESSION_SECRET`; reject bad signatures
-  so username stays non-spoofable.
-- **SameSite** — session + state cookies must be `sameSite: 'lax'` (not `strict`) so they survive the
-  GitHub redirect; `secure` only in prod (`!dev`), matching existing `COOKIE_OPTIONS`.
-- **Unconfigured OAuth** — with no `GITHUB_CLIENT_ID/SECRET`, anonymous play and existing routes must
-  keep working; only the auth routes should error, and gracefully.
-- **Redirect URL correctness** — `${ORIGIN}/api/auth/github/callback` must match the GitHub OAuth
-  App config; document in `.env.example`.
-- **Username drift / snapshot** — store `username` (and `githubId`) at submission time; no backfill,
-  no dedup (out of scope).
-- **Runtime** — adapter-auto + Neon serverless in prod: use standard `fetch` and web APIs only.
-- **Clean tree** — do not run `db:push`; commit only the generated migration. Remove any
-  vitest screenshot/attachment churn before finishing.
-
-## How it will be tested
-
-- **Unit (vitest `server` project):**
-  - session sign/verify round-trip; tamper (flipped byte / wrong secret) is rejected.
-  - `buildAuthorizeUrl` includes client_id/redirect_uri/state and no secret; scope is empty.
-  - callback logic with **mocked `fetch`** (stub token + `/user` responses): success sets a valid
-    session cookie; state mismatch / token failure yields no session.
-  - finish endpoint: with `locals.user` set, the inserted row carries `username`/`githubId`; without
-    it, stays anonymous — and `proofB64`-only body cannot inject a username.
-- **Existing suites** (`pnpm test`, `pnpm check`, `pnpm lint`) stay green; add browser test coverage
-  for the signed-in indicator only if it fits the existing `*.browser.test.ts` pattern.
-- **Manual** (documented, not run in CI): create a GitHub OAuth App, set env, sign in, submit a
-  time, confirm the verified username shows on `tsr lb`, then sign out → anonymous.
-
-## Scope flags (iteration 1 — shipped)
-
-- `needs_frontend: true` — terminal commands, signed-in indicator, sign-in/out buttons.
-- `needs_backend: true` — OAuth routes, hooks, session helpers, env config, DB column + migration,
-  finish-endpoint change.
+> This plan replaces the previous `.agent/plan.md` (which covered the now-merged issue #34/#36 GitHub
+> sign-in work, commit `6e36c0f`). The prior `.agent/interface.md` also belongs to that shipped work;
+> the interface stage for this issue will overwrite it.
 
 ---
 
-# Revision — PR #36 feedback (iteration 2)
+## 1. Goal (restated)
 
-The reviewer approved the sign-in feature, then asked for a better **challenge-completion flow**. The
-current completion screen (`src/routes/challenge/[id]/+page.svelte`, the `completion-overlay` card in
-the screenshot) shows only Time + Rank and records the time silently — anonymously unless already
-signed in. The feedback (verbatim):
+Ship an installable `tmux-speedrun` CLI so users run the challenges and practice flows against **their
+own native tmux** instead of the browser-emulated terminal. It must:
 
-1. When completing a challenge and the user is **not** logged in, prompt them to sign in with GitHub
-   to record their time.
-2. Show the current leaderboard and what place they got for that challenge.
-3. Do **not** require login to see the leaderboard / record a time — let them enter a (free-text)
-   username and record the time under that name.
-4. If they log in **after** finishing, the flow must be seamless: pick up where they left off (cookies)
-   and record the just-completed time under their GitHub username.
+- Be installable from a terminal (npm package; `npx tmux-speedrun` / global install).
+- Provide `tmux-speedrun help` listing commands.
+- Run **practice mode** and **challenges** (0–5) against native tmux (free-play is out of scope).
+- Show the **leaderboard** for any challenge.
+- Prompt the user with the current step; the user drives their real tmux to complete it; the CLI
+  advances the encrypted step chain as steps are solved.
+- Run challenges in a **fully isolated tmux server** on a private socket so prompted commands (e.g.
+  `kill-session`, `kill-server`) can never touch the user's real tmux. Torn down on exit/interrupt.
+  **Hard requirement.**
+- Support `tmux-speedrun login` (browser OAuth) attaching the **verified** GitHub username to
+  leaderboard entries, matching the web's server-side identity rules (no client-supplied username).
+- Add a **CLI documentation page** to the website.
 
-## What this changes about the current design
-
-Two things in the shipped code block requirement #4:
-
-- **`/api/challenge/finish` records immediately and deletes the challenge cookie.** Once it returns,
-  the completion is already written (anonymously) and the crypto session is gone — there is nothing
-  left to attach a verified username to after a later login.
-- **The completion screen is ephemeral client state.** `challenge/[id]/+page.svelte` starts a *new*
-  challenge on `onMount`, so a full-page OAuth round-trip (which we need — GitHub is an external
-  origin) destroys the completion view. The result must survive the redirect on the **server** side.
-
-So the core move is: **defer the leaderboard write** behind a short-lived, server-**signed**
-"pending result" cookie, and add an explicit **record** step. Recording resolves the identity at
-record time — verified GitHub identity if signed in, otherwise the free-text name — which keeps the
-approved invariant intact: *a client can never set the username on a **verified** entry* (§0.1 of the
-interface spec). Free-text names are, by the reviewer's explicit request, allowed for anonymous
-entries and are understood to be unverified; verified entries are visually badged so a free-text name
-cannot masquerade as a verified one.
-
-## Approach & architecture (iteration 2)
-
-### A. Signed "pending result" cookie (new helper)
-
-New module `src/lib/server/challenges/pending.ts` (mirrors the HMAC pattern of
-`src/lib/server/auth/session.ts`, reusing `$lib/crypto` + `getSessionSecret()` — no new deps):
-
-- Payload: `{ challengeId: number, durationMs: number, iat: number }`.
-- `createPendingResultToken(payload)` / `verifyPendingResultToken(raw)` — base64url(json).base64url(hmac),
-  `constantTimeEqual` on verify, returns `null` on tamper/garbage, and **null when older than
-  `MAX_CHALLENGE_DURATION_MS` (1h)** (single expiry source of truth). `set/clearPendingResultCookie(cookies)`.
-- Cookie: `PENDING_RESULT_COOKIE_NAME = 'tmux_pending_result'`, `sameSite: 'lax'` (must survive the
-  GitHub redirect), `httpOnly`, `secure: !dev`, `path: '/'`, `maxAge` = 1h. Constants live in
-  `src/lib/server/env.ts` alongside the existing cookie constants.
-- **Why signed:** the client must not be able to forge/alter `durationMs` or `challengeId` between
-  finish and record. The username is *never* in this cookie — it is always derived at record time.
-
-### B. `POST /api/challenge/finish` (modify) — defer when anonymous
-
-- Validate proof + compute `durationMs` exactly as today. Then branch on `locals.user`:
-  - **Signed in already** → record immediately (verified `username` + `githubId`, as today), return
-    `{ valid: true, durationMs, recorded: true, leaderboardPosition, username }`. Do **not** set a
-    pending cookie. (Preserves today's behavior + acceptance criteria for the already-authed path.)
-  - **Not signed in** → do **not** insert. Set the signed pending-result cookie, compute the
-    **provisional** rank (same "count of faster entries + 1" query, without inserting), and return
-    `{ valid: true, durationMs, recorded: false, leaderboardPosition (provisional) }`.
-- Keep clearing `CHALLENGE_COOKIE_NAME` (the crypto challenge session is spent either way). The
-  pending-result cookie — not the crypto session — is what carries the result forward.
-- Invalid proof path unchanged.
-
-### C. `POST /api/challenge/record` (new) — the explicit record step
-
-- Reads + verifies the pending-result cookie → `{ challengeId, durationMs }`; missing/expired/tampered
-  → `400` (nothing to record). Body: `{ username?: string }` (see schema below).
-- Identity resolution (the invariant):
-  - `locals.user` present → insert `{ username: user.username, githubId: user.githubId }`; **ignore any
-    body `username`** (verified wins, non-spoofable).
-  - else → insert `{ username: sanitized free-text name or null }`, `githubId` null.
-- Clear the pending cookie (**single-use** → no double-record; re-POST after clear → 400).
-- Compute + return `{ recorded: true, leaderboardPosition, username }` (final rank via the existing
-  count query). Preserve the finish endpoint's defensive try/catch around the DB block.
-
-### D. OAuth `return_to` (modify login + callback) — seamless login-after-finish
-
-- `GET /api/auth/github/login` accepts `?return_to=<local-path>`. **Open-redirect guard:** accept only
-  same-origin **paths** — must start with a single `/`, reject `//`, `/\`, or anything with a scheme/host;
-  otherwise fall back to the default. Stash the sanitized value in a short-lived httpOnly cookie
-  (`OAUTH_RETURN_COOKIE_NAME`, lax, ~10 min) set next to the state cookie.
-- `GET /api/auth/github/callback` reads + clears that cookie and, on success, `redirect(302, return_to
-  ?? '/?signed_in=1')`. Unchanged otherwise (state/CSRF, token exchange, session cookie).
-- The completion screen's "Sign in with GitHub" button links to
-  `/api/auth/github/login?return_to=/challenge/{index}?completed=1&record=1`. Because the pending-result
-  cookie is `lax`, it survives the round-trip; on return `locals.user` is set and the page auto-records.
-
-### E. Re-hydrate the completion screen server-side (modify challenge route)
-
-- `src/routes/challenge/[id]/+page.server.ts`: also return `user: locals.user` and, when the
-  pending-result cookie verifies **and its `challengeId` matches this route**, a
-  `pendingResult: { durationMs }` (else `null`). This makes the just-finished result durable across the
-  OAuth redirect independent of the ephemeral client store.
-- `src/routes/challenge/[id]/+page.svelte`:
-  - **Guard `onMount` auto-start:** if the URL has `?completed=1` **and** `data.pendingResult` exists,
-    do **not** `challenge.start(...)`; render the completion overlay hydrated from `data.pendingResult`
-    (time) + `data.user`.
-  - If `?record=1` **and** `data.user` is present (returned from OAuth), auto-`POST /api/challenge/record`
-    once, then show the confirmed rank + leaderboard.
-  - Strip the `completed/record` query params after handling (via `replaceState`) so a refresh/re-visit
-    starts a normal challenge.
-
-### F. Completion overlay UI (modify `challenge/[id]/+page.svelte`)
-
-Drive the overlay from a small view-model that unifies "fresh finish" (`challenge.result`) and
-"post-OAuth hydration" (`data.pendingResult`). States:
-
-- **Unrecorded (anonymous):** Time + "You'd place **#N**". Then:
-  - Free-text **username input** (optional) + **"Save time"** button → `POST /api/challenge/record`
-    `{ username }`. Blank name → recorded as Anonymous. One click = low friction (req #3).
-  - An **"or"** divider + **"Sign in with GitHub to save a verified ✓ time"** button →
-    `/api/auth/github/login?return_to=/challenge/{index}?completed=1&record=1` (req #1, #4).
-- **Recorded (either path):** show "Saved as **{username}** {✓ if verified}" and the **final rank**.
-- **Leaderboard panel (req #2):** after recording — and immediately for the already-signed-in path —
-  fetch `/api/leaderboard`, show the top entries **for this challenge**, and **highlight the user's
-  placement** (by rank; if their entry is outside the top 10, show a trailing "… you: #N" row).
-- Keep "Back to Home" / "Try Again".
-
-### G. Client store + service (modify)
-
-- `ChallengeResult` (`src/lib/client/challenge.ts`) gains `recorded: boolean` and keeps
-  `leaderboardPosition` as provisional-or-final. Add `ChallengeSession.record({ username })` → POST
-  `/api/challenge/record`, returning the final `{ recorded, leaderboardPosition, username }`.
-- `challenge-store.svelte.ts`: add a `record(username?)` action that calls the service, updates
-  `result`/`status`, and exposes `recorded` + the resolved `username`. Add a way to seed the store's
-  completion view from server `pendingResult` for the hydration path (or handle hydration purely in the
-  page component — implementer's choice; keep the store the single source for `result`).
-
-### H. Leaderboard `verified` flag (modify `/api/leaderboard`)
-
-- Select `githubId` too and add `verified: entry.githubId != null` to each `LeaderboardEntry`. The UI
-  badges verified entries (✓ / GitHub mark) so a free-text name cannot visually impersonate a verified
-  identity. Existing `username ?? 'Anonymous'` fallback unchanged. Existing consumers (`tsr lb`) ignore
-  the new field harmlessly.
-
-### I. Free-text username schema (modify `src/lib/server/challenges/schemas.ts`)
-
-- `recordChallengeRequestSchema = z.object({ username: z.string().trim().min(1).max(32).optional() })`
-  plus a sanitize step stripping control characters; empty/whitespace → treated as absent (Anonymous).
-  Export `parseRecordRequest`. Svelte auto-escapes on render, so display is XSS-safe; the length cap
-  keeps the leaderboard tidy.
-
-## Files to change / add (iteration 2)
-
-Create:
-- `src/lib/server/challenges/pending.ts` (signed pending-result cookie helpers)
-- `src/routes/api/challenge/record/+server.ts`
-
-Modify:
-- `src/routes/api/challenge/finish/+server.ts` (defer when anonymous; record immediately when signed in)
-- `src/lib/server/env.ts` (pending-result + OAuth return cookie constants)
-- `src/routes/api/auth/github/login/+server.ts` (validated `return_to` → return cookie)
-- `src/routes/api/auth/github/callback/+server.ts` (redirect to `return_to`)
-- `src/routes/api/leaderboard/+server.ts` (`verified` flag)
-- `src/lib/server/challenges/schemas.ts` (`parseRecordRequest`)
-- `src/routes/challenge/[id]/+page.server.ts` (return `user` + `pendingResult`)
-- `src/routes/challenge/[id]/+page.svelte` (completion overlay: record form, sign-in prompt,
-  leaderboard + highlight, OAuth re-hydration + auto-record, guarded auto-start)
-- `src/lib/client/challenge.ts` + `src/lib/client/challenge-store.svelte.ts` (`recorded`, `record()`)
-
-## Risks & edge cases (iteration 2)
-
-- **Verified-username invariant (must not regress).** `/api/challenge/record` ignores a body `username`
-  whenever `locals.user` is set → the reviewer-praised spoof-resistance holds. Add an explicit test for
-  "signed-in + body username → verified used, body ignored".
-- **Time forgery.** Pending-result cookie is HMAC-signed; `durationMs`/`challengeId` cannot be altered
-  client-side. Username is never in the cookie.
-- **Double / replay recording.** Pending cookie is single-use (cleared on record) and expires in 1h;
-  finish sets it only for anonymous finishes. Signed-in finishes record once, no pending cookie.
-- **Open redirect.** `return_to` accepted only as a same-origin path (leading single `/`, reject `//`,
-  `/\`, scheme/host). Test the guard.
-- **SPA re-hydration.** Completion survives OAuth via server `pendingResult`; `onMount` must not
-  auto-start when `?completed=1` + pending result present. Clear the query params after handling.
-- **Free-text safety.** trim + length cap + control-char strip; Svelte escaping prevents XSS; verified
-  badge disambiguates impersonation. Blank → Anonymous.
-- **Abandoned completion.** Deferring means a user who finishes and leaves without clicking "Save" is
-  not recorded (a change from today's silent auto-record). This is the intended trade for letting them
-  choose a name / sign in (req #3); "Save time" is one click with an optional name, keeping friction low.
-- **Unconfigured OAuth.** The "Sign in" button still routes through `/api/auth/github/login`, which
-  already redirects home with `auth_error=not_configured`; the free-text "Save time" path is fully
-  independent, so anonymous recording works with OAuth unconfigured.
-- **Existing test churn.** `src/routes/api/challenge/finish/finish.test.ts` currently asserts an
-  immediate insert for anonymous finishes — that behavior moves to `/record`. The tdd stage must update
-  those expectations (finish now defers + sets pending cookie for anonymous; still records for signed-in)
-  and add `record`/`pending`/`return_to`/`verified-flag` coverage. Flag this so it isn't read as a
-  regression.
-- **Clean tree.** No new migration needed (schema already has `username` + `githubId`). No `db:push`.
-  Remove any test artifacts before finishing.
-
-## How it will be tested (iteration 2)
-
-- **pending.ts:** sign/verify round-trip; tamper (flipped byte / wrong secret / truncated) → `null`;
-  `iat` older than 1h → `null`; garbage/empty → `null`.
-- **`/api/challenge/record`:** signed-in → verified `username`/`githubId`, **body username ignored**;
-  anonymous → free-text name sanitized (trim/length/blank→Anonymous); missing/expired/tampered pending
-  cookie → 400; single-use (cookie cleared, second POST → 400); returns correct final rank.
-- **`/api/challenge/finish`:** anonymous → no row inserted, pending cookie set, `recorded:false`,
-  provisional rank correct; signed-in → row inserted (verified), `recorded:true`, no pending cookie.
-- **login `return_to`:** only local paths accepted (open-redirect guard cases); callback redirects to
-  the stashed path and clears the return cookie.
-- **`/api/leaderboard`:** `verified` reflects `githubId != null`; anonymous/free-text entries `false`.
-- **UI** (browser test if it fits the existing `*.browser.test.ts` pattern; else manual, documented):
-  completion overlay shows record form when anonymous, leaderboard + highlighted rank after recording,
-  and the seamless login-after-finish path attaches the verified name to the just-completed time.
-- Existing `pnpm test` / `check` / `lint` stay green (with the finish-test updates above).
-
-## Scope flags (iteration 2 — shipped)
-
-- `needs_frontend: true` — completion overlay redesign (record form, GitHub prompt, leaderboard +
-  placement highlight, OAuth re-hydration), client store/service changes.
-- `needs_backend: true` — pending-result cookie helper, `/api/challenge/record`, finish-endpoint
-  deferral, OAuth `return_to`, leaderboard `verified` flag, record schema.
+The existing web API (`src/routes/api/**`) remains the **source of truth** for challenge creation,
+progression, and the leaderboard. Practice mode ships bundled/offline.
 
 ---
 
-# Revision — PR #36 feedback (iteration 3)
+## 2. How the existing system works (grounding)
 
-The reviewer approved iteration 2, then asked for two focused changes (verbatim):
+Studied the repo; the CLI must interoperate with these mechanisms exactly.
 
-> Overall the changes are good, however there should not be an input for adding any chosen name when
-> completing a challenge. The user should only have two choices: 1. Save time as "Anonymous" 2. Login
-> to github (save time using username) - they don't need to log in again if they already logged in to
-> github.
->
-> Also make sure that there is a way to log out on the app.
+### 2.1 Challenge crypto protocol (client ↔ server)
 
-This walks back the iteration-2 free-text-username affordance and re-tightens the leaderboard toward
-issue #34's original intent ("leaderboard identities are trustworthy and not free-text/spoofable"):
-the only ways to save a time become **Anonymous** (no name) or a **verified GitHub** identity.
+- **Start** — `POST /api/challenge/start` `{ challengeId, clientPublicKeyJwk }`. Server does ECDH
+  (P-256), generates a fresh randomized instruction sequence (25–100 steps by difficulty,
+  `src/lib/server/challenges/generator.ts` + `pools.ts`), derives a key chain, AES-GCM-encrypts each
+  step, returns `{ serverPublicKeyJwk, sessionSaltB64, steps[] }` where each step is
+  `{ index, nonceB64, ciphertextB64 }`, and sets an httpOnly `tmux_challenge_session` cookie holding
+  the encrypted proof (1h TTL). Steps are never stored server-side.
+- **Client key chain** (`src/lib/client/challenge.ts`, normative to reproduce):
+  - `sharedSecret = ECDH(clientPriv, serverPub)`
+  - `K0 = HKDF(sharedSecret, sessionSalt, "k0", 32)`
+  - Decrypt step `n` with `Kn` (AES-GCM). Plaintext JSON = `{ prompt, requiredInput?, seedInput? }`.
+  - On a correct answer string `a` for step `n`:
+    `K(n+1) = HKDF(Kn, SHA256(a), "step-{n+1}", 32)`.
+  - Correctness is verified locally by **trial-decrypting** step `n+1` with `K(n+1)`: success ⇒
+    answer was right. The last step's derived key is `Kfinal` = the **proof**.
+- **Finish** — `POST /api/challenge/finish` `{ proofB64 }` (proof = base64 of `Kfinal`). Server
+  validates against the session cookie, computes `durationMs` from the cookie's `startTime`.
+  - Signed-in (`locals.user` present) ⇒ inserts leaderboard row immediately, `recorded:true`.
+  - Anonymous ⇒ `recorded:false` + provisional rank; stashes a signed `tmux_pending_result` cookie.
+- **Record** — `POST /api/challenge/record` (empty body). Single-use "save my time" for a user who
+  signs in after finishing. Identity resolved **only** from `locals.user`; body never read for a
+  name. Clears the pending cookie (replay ⇒ 400).
+- **Leaderboard** — `GET /api/leaderboard` (public, cached 60s): `{ [challengeId]: LeaderboardEntry[] }`,
+  `LeaderboardEntry = { rank, username, time, durationMs, verified }`, `verified = githubId != null`.
 
-## Requirement mapping
+**Canonical answer strings** (`expectedAction`, from `generator.ts`): simple commands are the bare
+command name (`split-vertical`, `new-window`, `kill-session`, …); input commands are
+`"<name>:<randomInput>"` (e.g. `rename-window:swift-tiger-42`); the copy-paste step is
+`"copy-paste-sequence:<text>"` (`src/lib/utils/tmux-copy-sequence.ts`). The decrypted step delivers
+`requiredInput` (the exact string for input commands) and `seedInput` (the copy text), so the CLI
+**already knows the input portion** of the answer; only the command-name portion must be inferred
+from the user's action. The command pool per challenge is bundled data (`tmux-commands.ts` +
+`pools.ts`).
 
-1. **No free-text username on completion.** Remove the username `<input>` + "Save time" affordance.
-   The unrecorded/anonymous overlay offers exactly two buttons:
-   - **Save as Anonymous** → record with no name (`username` null).
-   - **Sign in with GitHub to save a verified time** → the existing OAuth round-trip that returns and
-     auto-records under the verified identity.
-2. **Already-signed-in users skip the sign-in step.** In normal flow a signed-in finish already
-   records immediately (§I5), so they never see the choice. For the rare signed-in-but-unrecorded
-   overlay (hydration without `?record=1`), show a single **Save my time** button (records verified) —
-   never prompt an already-authenticated user to "sign in with GitHub" again.
-3. **Remove the free-text path from the backend too**, not just the UI. Since no client surface can set
-   a name anymore, `/api/challenge/record` must stop honoring a body `username` entirely — this closes
-   the door on a crafted client injecting an arbitrary (unverified) name, restoring the non-spoofable
-   invariant end-to-end. Anonymous record ⇒ `username: null`, `githubId: null`. Signed-in record ⇒
-   verified `username`/`githubId` from `locals.user` (unchanged).
-4. **Log out anywhere.** A visible sign-out affordance must be reachable from the app, including the
-   **challenge page** (where the completion screenshot was taken and no logout exists today). Add a
-   signed-in indicator + **Sign out** button to the challenge page header, reusing the existing
-   `POST /api/auth/logout` endpoint. (The home page `auth-bar` and terminal `tsr logout` already exist
-   and stay.)
+In the browser, `src/routes/challenge/[id]/+page.svelte` receives structured signals from the
+emulator (`command-executed` with a ready-made canonical `command` string) and calls
+`challenge.submitAnswer(answer)`. **The CLI must synthesize the equivalent canonical answer from
+observed native-tmux state changes** — this is the core new work (see §5).
 
-## What changes about the current design
+### 2.2 Auth
 
-The iteration-2 code introduced a free-text name at three layers — schema, endpoint, client/UI — plus
-`?record=1` auto-record. Iteration 3 strips the free-text layer and adds a logout affordance to the
-challenge page; the deferral / pending-cookie / OAuth-return / verified-badge machinery is unchanged.
+- `GET /api/auth/github/login` → GitHub authorize (CSRF `state` cookie) → `GET
+  /api/auth/github/callback` exchanges code→token server-side, fetches the verified GitHub user, sets
+  a signed `tmux_session` cookie, redirects home (or to a sanitized same-origin `return_to`).
+- The session cookie is a **stateless HMAC-signed token** (`src/lib/server/auth/session.ts`):
+  `base64url(JSON(payload)).base64url(HMAC_SHA256(payloadB64))`, `payload = { githubId, username,
+  iat }`, signed with `SESSION_SECRET`. `hooks.server.ts` verifies it per request into `locals.user`.
+  `verifySessionToken` only checks signature + field types (no expiry check).
+- `sanitizeReturnPath` (`auth/return-to.ts`) restricts `return_to` to same-origin **local paths** —
+  absolute URLs and schemes are rejected (open-redirect guard). Loopback URLs are therefore **not**
+  expressible via `return_to`; the CLI needs a separate, explicitly-guarded loopback channel (§4).
 
-## Approach & architecture (iteration 3)
+### 2.3 Crypto reuse in Node
 
-### A. Completion overlay — two choices, no input (`src/routes/challenge/[id]/+page.svelte`)
+`src/lib/crypto/*` uses only Web Platform APIs available as Node 22 globals: `crypto.subtle`,
+`crypto.getRandomValues`, `btoa`/`atob`, `TextEncoder`/`TextDecoder`. No Svelte/browser-only deps.
+So the crypto primitives and the client key-chain helpers can be reused **unchanged** by the CLI
+(bundled at build time). Node in this repo is v22; tmux is available on the platform.
 
-- Delete the `usernameInput` state and the `<input class="username-input">` + its "Save time" button
-  and the `.record-row` wrapper; delete the `handleSaveTime` handler.
-- Replace the unrecorded block with a branch on `isSignedIn`:
-  - **Anonymous:** two stacked buttons — **"Save as Anonymous"** (`onclick={handleSaveAnonymous}` →
-    `challenge.record()` with no name) and, after an "or" divider, the existing **"Sign in with GitHub
-    to save a verified time"** button (`handleSignIn`, unchanged `signInHref`).
-  - **Signed in (edge):** a single **"Save my time"** button → `challenge.record()` (records verified).
-- Recorded state, leaderboard panel, verified badge, "Back to Home" / "Try Again", and the invalid-proof
-  branch are **unchanged**.
-- Remove now-dead CSS (`.username-input`, `.record-row`); keep `.record-form`, `.or-divider`,
-  `.github-button`, and button styles.
+---
 
-### B. Record endpoint — drop free-text (`src/routes/api/challenge/record/+server.ts`)
+## 3. Approach & architecture
 
-- Stop reading/parsing the request body for a username. Remove the `parseRecordRequest` import and the
-  body-parse try/catch. Identity resolution reduces to:
-  - `locals.user` set → insert verified `{ username, githubId }` (unchanged).
-  - else → insert `{ username: null }`, `githubId` null.
-- Everything else — pending-cookie verify (400 on missing/expired/tampered), single-use clear, rank
-  count, defensive DB try/catch, response shape `{ recorded, leaderboardPosition, username }` — stays.
-  (`username` in the response is now always the verified name or `null`.)
+### 3.1 Runtime, language, packaging
 
-### C. Record schema — remove the free-text validator (`src/lib/server/challenges/schemas.ts`)
+- **Node.js + TypeScript**, published as npm package **`tmux-speedrun`** with a `bin` entry
+  (`tmux-speedrun`). Node ESM, `engines.node >= 20` (Web Crypto globals; dev/target Node 22).
+- Housed **in this repo as a pnpm workspace package** at `cli/`. Add `cli` to
+  `pnpm-workspace.yaml` (currently only `onlyBuiltDependencies`; convert to include `packages: ['.',
+  'cli']` or the equivalent). This lets the CLI import the app's pure modules directly and keeps them
+  in lockstep.
+- **Bundler:** `tsup` (esbuild) → single ESM bundle + `bin` shim with `#!/usr/bin/env node`. Bundling
+  inlines the reused app modules so the published package is self-contained (no `$lib` alias at
+  runtime). Keep runtime deps minimal (ideally zero beyond Node built-ins; a tiny arg parser is
+  optional — prefer hand-rolled to avoid deps). `open`-the-browser is done via a 3-line
+  platform shim (`open`/`xdg-open`/`start`) rather than a dependency.
+- **Reused app modules** (imported by the CLI build; keep them dependency-free):
+  - `src/lib/crypto/**` (ECDH, HKDF, AES-GCM, utils).
+  - Pure key-chain helpers from `src/lib/client/challenge.ts` — **refactor** the pure functions
+    (`deriveK0`, `deriveNextKey`, `decryptStep`, step/types, `formatDuration`) into a new
+    `src/lib/client/challenge-core.ts` that both the web `ChallengeSession` and the CLI import. The
+    web's `ChallengeSession` keeps its `fetch('/api/…', credentials:'include')` transport; the CLI
+    gets its own transport (base-URL + cookie jar, §4.1). No behavior change to the web client.
+  - Data: `src/lib/data/tmux-commands.ts`, `src/lib/data/practice-flow.ts`,
+    `src/lib/server/challenges/pools.ts` (pure), `src/lib/utils/tmux-copy-sequence.ts`.
+    - Note: `practice-flow.ts` currently imports types from `$lib/utils/tmux-commands` and
+      `$lib/utils/tmux-conf`. Confirm these transitively pull in no browser-only code; if they do,
+      split the needed types into a leaf module. (Risk R7.)
 
-- Remove `recordChallengeRequestSchema`, `parseRecordRequest`, and the `RecordChallengeRequestBody`
-  type (all now dead). Keep every other export (`start`/`finish`/session schemas) untouched.
+### 3.2 CLI command surface
 
-### D. Client service + store — drop the `username` param
+```
+tmux-speedrun help                 # list commands (also default / --help / -h)
+tmux-speedrun login                # browser OAuth via loopback; store verified session
+tmux-speedrun logout               # clear stored session (best-effort POST /api/auth/logout)
+tmux-speedrun whoami               # show signed-in GitHub username (or "anonymous")
+tmux-speedrun leaderboard [id]     # GET /api/leaderboard; render table(s)
+tmux-speedrun practice [category]  # offline practice against isolated native tmux
+tmux-speedrun challenge <id>       # run challenge 0–5 against isolated native tmux
+```
 
-- `src/lib/client/challenge.ts`: `ChallengeSession.record()` and the standalone `recordChallenge()`
-  take **no** argument; the POST body becomes `{}` (empty). Keep `credentials: 'include'` + non-ok
-  throw. `RecordResult` / `ChallengeResult` types are unchanged (`username` can still be `null`).
-- `src/lib/client/challenge-store.svelte.ts`: the `record()` action drops its `username` parameter and
-  calls `recordChallenge()` with no arg. `recorded` / `recordedUsername` getters unchanged.
+Global options / env:
+- `--server <url>` or `TMUX_SPEEDRUN_API` — API base URL (default: the production site origin;
+  pinned as a constant, overridable for dev/testing).
+- `--no-color`, `--json` (for `leaderboard`/`whoami` scripting), `--verbose`.
 
-### E. Logout on the challenge page (`src/routes/challenge/[id]/+page.svelte`)
+### 3.3 Local state
 
-- The load already exposes `data.user` (§I9). Add to the `.challenge-header` a compact auth control:
-  when `data.user`, render `● signed in as {username}` + a **Sign out** button; when signed out, render
-  a small **Sign in** link (`href="/api/auth/github/login"`) for parity/discoverability.
-- Sign-out reuses the home page's pattern: `await fetch('/api/auth/logout', { method: 'POST' })` then
-  `window.location.reload()` (drops back to the anonymous state). Add a tiny `signOut()` helper in the
-  page script and matching header styles that fit the existing terminal aesthetic.
+- Config dir `~/.config/tmux-speedrun/` (respect `$XDG_CONFIG_HOME`).
+  - `session.json` — `{ token, username, githubId, savedAt }`, file mode `0600`. Holds the signed
+    session token obtained by `login`.
+- Challenge-session cookies (`tmux_challenge_session`, `tmux_pending_result`) are **ephemeral**,
+  held only in an in-memory cookie jar for the duration of one `challenge` run.
 
-## Files to change (iteration 3)
+---
 
-Modify:
-- `src/routes/challenge/[id]/+page.svelte` (remove input; two-choice overlay; header sign-out/-in)
-- `src/routes/api/challenge/record/+server.ts` (ignore/stop reading body username)
-- `src/lib/server/challenges/schemas.ts` (remove record schema + `parseRecordRequest`)
-- `src/lib/client/challenge.ts` (`record()` / `recordChallenge()` take no arg)
-- `src/lib/client/challenge-store.svelte.ts` (`record()` drops `username` param)
+## 4. Session transport (resolving the triage gap)
 
-No new files. No schema/migration change. No new backend routes. Home page + terminal logout unchanged.
+The whole protocol relies on browser-held httpOnly cookies and `locals.user`. The CLI carries this
+state in two ways.
 
-## Risks & edge cases (iteration 3)
+### 4.1 Challenge/anonymous cookies — no server change
 
-- **Verified invariant strengthened, not weakened.** Removing the body-username path means the only
-  named entries are verified GitHub identities; anonymous entries are `null`/`verified:false`. Re-assert
-  the spoof test at `/api/challenge/record` (signed-in + body username → body ignored; and now:
-  anonymous + body username → still `null`, name never used).
-- **Signed-in-unrecorded edge.** Must render the single "Save my time" button, never the GitHub prompt,
-  so an authenticated user is never asked to sign in again (req #2).
-- **Anonymous "Save as Anonymous" is one click**, no typing — lower friction than before, still records
-  with a provisional→final rank and the leaderboard panel (iteration-2 behavior preserved).
-- **Logout reachability.** Sign-out must work from the challenge page without breaking an in-progress
-  challenge state expectations — it's a full reload back to anonymous, only meaningful post-completion
-  or between challenges; acceptable and matches the home-page affordance.
-- **Test churn (flag for tdd).** `record.test.ts` cases that assert a free-text/sanitized username on
-  the anonymous path must change to assert `username: null`; `schemas.test.ts` cases for
-  `parseRecordRequest` must be removed. Add/keep: anonymous record → `null`; signed-in record → verified;
-  body username ignored in **both** branches; pending-cookie 400 + single-use unchanged. Any browser/UI
-  test asserting the username input must be updated to the two-button overlay.
-- **Clean tree.** Pure edits/removals; no migrations, no artifacts. Ensure `pnpm-workspace.yaml` and
-  lockfiles stay unchanged (a prior round flagged accidental workspace churn).
+`tmux_challenge_session` and `tmux_pending_result` are `httpOnly`; that flag only blocks **browser
+JS**, not an HTTP client. The CLI uses a small **cookie jar** that reads `Set-Cookie` from the
+`start`/`finish` responses and replays them on `finish`/`record`. This carries the entire challenge
+session with **no backend change**.
 
-## How it will be tested (iteration 3)
+- Implementation: Node `fetch` (global in Node 22) with manual cookie handling (read
+  `response.headers.getSetCookie()`, send `Cookie:` header). Persist only in memory per run.
+- `secure` cookies: cookies are marked `secure` in production, so the API base must be `https` in
+  prod (it is). For local dev against `http://localhost`, `secure` is false — works.
 
-- **`/api/challenge/record`:** anonymous → row inserted with `username: null`, `githubId` null, correct
-  final rank; **body `username` is ignored in both anonymous and signed-in branches**; signed-in →
-  verified `username`/`githubId`; missing/expired/tampered pending cookie → 400; single-use (replay →
-  400) — all unchanged except the anonymous-name expectation.
-- **schemas:** the `parseRecordRequest` suite is removed (function no longer exists); other schema tests
-  stay green.
-- **UI** (browser test if it fits `*.browser.test.ts`; else manual, documented): the completion overlay
-  shows **no text input** — only "Save as Anonymous" + "Sign in with GitHub" when anonymous, and a single
-  "Save my time" when signed in; the challenge header exposes a working **Sign out**.
-- Existing `pnpm test` / `check` / `lint` stay green with the test updates above.
+### 4.2 Auth token — loopback exchange (needs new/adapted endpoints)
 
-## Scope flags (iteration 3 — active)
+The web OAuth sets `tmux_session` in the **user's browser**, which the CLI cannot read. Use a
+loopback redirect that hands the signed session token back to the waiting CLI:
 
-- `needs_frontend: true` — completion-overlay two-choice redesign (remove input), challenge-page
-  header sign-out/-in, client store/service `record()` signature change.
-- `needs_backend: true` — `/api/challenge/record` stops honoring body username, record schema removed.
+1. `tmux-speedrun login` starts a localhost HTTP server bound to **`127.0.0.1:<ephemeral port>`** and
+   generates a random `cli_state` (CSRF).
+2. CLI opens the browser to a **new** endpoint
+   `GET /api/auth/cli/login?port=<port>&state=<cli_state>`. This endpoint:
+   - Validates `port` (numeric, in the ephemeral range) and `state` (opaque token, bounded length).
+   - Sets the normal OAuth `tmux_oauth_state` cookie (reusing `generateOAuthState` +
+     `OAUTH_STATE_COOKIE_*`).
+   - Sets a **new signed, short-lived `tmux_cli_login` cookie** carrying `{ port, cli_state }`
+     (HMAC-signed with `SESSION_SECRET`, ~10 min TTL), marking this OAuth round-trip as CLI-bound.
+   - Redirects to GitHub authorize (reuse `buildAuthorizeUrl`, same fixed callback URL
+     `/api/auth/github/callback`).
+3. GitHub → `GET /api/auth/github/callback` (existing). **Adapt** it: after the existing state check,
+   code→token exchange, user fetch, and `setSessionCookie(...)`, check for the `tmux_cli_login`
+   cookie. If present and valid:
+   - Delete the `tmux_cli_login` cookie (single-use).
+   - Build the loopback URL `http://127.0.0.1:<port>/callback?token=<sessionToken>&state=<cli_state>`
+     where `sessionToken` = the same signed token just minted (`createSessionToken(payload)`), and
+     redirect (302) there — but **only** after passing a strict loopback guard (§4.3). If the guard
+     rejects, fall back to the normal home redirect (never an open redirect).
+   - The browser is still logged into the website too (the cookie is set), which is fine.
+4. The CLI's loopback server receives `/callback`, checks `state === cli_state`, extracts `token`,
+   writes `session.json` (0600), responds with a friendly "You can close this tab" HTML page, and
+   shuts the loopback server down. `login` prints the resolved username (decoded locally from the
+   token payload, or by calling `whoami`).
+5. On subsequent authenticated calls (`finish`, `record`), the CLI sends `Cookie:
+   tmux_session=<token>`; `hooks.server.ts` verifies it → `locals.user` populated → verified
+   username attached. **No change to finish/record.**
+
+**Why reuse the existing session token** (vs. a new CLI token type): minimal server change, and
+`hooks.server.ts`/`finish`/`record` already trust it. The token is non-spoofable (HMAC), and identity
+is still server-verified — the CLI cannot inject a username. The token is bearer-capable and
+effectively long-lived (no expiry check in `verifySessionToken`); acceptable and consistent with the
+web's 30-day cookie. (If reviewers prefer scope-limiting, a dedicated CLI token with an expiry is a
+drop-in alternative — noted, not chosen, to keep the change minimal.)
+
+### 4.3 Loopback redirect guard (security-critical)
+
+New helper `src/lib/server/auth/cli-login.ts`:
+- `signCliLoginState({port, cli_state})` / `verifyCliLoginState(cookie)` — HMAC via `SESSION_SECRET`,
+  mirroring `session.ts`.
+- `buildLoopbackCallbackUrl({port, cli_state, token})` returning a URL **only** when host is
+  `127.0.0.1` (or `localhost`), scheme `http`, path `/callback`, and `port` is an integer in
+  `[1024, 65535]`. Reject everything else → callback falls back to the home redirect. This prevents
+  the callback from becoming an open redirect / token-exfiltration vector. `token` and `cli_state` are
+  URL-encoded.
+- The token only ever leaves over **loopback** to a process on the same machine that proved knowledge
+  of `cli_state`.
+
+### 4.4 New/adapted endpoints — summary
+
+- **New:** `GET /api/auth/cli/login` (`src/routes/api/auth/cli/login/+server.ts`).
+- **Adapted:** `GET /api/auth/github/callback` — branch to loopback redirect when `tmux_cli_login` is
+  present/valid; otherwise unchanged.
+- **New env constants** in `src/lib/server/env.ts`: `CLI_LOGIN_COOKIE_NAME = 'tmux_cli_login'` +
+  `CLI_LOGIN_COOKIE_OPTIONS` (httpOnly, `sameSite:'lax'`, ~10 min).
+- **Unchanged:** `start`, `finish`, `record`, `leaderboard`, `logout`, GitHub `login`.
+
+---
+
+## 5. Native-tmux challenge/practice engine
+
+### 5.1 Environment isolation (hard requirement)
+
+- Every challenge/practice run creates a **dedicated tmux server on a private socket**:
+  `tmux -L tmux-speedrun-<random>` (unique per run; `-L` names a socket under the tmux socket dir).
+  Optionally `-S <tmpdir>/sock` for full path isolation. A generated config file is passed with `-f`
+  (its own prefix/options; independent of the user's `~/.tmux.conf`).
+- **All** challenge commands and the user's attach happen against this socket. The user's default
+  tmux server (default socket) is never referenced — a prompted `kill-session`/`kill-server` can only
+  affect the isolated server.
+- **Teardown:** register handlers for `SIGINT`, `SIGTERM`, `SIGHUP`, normal exit, and uncaught
+  errors; always run `tmux -L <sock> kill-server` (ignore "no server" errors) and remove any temp
+  config/socket. Use a `try/finally` around the run plus process-level signal handlers so an interrupt
+  mid-challenge still cleans up. Idempotent (safe to call twice).
+- **Provable separation** (acceptance): the isolated socket name is distinct and logged; an
+  integration test asserts that after running `kill-server` inside the isolated server, the user's
+  default-socket sessions (created by the test on the default socket) are still present.
+
+### 5.2 Interaction model
+
+The user drives a **real native tmux** (the isolated server) — no emulation. Chosen model:
+
+- The CLI **attaches the user's terminal** into the isolated server (`tmux -L <sock> attach`) so they
+  operate real tmux directly.
+- The current **step prompt, progress (n/total), and timer** are surfaced via the isolated server's
+  **status line** (configured in the generated tmux config: `status-left`/`status-right`, short
+  status interval) and updated by the controller as steps advance (`tmux -L <sock> set -g
+  status-left …` / `display-message`). A large prompt can also be shown via `display-popup` /
+  `display-message` on advance.
+- A **controller process** runs alongside (outside the attached client) observing state changes
+  (§5.3) and advancing the encrypted chain. When the challenge completes, the controller submits the
+  proof, then detaches the user and prints results in the CLI.
+- Non-TTY / not-a-real-terminal ⇒ challenge/practice refuse with a clear message; `leaderboard`,
+  `whoami`, `login` still work.
+
+### 5.3 Action detection — native tmux → canonical answer (core new work)
+
+The controller must convert what the user does in native tmux into the canonical answer string the
+key chain expects. Design: **observe state deltas, generate candidate answer(s), verify by
+trial-decrypt.**
+
+**Observation.** The controller maintains a model of the isolated server's state by querying tmux
+(cheap, scriptable): `list-sessions`, `list-windows -a`, `list-panes -a`
+(`-F` with `#{session_name} #{window_index} #{window_name} #{pane_id} #{pane_active}
+#{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_zoomed_flag} …`),
+`show-buffer`/`list-buffers`, and pane mode via `#{pane_in_mode}`. Changes are driven by:
+1. **tmux hooks** installed in the generated config that fire `run-shell` to a tiny notifier writing
+   an event line to a Unix domain socket / FIFO the controller reads. Install the `after-*` and
+   notification hooks that tmux supports for the pool commands, e.g. `after-split-window`,
+   `after-new-window`, `after-new-session`, `after-kill-pane`, `after-select-pane`,
+   `after-select-window`, `after-rename-window`, `after-rename-session`, `session-closed`,
+   `window-renamed`, `pane-focus-in`, `pane-mode-changed`, etc. The hook is only a **trigger** ("state
+   may have changed"); the controller re-queries and diffs.
+2. A lightweight **poll** fallback (e.g. 100–200ms) as a safety net for anything a hook misses,
+   including read-only/informational commands. (tmux hook coverage varies by version; the poll +
+   trial-decrypt net guarantees progress without depending on exhaustive hook support — see R1.)
+
+**Delta → candidate answers.** From `(prevState, newState[, bufferState])` derive candidates:
+
+| Observation | Candidate canonical answer(s) |
+|---|---|
+| pane count +1; new pane to the right of its sibling (`pane_left` increases, same `pane_top`) | `split-vertical` |
+| pane count +1; new pane below its sibling (`pane_top` increases, same `pane_left`) | `split-horizontal` |
+| window count +1 (same session) | `new-window` (or `break-pane` if a pane left the source window ⇒ `break-pane`) |
+| pane count −1 in a window (window remains) | `kill-pane` |
+| session count +1 | `new-session` |
+| a session disappears (others remain) | `kill-session` |
+| all sessions disappear | `kill-server` |
+| window name changed to `X` | `rename-window:X` (X should equal the step's `requiredInput`) |
+| session name changed to `X` | `rename-session:X` |
+| active pane id changed within window | `select-pane` / `last-pane` (both candidates) |
+| active window index changed | `select-window` / `next-window` / `previous-window` / `last-window` (candidates) |
+| `window_zoomed_flag` toggled | `toggle-zoom` |
+| pane content rotated / positions swapped | `rotate-panes` / `swap-pane` (candidates) |
+| windows swapped by index | `swap-window` |
+| a pane joined from another window (pane count +1 and a window lost a pane / closed) | `join-pane` |
+| paste buffer now contains the step's `seedInput` **and** a paste landed in the focused pane | `copy-paste-sequence:<seedInput>` |
+| informational (no state delta): `list-*`, `show-time`, `display-panes`, `list-keys`, `show-buffer`, `capture-pane`, `list-buffers`, `delete-buffer` | detected via the specific command's hook/notification or command-prompt echo; candidate = the bare command name |
+
+For **input commands** the required input is known from the decrypted step, so the candidate is fully
+formed (`rename-window:<requiredInput>`). For **ambiguous** deltas, emit *all* plausible candidates.
+
+**Verification (the safety net).** For each candidate `a`, compute `K(n+1)=HKDF(Kn,SHA256(a),
+"step-{n+1}")` and trial-decrypt step `n+1` (exactly the web `submitAnswer` check). The candidate that
+decrypts is correct → advance and update the status line. If none decrypt, it was the wrong action or
+wrong input → show "not quite, try again" feedback (the prompt stays). This means detection only needs
+to **include** the right candidate, not classify perfectly — robust against tmux-version quirks.
+
+Because the answer's input portion is server-delivered and the command set is a small fixed pool, the
+candidate space per step is tiny; trial-decrypt is O(candidates) cheap local AES-GCM.
+
+**Completion.** When the last step's key is derived (all steps consumed), the controller has
+`Kfinal`; it POSTs `finish` with `proofB64`, then `record` if applicable (see §6). Duration is
+**server-authoritative** (from the `start` cookie's `startTime`), so the CLI cannot fake timing.
+
+### 5.4 Practice mode (offline)
+
+- Uses bundled `practice-flow.ts` items (per-category command drills + the copy/paste sequence). No
+  server, no crypto, no leaderboard.
+- Same isolated-tmux + status-line prompt + state-diff detection engine as challenges, but "correct"
+  is decided by directly matching the observed action to the practice step's `commandName` /
+  `CopyModeAction` (no key chain). Advances through the item's steps; no timing/submission.
+- Fully functional with no network (acceptance: works offline).
+
+### 5.5 tmux prerequisite handling
+
+- On `challenge`/`practice` start: check `tmux -V`; require a reasonable minimum (e.g. ≥ 3.0 for
+  hooks/format coverage). If missing/too old, print an actionable install hint and exit non-zero.
+- Document supported platforms: macOS, Linux, WSL. tmux is not native to Windows (WSL required) —
+  documented on the CLI page and in `help`.
+
+---
+
+## 6. End-to-end challenge flow in the CLI
+
+1. `tmux-speedrun challenge 0`:
+   - Load stored session token (if any) for authenticated submission.
+   - `POST /api/challenge/start` `{ challengeId, clientPublicKeyJwk }` (ECDH keypair generated
+     locally); capture `tmux_challenge_session` cookie; derive `K0`; decrypt step 0.
+   - Spin the isolated tmux server + controller; attach the user; show step 0 in the status line.
+   - As the user acts, detect → trial-decrypt → advance (§5.3), updating the prompt each step.
+   - On completion: `POST /api/challenge/finish` `{ proofB64 }` (sending `tmux_session` if logged in
+     and `tmux_challenge_session`).
+     - Signed-in ⇒ `recorded:true` with `username` + rank → print confirmation.
+     - Anonymous ⇒ `recorded:false` + provisional rank. Prompt: "Save your time?" → if the user runs
+       `tmux-speedrun login` (or is already logged in) then `POST /api/challenge/record` (sends
+       `tmux_pending_result` + `tmux_session`) to record under the verified username; else offer to
+       save as Anonymous by calling `record` without a session token (server records `username:null`).
+   - Tear down the isolated server; print final placement + a link to the web leaderboard.
+
+---
+
+## 7. Website CLI documentation page
+
+- New route `src/routes/cli/+page.svelte` documenting: install (`npm i -g tmux-speedrun` / `npx`),
+  the command list, `login` (browser OAuth) flow, the **isolation guarantee** (dedicated tmux server
+  on a private socket, torn down on exit; your real sessions are never touched), and supported
+  platforms. Match existing page/layout styling (Tailwind; see `tmux-conf/+page.svelte` as a
+  structural reference).
+- Add a nav link to the CLI page in `src/routes/+layout.svelte` (mirror how existing routes are
+  linked). Keep copy consistent with `README.md`.
+- Optionally add `+page.ts`/metadata for title/OG; reuse existing patterns. No server data needed
+  (static content).
+
+---
+
+## 8. Files to change / add
+
+**New CLI package (`cli/`):**
+- `cli/package.json` (name `tmux-speedrun`, `bin`, `type:module`, build/test scripts, `engines`),
+  `cli/tsconfig.json`, `cli/tsup.config.ts`.
+- `cli/src/index.ts` (arg routing + `help`), `cli/src/commands/{login,logout,whoami,leaderboard,
+  practice,challenge}.ts`.
+- `cli/src/api/client.ts` (fetch + cookie jar + base URL), `cli/src/api/challenge-session.ts`
+  (CLI transport reusing `challenge-core`), `cli/src/auth/{loopback-server,token-store}.ts`.
+- `cli/src/tmux/{server.ts (isolated socket lifecycle),config.ts (generated conf+hooks),
+  observer.ts (state query+diff),detector.ts (delta→candidates),controller.ts}.ts`.
+- `cli/src/ui/{status-line,leaderboard-table,prompts}.ts`.
+- `cli/README.md`.
+
+**Shared/refactor (web app):**
+- `src/lib/client/challenge-core.ts` — extract pure key-chain/step helpers from `challenge.ts`;
+  update `challenge.ts` to import them (no behavior change). Existing `challenge.test.ts` must still
+  pass.
+- `pnpm-workspace.yaml` — add the `cli` package.
+
+**Backend (auth loopback):**
+- `src/routes/api/auth/cli/login/+server.ts` — new.
+- `src/routes/api/auth/github/callback/+server.ts` — adapt for CLI loopback redirect.
+- `src/lib/server/auth/cli-login.ts` — new (sign/verify CLI-login state; loopback URL guard).
+- `src/lib/server/env.ts` — add `CLI_LOGIN_COOKIE_NAME` + options.
+
+**Website:**
+- `src/routes/cli/+page.svelte` — new docs page; `src/routes/+layout.svelte` — nav link.
+
+**Docs:**
+- Update root `README.md` to mention the CLI + link the docs page.
+
+---
+
+## 9. Risks & edge cases
+
+- **R1 — Action detection completeness (highest risk).** tmux hook availability varies by version and
+  some pool commands (informational/read-only) produce no state delta. Mitigation: the poll +
+  **trial-decrypt verifier** guarantees correctness of any candidate we produce; the open task is
+  ensuring the right candidate is *generated* for every one of the ~40 pool commands. The
+  interface/impl stage must build an explicit, empirically-verified mapping table against a real tmux,
+  with an integration test per command family. Ambiguous deltas emit multiple candidates.
+- **R2 — Isolation teardown must be bulletproof.** Any exit path (signal, crash, completion) must
+  `kill-server` the isolated socket and never the default one. Signal handlers + `try/finally` +
+  idempotent cleanup; integration test proves the default server is untouched. (Hard requirement.)
+- **R3 — Loopback auth security.** Strict loopback guard (127.0.0.1/localhost only), `cli_state`
+  CSRF, single-use signed `tmux_cli_login` cookie, token only over loopback. Fall back to home
+  redirect (never open-redirect) if the guard fails. Port-in-use / browser-can't-open ⇒ print the URL
+  to paste manually; login timeout with a clear message.
+- **R4 — Cookie handling.** httpOnly cookies are carried by the CLI's jar (reading
+  `getSetCookie()`); `secure` cookies require https in prod (satisfied). Verify Node `fetch`
+  `Set-Cookie` parsing (use `headers.getSetCookie()` in Node 22).
+- **R5 — Crypto parity.** The CLI's key chain must match the server byte-for-byte. Mitigated by
+  reusing `src/lib/crypto` + `challenge-core` unchanged and adding a parity test (start against a
+  local dev server, complete a scripted run, assert `finish` accepts the proof).
+- **R6 — Duration/anti-cheat.** Timing is server-side (cookie `startTime` → `finish`); the CLI can't
+  fake it. The pre-existing property that a client knows `requiredInput` is unchanged (out of scope to
+  alter the crypto scheme). The CLI faithfully requires real native-tmux actions.
+- **R7 — Importing app modules into a Node bundle.** `practice-flow.ts`/`pools.ts` must not
+  transitively pull browser-only code. Verify at build; if needed, split leaf type modules. Bundling
+  (tsup) resolves `$lib` aliases at build time so the published package is standalone.
+- **R8 — Non-TTY / CI.** Interactive modes require a TTY; detect and degrade gracefully.
+- **R9 — Windows.** tmux needs WSL; documented. CLI still installs; `challenge`/`practice` guard on
+  `tmux -V`.
+- **R10 — Working-tree cleanliness.** Do not commit build output (`cli/dist`), caches, or lockfile
+  churn beyond an intentional `cli` dependency addition; add `cli/dist` etc. to `.gitignore`.
+
+---
+
+## 10. Testing
+
+**Unit (fast, no tmux/network):**
+- `challenge-core` key-chain parity (reuse/extend existing `crypto.test.ts` / `challenge.test.ts`).
+- Detector: feed synthetic `(prevState, newState, buffer)` deltas → assert candidate answer sets
+  (all mappings in §5.3, including ambiguous multi-candidate cases and copy-paste).
+- Cookie jar: parse `Set-Cookie`, replay, expiry/secure handling.
+- Loopback guard (`cli-login.ts`): accept `http://127.0.0.1:<valid port>/callback`; reject absolute
+  hosts, non-loopback, bad schemes/ports, control chars (analogous to `return-to.test.ts`).
+- Arg parsing / `help` output; leaderboard table + `--json` rendering.
+
+**Server tests (Vitest, existing harness):**
+- `GET /api/auth/cli/login` sets `tmux_oauth_state` + signed `tmux_cli_login`, redirects to GitHub.
+- Callback: with a valid `tmux_cli_login`, redirects to the loopback URL carrying the token, only for
+  allowed loopback targets; with a disallowed target, falls back to home (no open redirect); clears
+  the cookie (single-use). State-mismatch → existing error path. Non-CLI flow unchanged.
+
+**Integration (gated on tmux; likely a separate opt-in script/CI job):**
+- Isolated-server lifecycle: create socket, run scripted tmux commands, assert detector emits correct
+  canonical actions per pool command; teardown kills only the isolated socket (create a default-socket
+  session first, assert it survives `kill-server` inside the isolated one — proves R2/acceptance).
+- Full challenge E2E against a local dev server + test DB: `start`→scripted actions→`finish`→row
+  recorded; anonymous→`record`→row; authenticated path stamps the verified username.
+
+**Website:** `cli/+page.svelte` renders; nav link present (mirror `home-page.browser.test.ts`
+patterns as applicable).
+
+---
+
+## 11. Acceptance-criteria mapping
+
+- Installable CLI + working `help` → §3.1/§3.2, packaging, help test.
+- `login` completes browser OAuth, stores usable session → §4.2/§4.3.
+- Start+complete a challenge end-to-end against native tmux, time recorded under verified username →
+  §5/§6 + E2E test.
+- Practice works offline → §5.4.
+- Leaderboard viewable from CLI → `leaderboard` command (§3.2) via `GET /api/leaderboard`.
+- Isolated tmux server, provably separate, torn down on exit; prompted `kill-session` can't touch real
+  sessions → §5.1/R2 + isolation test.
+- CLI documentation page on the website → §7.
+
+---
+
+## 12. Scope flags
+
+- **needs_backend: true** — the CLI (Node/TypeScript) is backend work; plus new/adapted auth
+  endpoints (`/api/auth/cli/login`, GitHub callback), new server auth helper + env constants, and the
+  `challenge-core` refactor.
+- **needs_frontend: true** — new website CLI documentation page (`src/routes/cli/+page.svelte`) and a
+  nav link in `+layout.svelte`.
