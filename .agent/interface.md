@@ -10,8 +10,6 @@ Issue: jzohdi/tmux-speedrun#35 · Plan: `.agent/plan.md`
 Legend: **NEW** = create · **ADAPT** = modify existing (keep old behaviour on the non-CLI path) ·
 **REUSE** = import unchanged.
 
----
-
 ## 0. Module map
 
 ```

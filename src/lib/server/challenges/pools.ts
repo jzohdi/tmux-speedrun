@@ -12,8 +12,8 @@
  * - C1-C2: Beginner + Intermediate (30 commands)
  * - C3-C5: All commands, including Advanced (39 commands)
  *
- * Instruction counts grow by 15 per challenge level:
- * C0=25, C1=40, C2=55, C3=70, C4=85, C5=100
+ * Instruction counts taper as challenges progress:
+ * C0=18, C1=26, C2=33, C3=39, C4=44, C5=48
  *
  * Input commands (rename-window, rename-session) add security by
  * expanding the answer space from 39 options to 39 + (N × 144,000),
@@ -21,6 +21,7 @@
  */
 
 import type { TmuxCommand } from '$lib/data/tmux-commands';
+import { CHALLENGE_INSTRUCTION_COUNTS } from '$lib/data/challenge-scaling';
 import { TMUX_COMMANDS } from '$lib/data/tmux-commands';
 
 /**
@@ -37,15 +38,7 @@ export type PoolConfig = {
 	minInputCommands: number;
 };
 
-/**
- * Base instruction count for challenge 0.
- */
-const BASE_INSTRUCTION_COUNT = 25;
-
-/**
- * Instruction count increment per challenge level.
- */
-const INSTRUCTION_INCREMENT = 15;
+const MIN_INPUT_COMMANDS = 2;
 
 /**
  * Pool configurations for each challenge level.
@@ -56,39 +49,39 @@ const INSTRUCTION_INCREMENT = 15;
 export const CHALLENGE_POOLS: PoolConfig[] = [
 	{
 		challengeId: 0,
-		instructionCount: BASE_INSTRUCTION_COUNT,
+		instructionCount: CHALLENGE_INSTRUCTION_COUNTS[0],
 		filter: (cmd) => cmd.difficulty === 'beginner',
-		minInputCommands: 3
+		minInputCommands: MIN_INPUT_COMMANDS
 	},
 	{
 		challengeId: 1,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT,
+		instructionCount: CHALLENGE_INSTRUCTION_COUNTS[1],
 		filter: (cmd) => cmd.difficulty === 'beginner' || cmd.difficulty === 'intermediate',
-		minInputCommands: 5
+		minInputCommands: MIN_INPUT_COMMANDS
 	},
 	{
 		challengeId: 2,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 2,
+		instructionCount: CHALLENGE_INSTRUCTION_COUNTS[2],
 		filter: (cmd) => cmd.difficulty === 'beginner' || cmd.difficulty === 'intermediate',
-		minInputCommands: 7
+		minInputCommands: MIN_INPUT_COMMANDS
 	},
 	{
 		challengeId: 3,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 3,
+		instructionCount: CHALLENGE_INSTRUCTION_COUNTS[3],
 		filter: () => true,
-		minInputCommands: 9
+		minInputCommands: MIN_INPUT_COMMANDS
 	},
 	{
 		challengeId: 4,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 4,
+		instructionCount: CHALLENGE_INSTRUCTION_COUNTS[4],
 		filter: () => true,
-		minInputCommands: 11
+		minInputCommands: MIN_INPUT_COMMANDS
 	},
 	{
 		challengeId: 5,
-		instructionCount: BASE_INSTRUCTION_COUNT + INSTRUCTION_INCREMENT * 5,
+		instructionCount: CHALLENGE_INSTRUCTION_COUNTS[5],
 		filter: () => true,
-		minInputCommands: 13
+		minInputCommands: MIN_INPUT_COMMANDS
 	}
 ];
 
