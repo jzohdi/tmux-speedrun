@@ -1,4 +1,5 @@
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import devtoolsJson from 'vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
@@ -10,6 +11,8 @@ const vitestBrowserRunner = globalThis as typeof globalThis & {
 		wrapDynamicImport<T>(load: () => Promise<T> | T): Promise<T> | T;
 	};
 };
+const require = createRequire(import.meta.url);
+const dependencyWorkspaceRoot = getDependencyWorkspaceRoot('@sveltejs/kit/package.json');
 
 // Vitest browser mode currently leaks its dynamic-import wrapper into SvelteKit's
 // SSR environment. Mirror the upstream workaround until the upstream fix lands.
@@ -17,16 +20,13 @@ vitestBrowserRunner.__vitest_browser_runner__ ??= {
 	wrapDynamicImport: <T>(load: () => Promise<T> | T) => load()
 };
 
-const repoRootPath = fileURLToPath(new URL('../..', import.meta.url));
-
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit(), devtoolsJson()],
 	server: {
 		fs: {
-			allow: [repoRootPath]
+			allow: [dependencyWorkspaceRoot]
 		}
 	},
-
 	test: {
 		expect: { requireAssertions: true },
 
@@ -59,3 +59,15 @@ export default defineConfig({
 		]
 	}
 });
+
+function getDependencyWorkspaceRoot(moduleId: string): string {
+	const resolvedModulePath = require.resolve(moduleId);
+	const pathSegments = resolvedModulePath.split(path.sep);
+	const nodeModulesIndex = pathSegments.indexOf('node_modules');
+
+	if (nodeModulesIndex <= 0) {
+		throw new Error(`Could not determine workspace root for ${moduleId}`);
+	}
+
+	return pathSegments.slice(0, nodeModulesIndex).join(path.sep) || path.sep;
+}
