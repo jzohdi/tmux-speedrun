@@ -81,6 +81,7 @@
 		addOutput('  tsr free-play       Practice keybindings in free play mode');
 		addOutput('  tsr practice        Learn tmux commands step by step');
 		addOutput('  tsr config          Edit and apply tmux.conf');
+		addOutput('  tsr cli             Docs for the native-tmux CLI');
 		addOutput('  tsr login           Sign in with GitHub');
 		addOutput('  tsr logout          Sign out');
 		addOutput('  tsr whoami          Show your signed-in GitHub username');
@@ -274,6 +275,12 @@
 				return;
 			}
 
+			if (subcommand === 'cli') {
+				addOutput('Opening the CLI docs...');
+				goto('/cli');
+				return;
+			}
+
 			if (subcommand === 'login') {
 				loginWithGitHub();
 				return;
@@ -291,7 +298,7 @@
 
 			addOutput(`Unknown subcommand: ${subcommand}`, 'error');
 			addOutput(
-				'Available: ls, lb, start, free-play, practice, config, login, logout, whoami',
+				'Available: ls, lb, start, free-play, practice, config, cli, login, logout, whoami',
 				'error'
 			);
 			return;
