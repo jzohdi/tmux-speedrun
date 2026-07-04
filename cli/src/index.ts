@@ -1,6 +1,9 @@
-#!/usr/bin/env node
 /**
  * tmux-speedrun CLI entrypoint (issue #35, interface §9).
+ *
+ * NOTE: the `#!/usr/bin/env node` shebang is injected by tsup at build time
+ * (see tsup.config.ts `banner`). Do not add one here — a second shebang below
+ * line 1 is a syntax error and breaks the built binary.
  *
  * Parses args, resolves config + stored session, builds the API client, and
  * dispatches to the matching command. Exit codes: 0 success, 1 runtime error,
