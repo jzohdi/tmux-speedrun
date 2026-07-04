@@ -13,12 +13,14 @@ import {
 	getGitHubOAuthConfig,
 	getGitHubRedirectUri,
 	OAUTH_STATE_COOKIE_NAME,
-	OAUTH_RETURN_COOKIE_NAME
+	OAUTH_RETURN_COOKIE_NAME,
+	CLI_LOGIN_COOKIE_NAME
 } from '$lib/server/env';
 import { verifyOAuthState } from '$lib/server/auth/state';
 import { sanitizeReturnPath } from '$lib/server/auth/return-to';
 import { exchangeCodeForToken, fetchGitHubUser } from '$lib/server/auth/github';
-import { setSessionCookie } from '$lib/server/auth/session';
+import { setSessionCookie, createSessionToken } from '$lib/server/auth/session';
+import { verifyCliLoginState, buildLoopbackCallbackUrl } from '$lib/server/auth/cli-login';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	// Read + clear the post-login return path (iteration 2). Clearing on every
@@ -53,6 +55,30 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			username: ghUser.login,
 			iat: Date.now()
 		});
+
+		// Issue #35: CLI loopback branch. If this OAuth round-trip was started by
+		// `tmux-speedrun login`, hand the freshly-minted (verified) session token
+		// back to the waiting CLI over a strictly-guarded loopback redirect. The
+		// browser cookie is still set (the user is logged into the website too).
+		const cliRaw = cookies.get(CLI_LOGIN_COOKIE_NAME);
+		if (cliRaw) {
+			cookies.delete(CLI_LOGIN_COOKIE_NAME, { path: '/' }); // single-use
+			const cli = await verifyCliLoginState(cliRaw);
+			if (cli) {
+				const sessionToken = await createSessionToken({
+					githubId: ghUser.id,
+					username: ghUser.login,
+					iat: Date.now()
+				});
+				const loopback = buildLoopbackCallbackUrl({
+					port: cli.port,
+					cliState: cli.cliState,
+					token: sessionToken
+				});
+				// Only path the token leaves over; guard failure falls through to home.
+				if (loopback) redirect(302, loopback);
+			}
+		}
 	} catch (err) {
 		// Re-throw SvelteKit redirects; only treat real failures as OAuth errors.
 		if (isRedirect(err)) throw err;

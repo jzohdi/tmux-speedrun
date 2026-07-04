@@ -16,27 +16,19 @@ import {
 	bytesToBase64,
 	bufferToBytes
 } from '$lib/crypto';
-import { hkdf, sha256 } from '$lib/crypto/hkdf';
-import { aesGcmDecrypt } from '$lib/crypto/aes-gcm';
-import { bytesToString } from '$lib/crypto/utils';
+import {
+	deriveK0,
+	deriveNextKey,
+	decryptStep,
+	formatDuration,
+	type DecryptedStep,
+	type EncryptedStep
+} from './challenge-core';
 
-/**
- * Step payload after decryption.
- */
-export type DecryptedStep = {
-	prompt: string;
-	requiredInput?: string;
-	seedInput?: string;
-};
-
-/**
- * Encrypted step from the server.
- */
-export type EncryptedStep = {
-	index: number;
-	nonceB64: string;
-	ciphertextB64: string;
-};
+// Re-export the moved pure helpers + types so existing importers keep working
+// after the extraction (the CLI, issue #35, imports them from challenge-core).
+export { formatDuration };
+export type { DecryptedStep, EncryptedStep };
 
 /**
  * Challenge state during an active session.
@@ -325,60 +317,4 @@ export async function recordChallenge(): Promise<RecordResult> {
 	}
 
 	return response.json();
-}
-
-/**
- * Derive K0 from shared secret and session salt.
- */
-async function deriveK0(
-	sharedSecret: ArrayBuffer,
-	sessionSalt: Uint8Array<ArrayBuffer>
-): Promise<ArrayBuffer> {
-	return hkdf(sharedSecret, sessionSalt, 'k0', 32);
-}
-
-/**
- * Derive the next key in the chain.
- *
- * Kn+1 = HKDF(Kn, SHA256(answer), "step-{n+1}")
- */
-async function deriveNextKey(
-	currentKey: ArrayBuffer,
-	answer: string,
-	stepIndex: number
-): Promise<ArrayBuffer> {
-	const answerHash = await sha256(answer);
-
-	return hkdf(currentKey, new Uint8Array(answerHash), `step-${stepIndex + 1}`, 32);
-}
-
-/**
- * Decrypt a step payload.
- */
-async function decryptStep(key: ArrayBuffer, encryptedStep: EncryptedStep): Promise<DecryptedStep> {
-	const nonce = base64ToBytes(encryptedStep.nonceB64);
-	const ciphertext = base64ToBytes(encryptedStep.ciphertextB64);
-
-	const plaintext = await aesGcmDecrypt(key, nonce, ciphertext);
-
-	return JSON.parse(bytesToString(plaintext)) as DecryptedStep;
-}
-
-/**
- * Format duration in a human-readable way.
- *
- * @param ms - Duration in milliseconds
- * @returns Formatted string like "12.3s" or "1m 23.4s"
- */
-export function formatDuration(ms: number): string {
-	const seconds = ms / 1000;
-
-	if (seconds < 60) {
-		return `${seconds.toFixed(1)}s`;
-	}
-
-	const minutes = Math.floor(seconds / 60);
-	const remainingSeconds = seconds % 60;
-
-	return `${minutes}m ${remainingSeconds.toFixed(1)}s`;
 }

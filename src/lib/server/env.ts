@@ -137,6 +137,24 @@ export const OAUTH_RETURN_COOKIE_OPTIONS = {
 	maxAge: 60 * 10 // 10 minutes
 };
 
+// ---------------------------------------------------------------------------
+// Issue #35: CLI loopback-login cookie. Marks an in-flight OAuth round-trip as
+// CLI-bound (carries the loopback {port, cliState}); short-lived + single-use.
+// See `.agent/interface.md` §4.1.
+// ---------------------------------------------------------------------------
+
+/** CLI-login round-trip cookie name. */
+export const CLI_LOGIN_COOKIE_NAME = 'tmux_cli_login';
+
+/** Short-lived CLI-login cookie (10 min). sameSite 'lax' so it survives the GitHub redirect. */
+export const CLI_LOGIN_COOKIE_OPTIONS = {
+	httpOnly: true,
+	secure: !dev,
+	sameSite: 'lax' as const,
+	path: '/',
+	maxAge: 60 * 10 // 10 minutes
+};
+
 export type GitHubOAuthConfig = { clientId: string; clientSecret: string };
 
 /**
