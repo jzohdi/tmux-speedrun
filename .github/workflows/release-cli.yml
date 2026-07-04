@@ -1,0 +1,66 @@
+name: Release CLI to npm
+
+# Publishes the cli/ workspace package to npm via OIDC trusted publishing
+# (no NPM_TOKEN secret; configure the trusted publisher on npmjs.com for
+# this repo + workflow filename). Triggered by pushing a v* tag whose
+# version matches cli/package.json.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write # required for npm OIDC trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # Matches the pnpm major Vercel resolves for this lockfile.
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Trusted publishing requires npm >= 11.5.1.
+      - name: Update npm for OIDC support
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check tag matches cli/package.json version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./cli/package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag v${tag} does not match cli/package.json version ${pkg}" >&2
+            exit 1
+          fi
+
+      - name: Run tests
+        run: pnpm run test
+
+      - name: Typecheck CLI
+        working-directory: cli
+        run: npm run typecheck
+
+      - name: Build and smoke-test CLI
+        working-directory: cli
+        run: |
+          npm run build
+          node dist/index.js help
+
+      - name: Publish to npm
+        working-directory: cli
+        run: npm publish
