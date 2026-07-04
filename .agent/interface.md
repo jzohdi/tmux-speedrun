@@ -40,24 +40,35 @@ shell CSS); only the props type and the `children` snippet are new.
 import type { Snippet } from 'svelte';
 
 type PagerProps = {
-	onQuit: () => void;                    // called on `q` / `Escape`
-	onToggleMaximize?: () => void;         // called on Ctrl/Cmd+Enter (no-op if absent)
-	containerRef?: HTMLDivElement | null;  // $bindable(null) — exposes the focusable container
-	ariaLabel: string;                     // accessible name of the role="application" container
-	children: Snippet;                     // pager body, rendered inside the scroll container
+	onQuit: () => void; // called on `q` / `Escape`
+	onToggleMaximize?: () => void; // called on Ctrl/Cmd+Enter (no-op if absent)
+	containerRef?: HTMLDivElement | null; // $bindable(null) — exposes the focusable container
+	ariaLabel: string; // accessible name of the role="application" container
+	children: Snippet; // pager body, rendered inside the scroll container
 };
 ```
 
 ### Markup contract (carried over verbatim — class names are external API)
 
 ```svelte
-<div class="manpage-container" role="application" aria-label={ariaLabel} tabindex="0"
-     bind:this={containerElement} onkeydown onclick onfocus onblur>
+<div
+	class="manpage-container"
+	role="application"
+	aria-label={ariaLabel}
+	tabindex="0"
+	bind:this={containerElement}
+	onkeydown
+	onclick
+	onfocus
+	onblur
+>
 	<div class="manpage-content" bind:this={scrollContainer}>
 		{@render children()}
 		<div class="content-spacer"></div>
 	</div>
-	<div class="status-bar"><span class="colon">:</span><span class="cursor" class:visible={isFocused}></span></div>
+	<div class="status-bar">
+		<span class="colon">:</span><span class="cursor" class:visible={isFocused}></span>
+	</div>
 </div>
 ```
 
@@ -90,16 +101,20 @@ type PagerProps = {
 type ManpageProps = {
 	onQuit: () => void;
 	onToggleMaximize?: () => void;
-	containerRef?: HTMLDivElement | null;  // $bindable(null)
-	commands?: TmuxCommand[];              // optional filter, as today
+	containerRef?: HTMLDivElement | null; // $bindable(null)
+	commands?: TmuxCommand[]; // optional filter, as today
 };
 ```
 
 ### Body
 
 ```svelte
-<Pager {onQuit} {onToggleMaximize} bind:containerRef
-       ariaLabel="Manual page viewer - use arrow keys or j/k to scroll, q to quit">
+<Pager
+	{onQuit}
+	{onToggleMaximize}
+	bind:containerRef
+	ariaLabel="Manual page viewer - use arrow keys or j/k to scroll, q to quit"
+>
 	<!-- existing TMUX(1) header + sections, byte-identical markup -->
 </Pager>
 ```
@@ -123,7 +138,7 @@ All-challenge leaderboard content inside `<Pager>`.
 type LeaderboardPagerProps = {
 	onQuit: () => void;
 	onToggleMaximize?: () => void;
-	containerRef?: HTMLDivElement | null;  // $bindable(null)
+	containerRef?: HTMLDivElement | null; // $bindable(null)
 };
 ```
 
@@ -174,10 +189,10 @@ Content CSS lives here (own scoped styles); reuse the man-page look (monospace, 
 ```ts
 import LeaderboardPager from './LeaderboardPager.svelte';
 
-type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man' | 'lb-pager';  // +'lb-pager'
+type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man' | 'lb-pager'; // +'lb-pager'
 
-let pagerRef = $state<HTMLDivElement | null>(null);  // RENAMED from manpageRef; binds to whichever
-                                                     // pager is active ('man' or 'lb-pager' — never both)
+let pagerRef = $state<HTMLDivElement | null>(null); // RENAMED from manpageRef; binds to whichever
+// pager is active ('man' or 'lb-pager' — never both)
 
 function showLeaderboardPager(): void {
 	// mirrors showManPage()
@@ -192,11 +207,11 @@ function showLeaderboardPager(): void {
 if (subcommand === 'lb') {
 	const challengeNum = args[1];
 	if (!challengeNum) {
-		showLeaderboardPager();   // was: usage error
+		showLeaderboardPager(); // was: usage error
 		return;
 	}
-	showLeaderboard(challengeNum);  // UNCHANGED — inline single-challenge view, incl. its
-	return;                         // invalid-id error naming the valid range 0-{max}
+	showLeaderboard(challengeNum); // UNCHANGED — inline single-challenge view, incl. its
+	return; // invalid-id error naming the valid range 0-{max}
 }
 ```
 
@@ -227,11 +242,23 @@ function focusInput() {
 ### Template
 
 ```svelte
-<div class="terminal-body" class:man-mode={mode === 'man' || mode === 'lb-pager'} bind:this={terminalRef}>
+<div
+	class="terminal-body"
+	class:man-mode={mode === 'man' || mode === 'lb-pager'}
+	bind:this={terminalRef}
+>
 	{#if mode === 'man'}
-		<Manpage onQuit={clearAndResetMode} onToggleMaximize={toggleMaximize} bind:containerRef={pagerRef} />
+		<Manpage
+			onQuit={clearAndResetMode}
+			onToggleMaximize={toggleMaximize}
+			bind:containerRef={pagerRef}
+		/>
 	{:else if mode === 'lb-pager'}
-		<LeaderboardPager onQuit={clearAndResetMode} onToggleMaximize={toggleMaximize} bind:containerRef={pagerRef} />
+		<LeaderboardPager
+			onQuit={clearAndResetMode}
+			onToggleMaximize={toggleMaximize}
+			bind:containerRef={pagerRef}
+		/>
 	{:else}
 		<!-- existing history / list / input markup unchanged -->
 	{/if}
@@ -258,7 +285,7 @@ truth; displayed string IS the executed string):
 ```ts
 const hints: Hint[] = [
 	{ command: 'tsr ls', description: 'list challenges' },
-	{ command: 'tsr lb', description: 'view leaderboards' },   // NEW
+	{ command: 'tsr lb', description: 'view leaderboards' }, // NEW
 	{ command: 'tsr start <id>', description: 'begin a challenge' },
 	{ command: 'tsr practice', description: 'learn step by step' },
 	{ command: 'tsr config', description: 'customize tmux.conf' },
@@ -300,7 +327,7 @@ existing tests do (`Terminal.browser.test.ts:9–12`):
   and a real pass-through `getEntriesForChallenge: (data, id) => data?.[String(id)] ?? []`;
   pending stub `{ isPending: true, isError: false, data: undefined }`; error stub
   `{ isPending: false, isError: true, data: undefined }`. `LeaderboardResponse =
-  Record<string, LeaderboardEntry[]>` keyed by challenge index as a string.
+Record<string, LeaderboardEntry[]>` keyed by challenge index as a string.
 - **Terminal**: `tsr lb` opens `getByRole('application', { name: /leaderboard viewer/i })`; tip
   line visible; per-challenge headings + mocked rows; empty/pending/error lines per §3; `q` and
   `Escape` exit, focus returns to `.terminal-input`, history restored; `tsr lb 2` still renders the

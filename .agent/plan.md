@@ -46,20 +46,20 @@ Web home page only. The native CLI (`cli/`) is out of scope. **No API or backend
     Query v6 + Svelte 5 the result is a reactive object, not a store. `getEntriesForChallenge(data, id)`
     pulls one challenge's entries.
 - **`src/lib/components/Manpage.svelte`** — the pager to model. Two concerns are mixed in one file:
-  1. *Pager shell* (~150 lines): focusable container (`role="application"`, aria-label, tabindex),
+  1. _Pager shell_ (~150 lines): focusable container (`role="application"`, aria-label, tabindex),
      scroll container with hidden scrollbar, key handling (`ArrowUp/k`, `ArrowDown/j`, `PageUp/b`,
      `PageDown/f/Space`, `g`, `G`, `q`/`Escape` → `onQuit`, Ctrl/Cmd+Enter → `onToggleMaximize`,
      `stopPropagation` on everything else), focus-on-mount via `setTimeout`, bindable
      `containerRef`, and the `:`-cursor status bar with blink animation. The container carries
      class `manpage-container`; the scroll container carries `manpage-content`.
-  2. *Man-page content*: the TMUX(1) sections and the command-category listing (with the optional
+  2. _Man-page content_: the TMUX(1) sections and the command-category listing (with the optional
      `commands` filter prop).
-  Also used by `src/lib/components/tmux/PaneView.svelte:436` (in-challenge man page), so Manpage's
-  **public props must not change**: `{ onQuit, onToggleMaximize?, containerRef? ($bindable), commands? }`.
-  PaneView additionally styles it from outside via
-  `.pane-view.man-mode :global(.manpage-container) { position: relative; height: 100%; }`
-  (`PaneView.svelte:763`), overriding the container's own `position: absolute; inset: 0` so the man
-  page fills the pane — so the **`manpage-container` class name is external API too**.
+     Also used by `src/lib/components/tmux/PaneView.svelte:436` (in-challenge man page), so Manpage's
+     **public props must not change**: `{ onQuit, onToggleMaximize?, containerRef? ($bindable), commands? }`.
+     PaneView additionally styles it from outside via
+     `.pane-view.man-mode :global(.manpage-container) { position: relative; height: 100%; }`
+     (`PaneView.svelte:763`), overriding the container's own `position: absolute; inset: 0` so the man
+     page fills the pane — so the **`manpage-container` class name is external API too**.
 - **`src/routes/+page.svelte`** — `hints` array is the single source of truth for the hint row: the
   displayed string IS the executed string (per #31). Currently five hints.
 - **`src/routes/api/leaderboard/+server.ts`** — `LeaderboardResponse = Record<string, LeaderboardEntry[]>`,
@@ -76,7 +76,7 @@ Web home page only. The native CLI (`cli/`) is out of scope. **No API or backend
 
 ### 3.1 Extract a shared pager shell: NEW `src/lib/components/Pager.svelte`
 
-Requirement 1 demands the *same* interaction as `man tmux`. Rather than duplicating ~150 lines of
+Requirement 1 demands the _same_ interaction as `man tmux`. Rather than duplicating ~150 lines of
 keyboard/scroll/focus/status-bar logic into a second component, extract it:
 
 - **`Pager.svelte` (NEW)** owns everything listed under "pager shell" above, moved verbatim from
@@ -91,7 +91,7 @@ keyboard/scroll/focus/status-bar logic into a second component, extract it:
   (see §2) and `Terminal.browser.test.ts:62` queries it; renaming would silently break the
   in-challenge man-page layout (no browser test covers PaneView man-mode layout). Add a code
   comment on the container div in Pager.svelte noting these two external consumers. (The name is
-  slightly off for a generic pager, but the pager *is* man-page-styled, and keeping it means zero
+  slightly off for a generic pager, but the pager _is_ man-page-styled, and keeping it means zero
   changes to PaneView and zero test-selector churn.)
 - **`Manpage.svelte` (MODIFY)** keeps its exact public props and becomes content-only: it renders
   `<Pager {onQuit} {onToggleMaximize} bind:containerRef ariaLabel="Manual page viewer - use arrow keys or j/k to scroll, q to quit">`
@@ -157,15 +157,15 @@ Add `{ command: 'tsr lb', description: 'view leaderboards' }` to the `hints` arr
 
 ## 4. Files to change
 
-| File | Change |
-| --- | --- |
-| `src/lib/components/Pager.svelte` | NEW — pager shell extracted verbatim from Manpage |
-| `src/lib/components/Manpage.svelte` | MODIFY — content-only, wraps `<Pager>`; public props unchanged |
-| `src/lib/components/LeaderboardPager.svelte` | NEW — all-challenge leaderboard content in `<Pager>` |
-| `src/lib/components/Terminal.svelte` | MODIFY — mode, dispatch, help text, focus, body class |
-| `src/routes/+page.svelte` | MODIFY — add `tsr lb` hint |
+| File                                          | Change                                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `src/lib/components/Pager.svelte`             | NEW — pager shell extracted verbatim from Manpage                                          |
+| `src/lib/components/Manpage.svelte`           | MODIFY — content-only, wraps `<Pager>`; public props unchanged                             |
+| `src/lib/components/LeaderboardPager.svelte`  | NEW — all-challenge leaderboard content in `<Pager>`                                       |
+| `src/lib/components/Terminal.svelte`          | MODIFY — mode, dispatch, help text, focus, body class                                      |
+| `src/routes/+page.svelte`                     | MODIFY — add `tsr lb` hint                                                                 |
 | `src/lib/components/Terminal.browser.test.ts` | MODIFY — new `tsr lb` cases (or a sibling browser test file); existing selectors untouched |
-| `src/routes/home-page.browser.test.ts` | MODIFY — add `tsr lb` to the asserted hint list + a click-opens-pager case |
+| `src/routes/home-page.browser.test.ts`        | MODIFY — add `tsr lb` to the asserted hint list + a click-opens-pager case                 |
 
 No backend, API, DB, or `cli/` changes. `PaneView.svelte` is deliberately untouched — its
 `:global(.manpage-container)` dependency is satisfied by keeping the class name (§3.1).
@@ -176,7 +176,7 @@ No backend, API, DB, or `cli/` changes. `PaneView.svelte` is deliberately untouc
   Manpage's props, aria-label, and the `manpage-container`/`manpage-content` class names identical
   (so PaneView's `:global(.manpage-container)` pane-fill override keeps matching), moving shell
   code verbatim, and the existing browser tests covering man-mode rendering + focus. PaneView
-  man-mode *layout* has no automated coverage, so the in-challenge man page gets an explicit
+  man-mode _layout_ has no automated coverage, so the in-challenge man page gets an explicit
   manual regression check (§6). This is the main risk of the chosen design.
 - **Focus flow**: hint click → `runCommand('tsr lb')` → `tick()` → `focusInput()` must focus the
   pager container (new `focusInput` branch); on `q`, `clearAndResetMode()` already refocuses the

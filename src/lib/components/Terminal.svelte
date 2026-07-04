@@ -8,13 +8,14 @@
 	} from '$lib/data/challenges';
 	import { createLeaderboardQuery, getEntriesForChallenge } from '$lib/queries/leaderboard';
 	import Manpage from './Manpage.svelte';
+	import LeaderboardPager from './LeaderboardPager.svelte';
 
 	/** Mirrors the server `SessionUser` shape; kept local so the component pulls no server code. */
 	type SessionUser = { githubId: number; username: string };
 
 	let { user = null }: { user?: SessionUser | null } = $props();
 
-	type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man';
+	type TerminalMode = 'default' | 'list' | 'leaderboard' | 'man' | 'lb-pager';
 
 	type HistoryEntry = {
 		type: 'input' | 'output' | 'error' | 'header';
@@ -37,7 +38,8 @@
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let terminalRef = $state<HTMLDivElement | null>(null);
 	let containerRef = $state<HTMLButtonElement | null>(null);
-	let manpageRef = $state<HTMLDivElement | null>(null);
+	// Binds to whichever pager is active ('man' or 'lb-pager' — never both)
+	let pagerRef = $state<HTMLDivElement | null>(null);
 	let historyLengthBeforeMode = $state(0); // Track history length to clear on quit
 	let isMaximized = $state(false);
 
@@ -76,6 +78,7 @@
 		addOutput('──────────────────', 'header');
 		addOutput('');
 		addOutput('  tsr ls              List all available challenges');
+		addOutput('  tsr lb              View all leaderboards (pager)');
 		addOutput('  tsr lb <num>        View leaderboard for a challenge');
 		addOutput('  tsr start <num>     Start a challenge (e.g. tsr start 0)');
 		addOutput('  tsr free-play       Practice keybindings in free play mode');
@@ -183,6 +186,11 @@
 		mode = 'man';
 	}
 
+	function showLeaderboardPager() {
+		historyLengthBeforeMode = history.length;
+		mode = 'lb-pager';
+	}
+
 	function startChallenge(challengeIndex: string | number) {
 		const numericIndex =
 			typeof challengeIndex === 'string' ? parseInt(challengeIndex, 10) : challengeIndex;
@@ -238,8 +246,7 @@
 			if (subcommand === 'lb') {
 				const challengeNum = args[1];
 				if (!challengeNum) {
-					addOutput('Usage: tsr lb <number>', 'error');
-					addOutput('Example: tsr lb 1', 'error');
+					showLeaderboardPager();
 					return;
 				}
 				showLeaderboard(challengeNum);
@@ -358,8 +365,8 @@
 			return;
 		}
 
-		// Man mode handles its own keyboard events via the Manpage component
-		if (mode === 'man') {
+		// Pager modes handle their own keyboard events via the Pager component
+		if (mode === 'man' || mode === 'lb-pager') {
 			return;
 		}
 
@@ -374,8 +381,8 @@
 	function focusInput() {
 		if (mode === 'default') {
 			inputRef?.focus();
-		} else if (mode === 'man' && manpageRef) {
-			manpageRef.focus();
+		} else if ((mode === 'man' || mode === 'lb-pager') && pagerRef) {
+			pagerRef.focus();
 		} else {
 			containerRef?.focus();
 		}
@@ -462,12 +469,22 @@
 	</div>
 
 	<!-- Terminal Body -->
-	<div class="terminal-body" class:man-mode={mode === 'man'} bind:this={terminalRef}>
+	<div
+		class="terminal-body"
+		class:man-mode={mode === 'man' || mode === 'lb-pager'}
+		bind:this={terminalRef}
+	>
 		{#if mode === 'man'}
 			<Manpage
 				onQuit={clearAndResetMode}
 				onToggleMaximize={toggleMaximize}
-				bind:containerRef={manpageRef}
+				bind:containerRef={pagerRef}
+			/>
+		{:else if mode === 'lb-pager'}
+			<LeaderboardPager
+				onQuit={clearAndResetMode}
+				onToggleMaximize={toggleMaximize}
+				bind:containerRef={pagerRef}
 			/>
 		{:else}
 			<!-- History -->
