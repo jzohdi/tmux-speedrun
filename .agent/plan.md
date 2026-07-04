@@ -1,501 +1,266 @@
-# Plan: `tmux-speedrun` CLI (native tmux, GitHub-authenticated leaderboard)
+# Plan: Make CLI challenge runs playable end-to-end (issue #45)
 
-Issue: jzohdi/tmux-speedrun#35
+Issue: jzohdi/tmux-speedrun#45
 
-> This plan replaces the previous `.agent/plan.md` (which covered the now-merged issue #34/#36 GitHub
-> sign-in work, commit `6e36c0f`). The prior `.agent/interface.md` also belongs to that shipped work;
-> the interface stage for this issue will overwrite it.
+> This plan replaces the previous `.agent/plan.md` (which covered the now-merged issue #35/#41 CLI
+> work, commit `5cca21f`). The existing `.agent/interface.md` also belongs to that shipped work; the
+> interface stage for this issue will overwrite it. All work is in `cli/` — the web app, API, and
+> challenge generator are **not** changed (the encrypted step chain and canonical answer strings are
+> shared with the web and must stay byte-identical).
 
 ---
 
 ## 1. Goal (restated)
 
-Ship an installable `tmux-speedrun` CLI so users run the challenges and practice flows against **their
-own native tmux** instead of the browser-emulated terminal. It must:
+`tmux-speedrun challenge <id>` (added in #41) is currently unwinnable. Three reported defects plus
+several same-kind blockers make every run fail:
 
-- Be installable from a terminal (npm package; `npx tmux-speedrun` / global install).
-- Provide `tmux-speedrun help` listing commands.
-- Run **practice mode** and **challenges** (0–5) against native tmux (free-play is out of scope).
-- Show the **leaderboard** for any challenge.
-- Prompt the user with the current step; the user drives their real tmux to complete it; the CLI
-  advances the encrypted step chain as steps are solved.
-- Run challenges in a **fully isolated tmux server** on a private socket so prompted commands (e.g.
-  `kill-session`, `kill-server`) can never touch the user's real tmux. Torn down on exit/interrupt.
-  **Hard requirement.**
-- Support `tmux-speedrun login` (browser OAuth) attaching the **verified** GitHub username to
-  leaderboard entries, matching the web's server-side identity rules (no client-supplied username).
-- Add a **CLI documentation page** to the website.
+1. **Stacked prompts** — multiple step prompts visible at the bottom of the screen at once instead
+   of exactly one, replaced in place.
+2. **"Switch to window by number" never completes** — pressing `prefix + <n>` does not advance.
+3. **Run dies on `detach` / `kill-session`** — any step that exits the tmux attach tears the run
+   down or leaves it in limbo.
 
-The existing web API (`src/routes/api/**`) remains the **source of truth** for challenge creation,
-progression, and the leaderboard. Practice mode ships bundled/offline.
+Fix these so challenge (and practice) runs are reliably completable end-to-end: one visible prompt
+at all times, every pool command detectable, and a run lifecycle decoupled from any single tmux
+attach — with no orphaned private servers on any exit path.
 
----
+## 2. Root-cause analysis (verified against the code)
 
-## 2. How the existing system works (grounding)
+### 2.1 Defect 3 — lifecycle is coupled to a single attach (fix first; the others live inside it)
 
-Studied the repo; the CLI must interoperate with these mechanisms exactly.
+- `server.attach()` (`cli/src/tmux/server.ts:83`) resolves whenever the tmux client process exits —
+  for **any** reason. `ChallengeController.run()` (`cli/src/tmux/controller.ts:76-87`) treats that
+  as end-of-run, stops the watcher, and returns; `challenge.ts` then tears the server down in
+  `finally`. So a `detach` or `kill-session` step ends the run instead of advancing it.
+- The generated config (`cli/src/tmux/config.ts`) does **not** set `exit-empty off`, so killing the
+  last session kills the private server (tmux default). After that every observer exec fails and is
+  silently swallowed (`observer.ts:180` catch), so the kill can never even be *observed*: the
+  detector's `kill-session` candidate requires a post-kill snapshot showing fewer sessions, which
+  requires a running server.
+- The detector has **no candidate at all for `detach`** (`#{session_attached}` is fetched but
+  unused), so even a surviving run could not advance a detach step.
 
-### 2.1 Challenge crypto protocol (client ↔ server)
+### 2.2 Defect 2 — select-window by number is undetectable in the common case
 
-- **Start** — `POST /api/challenge/start` `{ challengeId, clientPublicKeyJwk }`. Server does ECDH
-  (P-256), generates a fresh randomized instruction sequence (25–100 steps by difficulty,
-  `src/lib/server/challenges/generator.ts` + `pools.ts`), derives a key chain, AES-GCM-encrypts each
-  step, returns `{ serverPublicKeyJwk, sessionSaltB64, steps[] }` where each step is
-  `{ index, nonceB64, ciphertextB64 }`, and sets an httpOnly `tmux_challenge_session` cookie holding
-  the encrypted proof (1h TTL). Steps are never stored server-side.
-- **Client key chain** (`src/lib/client/challenge.ts`, normative to reproduce):
-  - `sharedSecret = ECDH(clientPriv, serverPub)`
-  - `K0 = HKDF(sharedSecret, sessionSalt, "k0", 32)`
-  - Decrypt step `n` with `Kn` (AES-GCM). Plaintext JSON = `{ prompt, requiredInput?, seedInput? }`.
-  - On a correct answer string `a` for step `n`:
-    `K(n+1) = HKDF(Kn, SHA256(a), "step-{n+1}", 32)`.
-  - Correctness is verified locally by **trial-decrypting** step `n+1` with `K(n+1)`: success ⇒
-    answer was right. The last step's derived key is `Kfinal` = the **proof**.
-- **Finish** — `POST /api/challenge/finish` `{ proofB64 }` (proof = base64 of `Kfinal`). Server
-  validates against the session cookie, computes `durationMs` from the cookie's `startTime`.
-  - Signed-in (`locals.user` present) ⇒ inserts leaderboard row immediately, `recorded:true`.
-  - Anonymous ⇒ `recorded:false` + provisional rank; stashes a signed `tmux_pending_result` cookie.
-- **Record** — `POST /api/challenge/record` (empty body). Single-use "save my time" for a user who
-  signs in after finishing. Identity resolved **only** from `locals.user`; body never read for a
-  name. Clears the pending cookie (replay ⇒ 400).
-- **Leaderboard** — `GET /api/leaderboard` (public, cached 60s): `{ [challengeId]: LeaderboardEntry[] }`,
-  `LeaderboardEntry = { rank, username, time, durationMs, verified }`, `verified = githubId != null`.
+- The run starts with a single window (index 0). The step prompt is generic ("Select a window by
+  number" — `prompt-variations.ts`), so the natural action is `prefix + 0`, which runs
+  `select-window -t :=0` on the already-active window → **no state change** → `hasChange()` is
+  false (`observer.ts:208`) → no delta → no candidate → the step can never advance. The existing
+  `select-window` candidate (`detector.ts:91-96`) only fires on `activeWindowChanged`.
+- The config already installs an `after-select-window` hook that writes to the event sink — but
+  **nothing ever reads the sink** (`observer.watch` is poll-only; the sink file only grows).
+  Reading it gives exact, targeted discrimination for free: `prefix + 0-9` runs the
+  `select-window` command (own after-hook) while `prefix + n/p/l` run `next-window` /
+  `previous-window` / `last-window` (distinct commands, distinct after-hooks).
 
-**Canonical answer strings** (`expectedAction`, from `generator.ts`): simple commands are the bare
-command name (`split-vertical`, `new-window`, `kill-session`, …); input commands are
-`"<name>:<randomInput>"` (e.g. `rename-window:swift-tiger-42`); the copy-paste step is
-`"copy-paste-sequence:<text>"` (`src/lib/utils/tmux-copy-sequence.ts`). The decrypted step delivers
-`requiredInput` (the exact string for input commands) and `seedInput` (the copy text), so the CLI
-**already knows the input portion** of the answer; only the command-name portion must be inferred
-from the user's action. The command pool per challenge is bundled data (`tmux-commands.ts` +
-`pools.ts`).
+### 2.3 Defect 1 — prompt rendering is race-prone and never re-asserted
 
-In the browser, `src/routes/challenge/[id]/+page.svelte` receives structured signals from the
-emulator (`command-executed` with a ready-made canonical `command` string) and calls
-`challenge.submitAnswer(answer)`. **The CLI must synthesize the equivalent canonical answer from
-observed native-tmux state changes** — this is the core new work (see §5).
+- The prompt is rendered by re-running `set -g status-left '<text>'` from an outside command client
+  on every advance (`cli/src/ui/status-line.ts:15-18`), driven by a watcher that can fire several
+  deltas per action; there is no re-assertion after client exit/re-attach, and nothing enforces a
+  single status row. The exact visual mechanism of the stacking must be pinned by reproduction
+  (mandated in §5, step 0), but the fix is structural regardless: make tmux itself own the render
+  from a single source of truth (a user option referenced once by `status-left`), update only that
+  option per step, serialize updates, and re-apply the current prompt on every re-attach/recovery
+  in the new lifecycle loop.
 
-### 2.2 Auth
+### 2.4 Same-kind blockers ("possibly more" — confirmed by auditing the pool against the detector)
 
-- `GET /api/auth/github/login` → GitHub authorize (CSRF `state` cookie) → `GET
-  /api/auth/github/callback` exchanges code→token server-side, fetches the verified GitHub user, sets
-  a signed `tmux_session` cookie, redirects home (or to a sanitized same-origin `return_to`).
-- The session cookie is a **stateless HMAC-signed token** (`src/lib/server/auth/session.ts`):
-  `base64url(JSON(payload)).base64url(HMAC_SHA256(payloadB64))`, `payload = { githubId, username,
-  iat }`, signed with `SESSION_SECRET`. `hooks.server.ts` verifies it per request into `locals.user`.
-  `verifySessionToken` only checks signature + field types (no expiry check).
-- `sanitizeReturnPath` (`auth/return-to.ts`) restricts `return_to` to same-origin **local paths** —
-  absolute URLs and schemes are rejected (open-redirect guard). Loopback URLs are therefore **not**
-  expressible via `return_to`; the CLI needs a separate, explicitly-guarded loopback channel (§4).
+Challenge 0's generator guarantees **every** beginner command appears at least once
+(`generator.ts` step 2; pool = all 16 beginner commands), so every challenge-0 run contains steps
+that today emit **no candidate ever**:
 
-### 2.3 Crypto reuse in Node
+| Step (canonical answer) | How the user performs it | Why undetected today |
+|---|---|---|
+| `detach` | `prefix + d` | no state change; no candidate; kills attach (§2.1) |
+| `attach-session` | re-attach after detach (runner does it), or `switch-client -t` | no candidate; in-pane `tmux attach` is refused (nested `$TMUX`) |
+| `list-sessions` | `tmux ls` typed in a pane (targets the isolated server via `$TMUX`) | no state change |
+| `list-windows` | `prefix + w` (runs `choose-tree -Zw`) or `tmux lsw` | tree mode sets `pane_in_mode` → wrongly emits only `copy-mode` |
+| `show-time` | `prefix + t` (runs `clock-mode`) | clock mode → wrongly emits only `copy-mode` |
+| `kill-session` (last session) | `tmux kill-session` | server exits (no `exit-empty off`) → unobservable (§2.1) |
+| `select-window` (no-op case) | `prefix + 0` | §2.2 |
 
-`src/lib/crypto/*` uses only Web Platform APIs available as Node 22 globals: `crypto.subtle`,
-`crypto.getRandomValues`, `btoa`/`atob`, `TextEncoder`/`TextDecoder`. No Svelte/browser-only deps.
-So the crypto primitives and the client key-chain helpers can be reused **unchanged** by the CLI
-(bundled at build time). Node in this repo is v22; tmux is available on the platform.
-
----
+Higher pools add more of the same kind: `list-keys`, `display-panes`, `command-prompt`,
+`reload-config` (`source-file`), `kill-server` (server death — currently fatal), and silent-state
+commands `swap-pane`, `swap-window`, `rotate-panes`, and `join-pane` (join **moves** an existing
+pane — pane ids don't change, so the current heuristic at `detector.ts:82` never fires). These all
+need the same command-event detection channel; fix them in this pass since it's the same code path
+(the issue explicitly asks to fix same-kind blockers found here).
 
 ## 3. Approach & architecture
 
-### 3.1 Runtime, language, packaging
+Three coordinated changes, lifecycle-first (they share the attach/watch loop):
 
-- **Node.js + TypeScript**, published as npm package **`tmux-speedrun`** with a `bin` entry
-  (`tmux-speedrun`). Node ESM, `engines.node >= 20` (Web Crypto globals; dev/target Node 22).
-- Housed **in this repo as a pnpm workspace package** at `cli/`. Add `cli` to
-  `pnpm-workspace.yaml` (currently only `onlyBuiltDependencies`; convert to include `packages: ['.',
-  'cli']` or the equivalent). This lets the CLI import the app's pure modules directly and keeps them
-  in lockstep.
-- **Bundler:** `tsup` (esbuild) → single ESM bundle + `bin` shim with `#!/usr/bin/env node`. Bundling
-  inlines the reused app modules so the published package is self-contained (no `$lib` alias at
-  runtime). Keep runtime deps minimal (ideally zero beyond Node built-ins; a tiny arg parser is
-  optional — prefer hand-rolled to avoid deps). `open`-the-browser is done via a 3-line
-  platform shim (`open`/`xdg-open`/`start`) rather than a dependency.
-- **Reused app modules** (imported by the CLI build; keep them dependency-free):
-  - `src/lib/crypto/**` (ECDH, HKDF, AES-GCM, utils).
-  - Pure key-chain helpers from `src/lib/client/challenge.ts` — **refactor** the pure functions
-    (`deriveK0`, `deriveNextKey`, `decryptStep`, step/types, `formatDuration`) into a new
-    `src/lib/client/challenge-core.ts` that both the web `ChallengeSession` and the CLI import. The
-    web's `ChallengeSession` keeps its `fetch('/api/…', credentials:'include')` transport; the CLI
-    gets its own transport (base-URL + cookie jar, §4.1). No behavior change to the web client.
-  - Data: `src/lib/data/tmux-commands.ts`, `src/lib/data/practice-flow.ts`,
-    `src/lib/server/challenges/pools.ts` (pure), `src/lib/utils/tmux-copy-sequence.ts`.
-    - Note: `practice-flow.ts` currently imports types from `$lib/utils/tmux-commands` and
-      `$lib/utils/tmux-conf`. Confirm these transitively pull in no browser-only code; if they do,
-      split the needed types into a leaf module. (Risk R7.)
+### 3.1 Run-loop lifecycle (defect 3)
 
-### 3.2 CLI command surface
+Replace "attach once → teardown when the client exits" with a **run loop** that owns recovery and
+only ends on completion, explicit abort, or launcher death:
 
 ```
-tmux-speedrun help                 # list commands (also default / --help / -h)
-tmux-speedrun login                # browser OAuth via loopback; store verified session
-tmux-speedrun logout               # clear stored session (best-effort POST /api/auth/logout)
-tmux-speedrun whoami               # show signed-in GitHub username (or "anonymous")
-tmux-speedrun leaderboard [id]     # GET /api/leaderboard; render table(s)
-tmux-speedrun practice [category]  # offline practice against isolated native tmux
-tmux-speedrun challenge <id>       # run challenge 0–5 against isolated native tmux
+while (!complete && !aborted):
+    ensure private server alive        # restart on same socket via `new-session -d` (re-sources conf) if kill-server happened
+    ensure ≥1 session exists           # create fresh session if kill-session emptied the server
+    re-apply current step prompt       # idempotent
+    observer.resetBaseline()           # never diff across a recovery boundary (runner-made sessions must not look like user actions)
+    attach → wait for client exit
+    drain sink events + one snapshot/diff pass   # classify WHY the client exited, BEFORE recovering infra
+    submit resulting candidates        # 'detach', 'kill-session', 'kill-server', … may advance the step
+    if !complete: print one-line notice + ~1s pause before re-attach ("Ctrl-C to quit")
 ```
 
-Global options / env:
-- `--server <url>` or `TMUX_SPEEDRUN_API` — API base URL (default: the production site origin;
-  pinned as a constant, overridable for dev/testing).
-- `--no-color`, `--json` (for `leaderboard`/`whoami` scripting), `--verbose`.
+Key mechanics:
 
-### 3.3 Local state
+- **`set -g exit-empty off`** in the generated config so the private server survives zero sessions;
+  `kill-session` becomes observable (`sessions → []`) and recovery is just `new-session -d`.
+- **Server death = a signal, not an error**: when execs fail with "no server running" (or the
+  socket vanishes), synthesize a `kill-server` (+ `kill-session`) candidate, submit, then restart
+  the server **on the same private socket** with the same conf (`-f` is passed on every exec, so a
+  restart re-sources hooks). Never touch the default socket (preserves invariant ISO1).
+- **Abort semantics** (matches the issue exactly): SIGINT/SIGTERM/SIGHUP handlers already tear down
+  (`server.ts:56-73`) — closing the launching terminal SIGHUPs Node → `kill-server` → no orphans.
+  The ~1s pre-re-attach pause is the deliberate window where Ctrl-C reaches the Node process for an
+  explicit abort. Guard against tight loops: N consecutive attach failures without progress → abort
+  with a clear error.
+- **Completion path unchanged in spirit**: on final step the controller detaches the client
+  (suppressed from detection, see §3.2), loop sees `isComplete()`, `finish()` runs, `finally`
+  teardown as today.
+- Extract the loop so **`ChallengeController` and `PracticeController` share it** (practice has the
+  identical defect — `createPracticeItems` covers `detach`/`kill-session` drills; practice.ts:60
+  currently treats any detach as "stop the run"). Keep practice's per-item server; put the loop
+  inside each item. Design the loop against injected `server`/`observer`/`clock` so it is unit
+  testable with fakes.
 
-- Config dir `~/.config/tmux-speedrun/` (respect `$XDG_CONFIG_HOME`).
-  - `session.json` — `{ token, username, githubId, savedAt }`, file mode `0600`. Holds the signed
-    session token obtained by `login`.
-- Challenge-session cookies (`tmux_challenge_session`, `tmux_pending_result`) are **ephemeral**,
-  held only in an in-memory cookie jar for the duration of one `challenge` run.
+### 3.2 Command-event detection channel (defect 2 + §2.4)
 
----
+The sink becomes a real channel instead of a write-only file:
 
-## 4. Session transport (resolving the triage gap)
+- **Config** (`config.ts`): expand `HOOK_EVENTS` to cover every pool command's underlying tmux
+  command: `after-select-window`, `after-next/previous/last-window`, `after-select-pane`,
+  `after-last-pane`, `after-list-sessions/-windows/-keys/-buffers`, `after-show-buffer`,
+  `after-delete-buffer`, `after-capture-pane`, `after-display-panes`, `after-clock-mode`,
+  `after-choose-tree`, `after-command-prompt`, `after-source-file`, `after-swap-window/-pane`,
+  `after-rotate-window`, `after-join-pane`, `after-kill-session/-window/-pane`,
+  `after-attach-session`, `after-switch-client`, plus notification hooks `client-attached` /
+  `client-detached`. Each writes its hook name as a line to the sink (as today).
+- **Observer** (`observer.ts`): tail the sink (byte-offset reads on each tick + a drain call the
+  run loop invokes at exit-classification time, with a short settle retry since `run-shell` is
+  async). Expose new `StateDelta.commandEvents: string[]`. Add `#{pane_mode}` to `PANE_FORMAT` so
+  copy / clock / tree / view modes are distinguishable. Add `resetBaseline()`.
+- **Runner self-suppression** (critical): the observer's own poll runs `list-sessions`,
+  `list-panes`, `list-buffers`, `show-buffer` every 150ms, and the controller runs `detach-client`
+  and recovery `new-session` — with the new hooks these would spuriously satisfy `list-sessions` /
+  `show-buffer` / `detach` / `new-session` steps instantly. Primary mechanism: an exec-accounting
+  suppression queue — every runner exec of a hooked command pushes its expected event name(s); sink
+  reading skips one matching entry. This is deterministic and tmux-version-independent (do **not**
+  rely on `#{client_tty}`/`#{hook_client}` expansion in hook commands; may be used later as
+  refinement only). Note tmux does not fire `after-` hooks for commands run *from* hooks, so the
+  hooks' own `run-shell`s don't recurse.
+- **Detector** (`detector.ts`): add a pure event→candidate table on top of the existing state-diff
+  candidates (over-emission is always safe — trial-decrypt in `challenge-session.ts` is the
+  authority): `after-select-window → select-window` (fixes defect 2 for the no-op case, keeps the
+  targeted-vs-generic distinction), `after-choose-tree → list-windows, list-sessions`,
+  `after-clock-mode → show-time`, `after-list-keys → list-keys`, `client-detached → detach`,
+  `client-attached / after-attach-session / after-switch-client → attach-session`,
+  `after-join-pane → join-pane`, `after-swap-pane → swap-pane`, `after-swap-window → swap-window`,
+  `after-rotate-window → rotate-panes`, `after-source-file → reload-config`,
+  `after-display-panes → display-panes`, `after-command-prompt → command-prompt`, etc.
+  Also from state: use `pane_mode` so `copy-mode` is emitted only for real copy/view mode (clock
+  and tree modes map to `show-time` / `list-windows`+`list-sessions`); on cascade kills
+  (session/window disappeared) additionally emit `kill-window` / `kill-pane` / `kill-session` /
+  `kill-server` together — the key chain filters. Synthetic events from the run loop
+  (`server-died → kill-server`) enter through the same table.
+- **Verification & fallback**: generic `after-<command>` hooks are expected on tmux ≥ 3.0
+  (preflight minimum), but the implementer must verify each mapped hook actually fires on a real
+  tmux 3.x (script it: run command → assert sink line). For any that don't (interactive commands
+  like `display-panes`/`command-prompt` are candidates for gaps), fall back to explicit key
+  **rebinds in the generated config** that run the default command plus the sink logger — the
+  isolated config owns the server, so rebinds are safe and invisible to the user. State-diff
+  candidates remain as a safety net throughout.
 
-The whole protocol relies on browser-held httpOnly cookies and `locals.user`. The CLI carries this
-state in two ways.
+### 3.3 Prompt rendering (defect 1)
 
-### 4.1 Challenge/anonymous cookies — no server change
+- Config declares `set -g status-left '#{@speedrun_prompt}'` **once**, statically (plus existing
+  `status on`, `status-left-length`; sanitize length cap aligned to the configured 120 — today's
+  code slices at 160). `StatusLine.setPrompt` becomes a single `set -g @speedrun_prompt '<text>'`;
+  tmux owns the redraw. `clear()` likewise sets the option.
+- The run loop **re-applies the current prompt** before every (re-)attach and after every recovery,
+  so a recreated server/session always shows exactly the current step.
+- Prompt updates stay inside the watcher's `advancing` critical section (already the case) so they
+  are ordered; the loop's drain-then-recover sequencing removes the poll/hook double-fire races the
+  triage note points at.
+- **Reproduction is step 0 of implementation** (see §5): reproduce the stacking on challenge 0
+  before the fix, confirm exactly-one-prompt after, and record what the mechanism was. If the
+  observed mechanism is something this restructure does not cover (e.g. terminal-emulator redraw
+  artifact), address it then — but the single-source-of-truth render is wanted regardless.
 
-`tmux_challenge_session` and `tmux_pending_result` are `httpOnly`; that flag only blocks **browser
-JS**, not an HTTP client. The CLI uses a small **cookie jar** that reads `Set-Cookie` from the
-`start`/`finish` responses and replays them on `finish`/`record`. This carries the entire challenge
-session with **no backend change**.
+## 4. Files to change
 
-- Implementation: Node `fetch` (global in Node 22) with manual cookie handling (read
-  `response.headers.getSetCookie()`, send `Cookie:` header). Persist only in memory per run.
-- `secure` cookies: cookies are marked `secure` in production, so the API base must be `https` in
-  prod (it is). For local dev against `http://localhost`, `secure` is false — works.
-
-### 4.2 Auth token — loopback exchange (needs new/adapted endpoints)
-
-The web OAuth sets `tmux_session` in the **user's browser**, which the CLI cannot read. Use a
-loopback redirect that hands the signed session token back to the waiting CLI:
-
-1. `tmux-speedrun login` starts a localhost HTTP server bound to **`127.0.0.1:<ephemeral port>`** and
-   generates a random `cli_state` (CSRF).
-2. CLI opens the browser to a **new** endpoint
-   `GET /api/auth/cli/login?port=<port>&state=<cli_state>`. This endpoint:
-   - Validates `port` (numeric, in the ephemeral range) and `state` (opaque token, bounded length).
-   - Sets the normal OAuth `tmux_oauth_state` cookie (reusing `generateOAuthState` +
-     `OAUTH_STATE_COOKIE_*`).
-   - Sets a **new signed, short-lived `tmux_cli_login` cookie** carrying `{ port, cli_state }`
-     (HMAC-signed with `SESSION_SECRET`, ~10 min TTL), marking this OAuth round-trip as CLI-bound.
-   - Redirects to GitHub authorize (reuse `buildAuthorizeUrl`, same fixed callback URL
-     `/api/auth/github/callback`).
-3. GitHub → `GET /api/auth/github/callback` (existing). **Adapt** it: after the existing state check,
-   code→token exchange, user fetch, and `setSessionCookie(...)`, check for the `tmux_cli_login`
-   cookie. If present and valid:
-   - Delete the `tmux_cli_login` cookie (single-use).
-   - Build the loopback URL `http://127.0.0.1:<port>/callback?token=<sessionToken>&state=<cli_state>`
-     where `sessionToken` = the same signed token just minted (`createSessionToken(payload)`), and
-     redirect (302) there — but **only** after passing a strict loopback guard (§4.3). If the guard
-     rejects, fall back to the normal home redirect (never an open redirect).
-   - The browser is still logged into the website too (the cookie is set), which is fine.
-4. The CLI's loopback server receives `/callback`, checks `state === cli_state`, extracts `token`,
-   writes `session.json` (0600), responds with a friendly "You can close this tab" HTML page, and
-   shuts the loopback server down. `login` prints the resolved username (decoded locally from the
-   token payload, or by calling `whoami`).
-5. On subsequent authenticated calls (`finish`, `record`), the CLI sends `Cookie:
-   tmux_session=<token>`; `hooks.server.ts` verifies it → `locals.user` populated → verified
-   username attached. **No change to finish/record.**
-
-**Why reuse the existing session token** (vs. a new CLI token type): minimal server change, and
-`hooks.server.ts`/`finish`/`record` already trust it. The token is non-spoofable (HMAC), and identity
-is still server-verified — the CLI cannot inject a username. The token is bearer-capable and
-effectively long-lived (no expiry check in `verifySessionToken`); acceptable and consistent with the
-web's 30-day cookie. (If reviewers prefer scope-limiting, a dedicated CLI token with an expiry is a
-drop-in alternative — noted, not chosen, to keep the change minimal.)
-
-### 4.3 Loopback redirect guard (security-critical)
-
-New helper `src/lib/server/auth/cli-login.ts`:
-- `signCliLoginState({port, cli_state})` / `verifyCliLoginState(cookie)` — HMAC via `SESSION_SECRET`,
-  mirroring `session.ts`.
-- `buildLoopbackCallbackUrl({port, cli_state, token})` returning a URL **only** when host is
-  `127.0.0.1` (or `localhost`), scheme `http`, path `/callback`, and `port` is an integer in
-  `[1024, 65535]`. Reject everything else → callback falls back to the home redirect. This prevents
-  the callback from becoming an open redirect / token-exfiltration vector. `token` and `cli_state` are
-  URL-encoded.
-- The token only ever leaves over **loopback** to a process on the same machine that proved knowledge
-  of `cli_state`.
-
-### 4.4 New/adapted endpoints — summary
-
-- **New:** `GET /api/auth/cli/login` (`src/routes/api/auth/cli/login/+server.ts`).
-- **Adapted:** `GET /api/auth/github/callback` — branch to loopback redirect when `tmux_cli_login` is
-  present/valid; otherwise unchanged.
-- **New env constants** in `src/lib/server/env.ts`: `CLI_LOGIN_COOKIE_NAME = 'tmux_cli_login'` +
-  `CLI_LOGIN_COOKIE_OPTIONS` (httpOnly, `sameSite:'lax'`, ~10 min).
-- **Unchanged:** `start`, `finish`, `record`, `leaderboard`, `logout`, GitHub `login`.
-
----
-
-## 5. Native-tmux challenge/practice engine
-
-### 5.1 Environment isolation (hard requirement)
-
-- Every challenge/practice run creates a **dedicated tmux server on a private socket**:
-  `tmux -L tmux-speedrun-<random>` (unique per run; `-L` names a socket under the tmux socket dir).
-  Optionally `-S <tmpdir>/sock` for full path isolation. A generated config file is passed with `-f`
-  (its own prefix/options; independent of the user's `~/.tmux.conf`).
-- **All** challenge commands and the user's attach happen against this socket. The user's default
-  tmux server (default socket) is never referenced — a prompted `kill-session`/`kill-server` can only
-  affect the isolated server.
-- **Teardown:** register handlers for `SIGINT`, `SIGTERM`, `SIGHUP`, normal exit, and uncaught
-  errors; always run `tmux -L <sock> kill-server` (ignore "no server" errors) and remove any temp
-  config/socket. Use a `try/finally` around the run plus process-level signal handlers so an interrupt
-  mid-challenge still cleans up. Idempotent (safe to call twice).
-- **Provable separation** (acceptance): the isolated socket name is distinct and logged; an
-  integration test asserts that after running `kill-server` inside the isolated server, the user's
-  default-socket sessions (created by the test on the default socket) are still present.
-
-### 5.2 Interaction model
-
-The user drives a **real native tmux** (the isolated server) — no emulation. Chosen model:
-
-- The CLI **attaches the user's terminal** into the isolated server (`tmux -L <sock> attach`) so they
-  operate real tmux directly.
-- The current **step prompt, progress (n/total), and timer** are surfaced via the isolated server's
-  **status line** (configured in the generated tmux config: `status-left`/`status-right`, short
-  status interval) and updated by the controller as steps advance (`tmux -L <sock> set -g
-  status-left …` / `display-message`). A large prompt can also be shown via `display-popup` /
-  `display-message` on advance.
-- A **controller process** runs alongside (outside the attached client) observing state changes
-  (§5.3) and advancing the encrypted chain. When the challenge completes, the controller submits the
-  proof, then detaches the user and prints results in the CLI.
-- Non-TTY / not-a-real-terminal ⇒ challenge/practice refuse with a clear message; `leaderboard`,
-  `whoami`, `login` still work.
-
-### 5.3 Action detection — native tmux → canonical answer (core new work)
-
-The controller must convert what the user does in native tmux into the canonical answer string the
-key chain expects. Design: **observe state deltas, generate candidate answer(s), verify by
-trial-decrypt.**
-
-**Observation.** The controller maintains a model of the isolated server's state by querying tmux
-(cheap, scriptable): `list-sessions`, `list-windows -a`, `list-panes -a`
-(`-F` with `#{session_name} #{window_index} #{window_name} #{pane_id} #{pane_active}
-#{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_zoomed_flag} …`),
-`show-buffer`/`list-buffers`, and pane mode via `#{pane_in_mode}`. Changes are driven by:
-1. **tmux hooks** installed in the generated config that fire `run-shell` to a tiny notifier writing
-   an event line to a Unix domain socket / FIFO the controller reads. Install the `after-*` and
-   notification hooks that tmux supports for the pool commands, e.g. `after-split-window`,
-   `after-new-window`, `after-new-session`, `after-kill-pane`, `after-select-pane`,
-   `after-select-window`, `after-rename-window`, `after-rename-session`, `session-closed`,
-   `window-renamed`, `pane-focus-in`, `pane-mode-changed`, etc. The hook is only a **trigger** ("state
-   may have changed"); the controller re-queries and diffs.
-2. A lightweight **poll** fallback (e.g. 100–200ms) as a safety net for anything a hook misses,
-   including read-only/informational commands. (tmux hook coverage varies by version; the poll +
-   trial-decrypt net guarantees progress without depending on exhaustive hook support — see R1.)
-
-**Delta → candidate answers.** From `(prevState, newState[, bufferState])` derive candidates:
-
-| Observation | Candidate canonical answer(s) |
+| File | Change |
 |---|---|
-| pane count +1; new pane to the right of its sibling (`pane_left` increases, same `pane_top`) | `split-vertical` |
-| pane count +1; new pane below its sibling (`pane_top` increases, same `pane_left`) | `split-horizontal` |
-| window count +1 (same session) | `new-window` (or `break-pane` if a pane left the source window ⇒ `break-pane`) |
-| pane count −1 in a window (window remains) | `kill-pane` |
-| session count +1 | `new-session` |
-| a session disappears (others remain) | `kill-session` |
-| all sessions disappear | `kill-server` |
-| window name changed to `X` | `rename-window:X` (X should equal the step's `requiredInput`) |
-| session name changed to `X` | `rename-session:X` |
-| active pane id changed within window | `select-pane` / `last-pane` (both candidates) |
-| active window index changed | `select-window` / `next-window` / `previous-window` / `last-window` (candidates) |
-| `window_zoomed_flag` toggled | `toggle-zoom` |
-| pane content rotated / positions swapped | `rotate-panes` / `swap-pane` (candidates) |
-| windows swapped by index | `swap-window` |
-| a pane joined from another window (pane count +1 and a window lost a pane / closed) | `join-pane` |
-| paste buffer now contains the step's `seedInput` **and** a paste landed in the focused pane | `copy-paste-sequence:<seedInput>` |
-| informational (no state delta): `list-*`, `show-time`, `display-panes`, `list-keys`, `show-buffer`, `capture-pane`, `list-buffers`, `delete-buffer` | detected via the specific command's hook/notification or command-prompt echo; candidate = the bare command name |
+| `cli/src/tmux/config.ts` | `exit-empty off`; static `status-left '#{@speedrun_prompt}'`; expanded hook list (+ any fallback rebinds) |
+| `cli/src/tmux/server.ts` | `isAlive()`/restart-on-same-socket primitive; `attach()` exit info; keep teardown + signal handlers (unchanged semantics) |
+| `cli/src/tmux/observer.ts` | sink tailing + drain; suppression queue; `commandEvents` in deltas; `#{pane_mode}` in `PANE_FORMAT`; `resetBaseline()` |
+| `cli/src/engine/types.ts` | `StateDelta.commandEvents`; `PaneInfo.mode` |
+| `cli/src/tmux/detector.ts` | event→candidate table; mode-kind mapping; cascade-kill and moved-pane over-emission |
+| `cli/src/tmux/controller.ts` | run-loop refactor shared by challenge + practice; exit classification; synthetic `kill-server`; prompt re-assertion; re-attach notice + abort window; loop-failure guard |
+| `cli/src/ui/status-line.ts` | write `@speedrun_prompt` instead of `status-left`; align sanitize cap |
+| `cli/src/commands/challenge.ts`, `cli/src/commands/practice.ts` | adapt to loop results/messaging; practice keeps per-item servers with in-item loop |
+| `cli/src/tmux/detector.test.ts` + new tests | see §6 |
 
-For **input commands** the required input is known from the decrypted step, so the candidate is fully
-formed (`rename-window:<requiredInput>`). For **ambiguous** deltas, emit *all* plausible candidates.
+No web (`src/`) changes. No API or generator changes.
 
-**Verification (the safety net).** For each candidate `a`, compute `K(n+1)=HKDF(Kn,SHA256(a),
-"step-{n+1}")` and trial-decrypt step `n+1` (exactly the web `submitAnswer` check). The candidate that
-decrypts is correct → advance and update the status line. If none decrypt, it was the wrong action or
-wrong input → show "not quite, try again" feedback (the prompt stays). This means detection only needs
-to **include** the right candidate, not classify perfectly — robust against tmux-version quirks.
+## 5. Implementation order
 
-Because the answer's input portion is server-delivered and the command set is a small fixed pool, the
-candidate space per step is tiny; trial-decrypt is O(candidates) cheap local AES-GCM.
+0. **Reproduce first**: play challenge 0 in a real terminal (and scripted practice drills for
+   `detach`/`kill-session`/`select-window`); capture the prompt-stacking mechanism and the exact
+   failure of each defect. Also empirically verify which `after-*` hooks fire on the dev machine's
+   tmux (small scripted harness against an isolated server — no TTY needed for hook checks).
+1. Config + observer channel: `exit-empty off`, hook expansion, sink tailing, suppression queue,
+   `pane_mode`, `resetBaseline()` (§3.2 infrastructure).
+2. Lifecycle run loop in controller + server primitives (§3.1); wire challenge + practice.
+3. Detector event table + state-diff refinements (§3.2 mapping; fixes defect 2).
+4. Prompt rendering via `@speedrun_prompt` + re-assertion in the loop (§3.3; fixes defect 1).
+5. Tests (§6), then full manual E2E: complete challenge 0, 1, and one of 3–5 end-to-end; kill the
+   terminal mid-run and verify no `tmux -L tmux-speedrun-*` processes remain; Ctrl-C during the
+   re-attach notice aborts cleanly.
 
-**Completion.** When the last step's key is derived (all steps consumed), the controller has
-`Kfinal`; it POSTs `finish` with `proofB64`, then `record` if applicable (see §6). Duration is
-**server-authoritative** (from the `start` cookie's `startTime`), so the CLI cannot fake timing.
+## 6. Testing
 
-### 5.4 Practice mode (offline)
+- **Unit (vitest, `cd cli && npm test`)**:
+  - detector: event→candidate mapping (incl. `after-select-window` with *no* state change → defect 2
+    regression test); mode-kind mapping (clock/tree ≠ copy); cascade-kill over-emission; join/swap
+    /rotate via events.
+  - observer: sink parsing + offset tailing; suppression queue (runner poll events dropped, user
+    events kept); `diff` with `pane_mode`; `resetBaseline` yields no delta across recovery.
+  - run loop with fake server/observer: detach step → re-attach + advance; kill-session (last
+    session) → recover + advance; kill-server → synthetic candidate + restart + advance; complete →
+    loop exits; abort during pause; N-failure guard.
+  - config: generated text contains `exit-empty off`, static status-left indirection, all hooks.
+- **Live-server integration (no TTY required — guard/skip when tmux is unavailable)**: against a
+  real isolated server, assert kill-session with `exit-empty off` leaves a queryable 0-session
+  server; assert hook lines appear in the sink for `select-window`, `kill-session`, etc.
+- **Manual acceptance** (issue checklist): exactly one prompt at all times, updated in place;
+  `prefix + <n>` completes a window-by-number step; runs containing `detach`/`kill-session`
+  complete end-to-end regardless of position; terminal close leaves no orphan servers; existing CLI
+  tests pass; `npm run typecheck` clean.
 
-- Uses bundled `practice-flow.ts` items (per-category command drills + the copy/paste sequence). No
-  server, no crypto, no leaderboard.
-- Same isolated-tmux + status-line prompt + state-diff detection engine as challenges, but "correct"
-  is decided by directly matching the observed action to the practice step's `commandName` /
-  `CopyModeAction` (no key chain). Advances through the item's steps; no timing/submission.
-- Fully functional with no network (acceptance: works offline).
+## 7. Risks & edge cases
 
-### 5.5 tmux prerequisite handling
-
-- On `challenge`/`practice` start: check `tmux -V`; require a reasonable minimum (e.g. ≥ 3.0 for
-  hooks/format coverage). If missing/too old, print an actionable install hint and exit non-zero.
-- Document supported platforms: macOS, Linux, WSL. tmux is not native to Windows (WSL required) —
-  documented on the CLI page and in `help`.
-
----
-
-## 6. End-to-end challenge flow in the CLI
-
-1. `tmux-speedrun challenge 0`:
-   - Load stored session token (if any) for authenticated submission.
-   - `POST /api/challenge/start` `{ challengeId, clientPublicKeyJwk }` (ECDH keypair generated
-     locally); capture `tmux_challenge_session` cookie; derive `K0`; decrypt step 0.
-   - Spin the isolated tmux server + controller; attach the user; show step 0 in the status line.
-   - As the user acts, detect → trial-decrypt → advance (§5.3), updating the prompt each step.
-   - On completion: `POST /api/challenge/finish` `{ proofB64 }` (sending `tmux_session` if logged in
-     and `tmux_challenge_session`).
-     - Signed-in ⇒ `recorded:true` with `username` + rank → print confirmation.
-     - Anonymous ⇒ `recorded:false` + provisional rank. Prompt: "Save your time?" → if the user runs
-       `tmux-speedrun login` (or is already logged in) then `POST /api/challenge/record` (sends
-       `tmux_pending_result` + `tmux_session`) to record under the verified username; else offer to
-       save as Anonymous by calling `record` without a session token (server records `username:null`).
-   - Tear down the isolated server; print final placement + a link to the web leaderboard.
-
----
-
-## 7. Website CLI documentation page
-
-- New route `src/routes/cli/+page.svelte` documenting: install (`npm i -g tmux-speedrun` / `npx`),
-  the command list, `login` (browser OAuth) flow, the **isolation guarantee** (dedicated tmux server
-  on a private socket, torn down on exit; your real sessions are never touched), and supported
-  platforms. Match existing page/layout styling (Tailwind; see `tmux-conf/+page.svelte` as a
-  structural reference).
-- Add a nav link to the CLI page in `src/routes/+layout.svelte` (mirror how existing routes are
-  linked). Keep copy consistent with `README.md`.
-- Optionally add `+page.ts`/metadata for title/OG; reuse existing patterns. No server data needed
-  (static content).
-
----
-
-## 8. Files to change / add
-
-**New CLI package (`cli/`):**
-- `cli/package.json` (name `tmux-speedrun`, `bin`, `type:module`, build/test scripts, `engines`),
-  `cli/tsconfig.json`, `cli/tsup.config.ts`.
-- `cli/src/index.ts` (arg routing + `help`), `cli/src/commands/{login,logout,whoami,leaderboard,
-  practice,challenge}.ts`.
-- `cli/src/api/client.ts` (fetch + cookie jar + base URL), `cli/src/api/challenge-session.ts`
-  (CLI transport reusing `challenge-core`), `cli/src/auth/{loopback-server,token-store}.ts`.
-- `cli/src/tmux/{server.ts (isolated socket lifecycle),config.ts (generated conf+hooks),
-  observer.ts (state query+diff),detector.ts (delta→candidates),controller.ts}.ts`.
-- `cli/src/ui/{status-line,leaderboard-table,prompts}.ts`.
-- `cli/README.md`.
-
-**Shared/refactor (web app):**
-- `src/lib/client/challenge-core.ts` — extract pure key-chain/step helpers from `challenge.ts`;
-  update `challenge.ts` to import them (no behavior change). Existing `challenge.test.ts` must still
-  pass.
-- `pnpm-workspace.yaml` — add the `cli` package.
-
-**Backend (auth loopback):**
-- `src/routes/api/auth/cli/login/+server.ts` — new.
-- `src/routes/api/auth/github/callback/+server.ts` — adapt for CLI loopback redirect.
-- `src/lib/server/auth/cli-login.ts` — new (sign/verify CLI-login state; loopback URL guard).
-- `src/lib/server/env.ts` — add `CLI_LOGIN_COOKIE_NAME` + options.
-
-**Website:**
-- `src/routes/cli/+page.svelte` — new docs page; `src/routes/+layout.svelte` — nav link.
-
-**Docs:**
-- Update root `README.md` to mention the CLI + link the docs page.
-
----
-
-## 9. Risks & edge cases
-
-- **R1 — Action detection completeness (highest risk).** tmux hook availability varies by version and
-  some pool commands (informational/read-only) produce no state delta. Mitigation: the poll +
-  **trial-decrypt verifier** guarantees correctness of any candidate we produce; the open task is
-  ensuring the right candidate is *generated* for every one of the ~40 pool commands. The
-  interface/impl stage must build an explicit, empirically-verified mapping table against a real tmux,
-  with an integration test per command family. Ambiguous deltas emit multiple candidates.
-- **R2 — Isolation teardown must be bulletproof.** Any exit path (signal, crash, completion) must
-  `kill-server` the isolated socket and never the default one. Signal handlers + `try/finally` +
-  idempotent cleanup; integration test proves the default server is untouched. (Hard requirement.)
-- **R3 — Loopback auth security.** Strict loopback guard (127.0.0.1/localhost only), `cli_state`
-  CSRF, single-use signed `tmux_cli_login` cookie, token only over loopback. Fall back to home
-  redirect (never open-redirect) if the guard fails. Port-in-use / browser-can't-open ⇒ print the URL
-  to paste manually; login timeout with a clear message.
-- **R4 — Cookie handling.** httpOnly cookies are carried by the CLI's jar (reading
-  `getSetCookie()`); `secure` cookies require https in prod (satisfied). Verify Node `fetch`
-  `Set-Cookie` parsing (use `headers.getSetCookie()` in Node 22).
-- **R5 — Crypto parity.** The CLI's key chain must match the server byte-for-byte. Mitigated by
-  reusing `src/lib/crypto` + `challenge-core` unchanged and adding a parity test (start against a
-  local dev server, complete a scripted run, assert `finish` accepts the proof).
-- **R6 — Duration/anti-cheat.** Timing is server-side (cookie `startTime` → `finish`); the CLI can't
-  fake it. The pre-existing property that a client knows `requiredInput` is unchanged (out of scope to
-  alter the crypto scheme). The CLI faithfully requires real native-tmux actions.
-- **R7 — Importing app modules into a Node bundle.** `practice-flow.ts`/`pools.ts` must not
-  transitively pull browser-only code. Verify at build; if needed, split leaf type modules. Bundling
-  (tsup) resolves `$lib` aliases at build time so the published package is standalone.
-- **R8 — Non-TTY / CI.** Interactive modes require a TTY; detect and degrade gracefully.
-- **R9 — Windows.** tmux needs WSL; documented. CLI still installs; `challenge`/`practice` guard on
-  `tmux -V`.
-- **R10 — Working-tree cleanliness.** Do not commit build output (`cli/dist`), caches, or lockfile
-  churn beyond an intentional `cli` dependency addition; add `cli/dist` etc. to `.gitignore`.
-
----
-
-## 10. Testing
-
-**Unit (fast, no tmux/network):**
-- `challenge-core` key-chain parity (reuse/extend existing `crypto.test.ts` / `challenge.test.ts`).
-- Detector: feed synthetic `(prevState, newState, buffer)` deltas → assert candidate answer sets
-  (all mappings in §5.3, including ambiguous multi-candidate cases and copy-paste).
-- Cookie jar: parse `Set-Cookie`, replay, expiry/secure handling.
-- Loopback guard (`cli-login.ts`): accept `http://127.0.0.1:<valid port>/callback`; reject absolute
-  hosts, non-loopback, bad schemes/ports, control chars (analogous to `return-to.test.ts`).
-- Arg parsing / `help` output; leaderboard table + `--json` rendering.
-
-**Server tests (Vitest, existing harness):**
-- `GET /api/auth/cli/login` sets `tmux_oauth_state` + signed `tmux_cli_login`, redirects to GitHub.
-- Callback: with a valid `tmux_cli_login`, redirects to the loopback URL carrying the token, only for
-  allowed loopback targets; with a disallowed target, falls back to home (no open redirect); clears
-  the cookie (single-use). State-mismatch → existing error path. Non-CLI flow unchanged.
-
-**Integration (gated on tmux; likely a separate opt-in script/CI job):**
-- Isolated-server lifecycle: create socket, run scripted tmux commands, assert detector emits correct
-  canonical actions per pool command; teardown kills only the isolated socket (create a default-socket
-  session first, assert it survives `kill-server` inside the isolated one — proves R2/acceptance).
-- Full challenge E2E against a local dev server + test DB: `start`→scripted actions→`finish`→row
-  recorded; anonymous→`record`→row; authenticated path stamps the verified username.
-
-**Website:** `cli/+page.svelte` renders; nav link present (mirror `home-page.browser.test.ts`
-patterns as applicable).
-
----
-
-## 11. Acceptance-criteria mapping
-
-- Installable CLI + working `help` → §3.1/§3.2, packaging, help test.
-- `login` completes browser OAuth, stores usable session → §4.2/§4.3.
-- Start+complete a challenge end-to-end against native tmux, time recorded under verified username →
-  §5/§6 + E2E test.
-- Practice works offline → §5.4.
-- Leaderboard viewable from CLI → `leaderboard` command (§3.2) via `GET /api/leaderboard`.
-- Isolated tmux server, provably separate, torn down on exit; prompted `kill-session` can't touch real
-  sessions → §5.1/R2 + isolation test.
-- CLI documentation page on the website → §7.
-
----
-
-## 12. Scope flags
-
-- **needs_backend: true** — the CLI (Node/TypeScript) is backend work; plus new/adapted auth
-  endpoints (`/api/auth/cli/login`, GitHub callback), new server auth helper + env constants, and the
-  `challenge-core` refactor.
-- **needs_frontend: true** — new website CLI documentation page (`src/routes/cli/+page.svelte`) and a
-  nav link in `+layout.svelte`.
+- **`after-*` hook coverage varies** by command/version → verified empirically in step 0; rebind
+  fallback; state-diff candidates always retained as safety net.
+- **`run-shell` sink writes are async** → drain with a short settle window at exit-classification;
+  the poll keeps providing state deltas regardless.
+- **Runner-origin events masquerading as user actions** → exec-accounting suppression (§3.2) +
+  `resetBaseline()` after recovery; test both explicitly. The one intentional exception: the
+  runner's re-attach may satisfy an `attach-session` step (that *is* the user's post-detach flow).
+- **Auto re-attach can trap the user** in an unwinnable run → the ~1s Ctrl-C window + notice each
+  cycle, and the consecutive-failure guard.
+- **Isolation (ISO1)**: recovery must only ever use the run's private socket; teardown/exit
+  handlers already reference the socket name and stay valid across server restarts (verify the
+  temp dir isn't removed until final teardown).
+- **Ordering races** between poll, sink, and recovery → the loop serializes: drain/diff *before*
+  recovery, reset baseline *after*, single `advancing` critical section for submits.
+- **Shared canonical answers**: no changes to answer strings or the crypto chain — the CLI must
+  keep matching the server generator exactly; all fixes are detection-side over-emission, which
+  trial-decrypt filters by design.
