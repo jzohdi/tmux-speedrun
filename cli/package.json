@@ -15,6 +15,7 @@
 	},
 	"scripts": {
 		"build": "tsup",
+		"prepack": "tsup",
 		"test": "vitest --run",
 		"typecheck": "tsc --noEmit"
 	},
@@ -24,6 +25,15 @@
 		"challenge",
 		"speedrun"
 	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/jzohdi/tmux-speedrun.git",
+		"directory": "cli"
+	},
+	"homepage": "https://github.com/jzohdi/tmux-speedrun/tree/main/cli#readme",
+	"bugs": {
+		"url": "https://github.com/jzohdi/tmux-speedrun/issues"
+	},
 	"license": "MIT",
 	"devDependencies": {
 		"tsup": "^8.0.0",
