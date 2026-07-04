@@ -1,18 +1,31 @@
 name: Release CLI to npm
 
-# Publishes the cli/ workspace package to npm via OIDC trusted publishing
-# (no NPM_TOKEN secret; configure the trusted publisher on npmjs.com for
-# this repo + workflow filename). Triggered by pushing a v* tag whose
-# version matches cli/package.json.
+# Automatically publishes the cli/ workspace package to npm whenever CLI
+# code (or the shared src/lib code that tsup bundles into it) lands on
+# main. If cli/package.json's version was bumped in the merge, that exact
+# version is published; otherwise the patch version is bumped
+# automatically and the bump is committed back to main. Uses OIDC trusted
+# publishing (configure on npmjs.com: repo jzohdi/tmux-speedrun, workflow
+# release-cli.yml) — no NPM_TOKEN secret required.
+#
+# workflow_dispatch acts as a "force release" button: it always results
+# in a publish (auto-bumping if the current version is already on npm).
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths:
+      - 'cli/**'
+      - 'src/lib/**' # inlined into the CLI bundle by tsup ($lib alias)
+  workflow_dispatch:
 
 permissions:
-  contents: read
-  id-token: write # required for npm OIDC trusted publishing
+  contents: write # push the auto-bump commit and release tag
+  id-token: write # npm OIDC trusted publishing
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -39,15 +52,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check tag matches cli/package.json version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./cli/package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::Tag v${tag} does not match cli/package.json version ${pkg}" >&2
-            exit 1
-          fi
-
       - name: Run tests
         run: pnpm run test
 
@@ -61,6 +65,32 @@ jobs:
           npm run build
           node dist/index.js help
 
+      - name: Resolve release version
+        id: version
+        run: |
+          current="$(node -p "require('./cli/package.json').version")"
+          if npm view "tmux-speedrun@${current}" version >/dev/null 2>&1; then
+            # Version already on npm -> auto-bump patch and push it to main.
+            # (A push from GITHUB_TOKEN cannot retrigger workflows, so no loop.)
+            new="$(cd cli && npm version patch --no-git-tag-version)"
+            new="${new#v}"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add cli/package.json
+            git commit -m "Release tmux-speedrun ${new} [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+            echo "version=${new}" >> "$GITHUB_OUTPUT"
+          else
+            # Version was bumped manually in the merge -> publish it as-is.
+            echo "version=${current}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
         working-directory: cli
         run: npm publish
+
+      - name: Tag release
+        run: |
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
