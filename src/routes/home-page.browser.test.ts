@@ -14,7 +14,14 @@ vi.mock('$lib/queries/leaderboard', () => ({
 
 // The full set of hint labels shown above the terminal. Each label's command
 // is the text it displays (no separate mapping), per the issue.
-const HINT_COMMANDS = ['tsr ls', 'tsr start <id>', 'tsr practice', 'tsr config', 'man tmux'];
+const HINT_COMMANDS = [
+	'tsr ls',
+	'tsr lb',
+	'tsr start <id>',
+	'tsr practice',
+	'tsr config',
+	'man tmux'
+];
 
 describe('home page command hints', () => {
 	it('renders every hint as a keyboard-focusable button with an accessible name', async () => {
@@ -30,7 +37,7 @@ describe('home page command hints', () => {
 		}
 	});
 
-	it('still displays the same five command labels in order', async () => {
+	it('displays all six command labels', async () => {
 		const screen = await render(Page);
 
 		for (const command of HINT_COMMANDS) {
@@ -63,6 +70,25 @@ describe('home page command hints', () => {
 		await vi.waitFor(() => {
 			expect(document.activeElement).toBe(container);
 			expect(document.activeElement).not.toBe(lsHint.element());
+		});
+	});
+
+	it('opens the all-challenges leaderboard pager when the tsr lb hint is clicked', async () => {
+		const screen = await render(Page);
+
+		const lbHint = screen.getByRole('button', { name: 'Run command: tsr lb' });
+		await userEvent.click(lbHint);
+
+		// The command echoes and opens the pager-style leaderboard viewer.
+		await expect
+			.element(screen.getByRole('application', { name: /leaderboard viewer/i }))
+			.toBeVisible();
+
+		// Focus moves into the pager so arrow keys / q work immediately.
+		const pagerEl = document.querySelector('.manpage-container');
+		expect(pagerEl).not.toBeNull();
+		await vi.waitFor(() => {
+			expect(document.activeElement).toBe(pagerEl);
 		});
 	});
 
