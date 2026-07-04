@@ -277,7 +277,10 @@ describe('deriveCandidates — window-by-number regression (issue #45 defect 2)'
 	});
 
 	it('after-next-window alone does NOT yield select-window (targeted vs generic stays distinguishable)', () => {
-		const candidates = deriveCandidates(delta({ commandEvents: ['after-next-window'] }), simpleStep);
+		const candidates = deriveCandidates(
+			delta({ commandEvents: ['after-next-window'] }),
+			simpleStep
+		);
 		expect(candidates).toContain('next-window');
 		expect(candidates).not.toContain('select-window');
 	});
@@ -358,7 +361,11 @@ describe('deriveCandidates — pane modes (issue #45, interface §5.2.2)', () =>
 
 describe('deriveCandidates — moved panes (issue #45, interface §5.2.3)', () => {
 	const moved: MovedPane[] = [
-		{ paneId: '%1', from: { session: 'main', windowIndex: 0 }, to: { session: 'main', windowIndex: 1 } }
+		{
+			paneId: '%1',
+			from: { session: 'main', windowIndex: 0 },
+			to: { session: 'main', windowIndex: 1 }
+		}
 	];
 
 	it('a pane that changed window → join-pane, swap-pane, swap-window', () => {

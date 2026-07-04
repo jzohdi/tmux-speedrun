@@ -40,7 +40,11 @@ type ObserverX = {
 	exec(args: string[]): Promise<TmuxResult>;
 	expectEvents(events: string[]): void;
 	snapshot(): Promise<TmuxState>;
-	diff(prev: TmuxState, next: TmuxState, ctx?: { seedInput?: string; commandEvents?: string[] }): DeltaX;
+	diff(
+		prev: TmuxState,
+		next: TmuxState,
+		ctx?: { seedInput?: string; commandEvents?: string[] }
+	): DeltaX;
 	watch(
 		onDelta: (d: DeltaX) => void,
 		opts?: { intervalMs?: number; getSeedInput?: () => string | undefined }
@@ -186,7 +190,11 @@ describe('diff — commandEvents / enteredMode / movedPanes (interface §1)', ()
 		});
 		const d = obs().diff(prev, next);
 		expect(d.movedPanes).toEqual([
-			{ paneId: '%1', from: { session: 'main', windowIndex: 0 }, to: { session: 'main', windowIndex: 1 } }
+			{
+				paneId: '%1',
+				from: { session: 'main', windowIndex: 0 },
+				to: { session: 'main', windowIndex: 1 }
+			}
 		]);
 	});
 
@@ -339,7 +347,9 @@ describe('watch — the sink is a real change channel (issue #45 defect 2 plumbi
 		} finally {
 			watcher.stop();
 		}
-		expect(received.length, 'watch never emitted a delta for a sink-only change').toBeGreaterThan(0);
+		expect(received.length, 'watch never emitted a delta for a sink-only change').toBeGreaterThan(
+			0
+		);
 		expect(received.some((d) => d.commandEvents?.includes('after-select-window'))).toBe(true);
 	}, 10_000);
 });

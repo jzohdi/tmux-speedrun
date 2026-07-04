@@ -40,7 +40,9 @@ export const practiceCommand: Command = {
 		}
 
 		info(
-			bold('Practice mode') + ` — ${items.length} drills. Press the tmux keys to complete each.`
+			bold('Practice mode') +
+				` — ${items.length} drills. Press the tmux keys to complete each.` +
+				' Detaching re-attaches automatically; press Ctrl-C here to quit.'
 		);
 
 		let completed = 0;
@@ -50,14 +52,14 @@ export const practiceCommand: Command = {
 				info(`\n${bold(item.title)} — ${item.description}`);
 				const observer = new TmuxObserver(server);
 				const ui = new StatusLine(server);
-				const controller = new PracticeController({ server, observer, item, ui });
+				const controller = new PracticeController({ server, observer, item, ui, notify: info });
 				const result = await controller.run();
 				if (result.completed) {
 					completed++;
 					success(`Done: ${item.title}`);
 				} else {
-					info(`Skipped: ${item.title}`);
-					break; // user detached — stop the run
+					info(`Stopped: ${item.title}`);
+					break; // run-loop guard abort — stop the drill sequence
 				}
 			} catch (err) {
 				error(`Practice failed: ${(err as Error).message}`);

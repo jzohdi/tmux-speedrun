@@ -288,7 +288,15 @@ describe('runAttachLoop — lifecycle decoupled from any single attach (defect 3
 		expect(result).toMatchObject({ completed: true, aborted: false });
 		// recovery (ensureRunning) must come AFTER the exit was classified —
 		// never overwrite the evidence of what the user did
-		assertOrder(h.ops, 'attach:1', 'drain', 'advance:1', 'ensureRunning:speedrun', 'attach:2', 'advance:2');
+		assertOrder(
+			h.ops,
+			'attach:1',
+			'drain',
+			'advance:1',
+			'ensureRunning:speedrun',
+			'attach:2',
+			'advance:2'
+		);
 	});
 
 	it('a dead server is classified via SERVER_DIED_EVENT and the run continues (kill-server step)', async () => {
@@ -326,7 +334,7 @@ describe('runAttachLoop — lifecycle decoupled from any single attach (defect 3
 		assertOrder(h.ops, 'advance:1', 'clear', 'exec:detach-client');
 	});
 
-	it('suppresses the FIRST attach\'s own client-attached events, but never recovery re-attaches', async () => {
+	it("suppresses the FIRST attach's own client-attached events, but never recovery re-attaches", async () => {
 		const loop = requireLoop();
 		const h = makeHarness({
 			answers: ['detach', 'attach-session'],

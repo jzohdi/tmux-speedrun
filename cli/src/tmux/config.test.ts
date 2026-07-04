@@ -128,10 +128,9 @@ describe('SINK_HOOKS + generated hook lines (interface §2.2)', () => {
 
 describe('expectedSinkEventsFor — runner exec → expected sink events (interface §2.3)', () => {
 	it('is exported from config.ts', () => {
-		expect(
-			typeof expectedSinkEventsFor,
-			'config.ts must export expectedSinkEventsFor'
-		).toBe('function');
+		expect(typeof expectedSinkEventsFor, 'config.ts must export expectedSinkEventsFor').toBe(
+			'function'
+		);
 	});
 
 	const cases: [string[], string[]][] = [
