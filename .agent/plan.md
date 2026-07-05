@@ -28,6 +28,18 @@ Issue: jzohdi/tmux-speedrun#45 · PR: #46
 > and adds a new CLI command. Where §9 contradicts an earlier section or `.agent/interface.md`, §9
 > wins. All work stays inside `cli/` except a CLI-only prompt-composition change (no web/API/
 > generator/canonical-answer changes).
+>
+> **Revision 4 (2026-07-05, PR #46 third feedback round).** §1–§9 are implemented, reviewed, and
+> merged on this branch (through commit `e34ed99`); challenge 0 is now completable end-to-end (the
+> user confirmed). The new PR #46 feedback (comment of 2026-07-05T21:29) reports two remaining
+> issues, addressed by **§10**: (1) **practice mode detaches/re-attaches between almost every
+> drill** — it should instead behave like challenge mode (one continuous attached session that
+> cycles through every command once, each producing real tmux results), keeping the already-shipped
+> hotkey hints; and (2) the **`login` command uses the wrong origin** — the GitHub-login redirect
+> must go through `https://tmux-speedrun.xyz`, not the pinned Vercel preview origin. §10 amends the
+> practice run structure (§3.1's "keep practice's per-item server" decision and §9.2) and the pinned
+> API origin. Where §10 contradicts an earlier section or `.agent/interface.md`, §10 wins. All work
+> stays inside `cli/` (no web/API/generator/canonical-answer changes).
 
 ---
 
@@ -765,3 +777,152 @@ where they conflict; the interface stage should reconcile them.
 - **`debug` must not weaken ISO1/LIFE1**: it uses the same isolated server + teardown; assert no
   orphan `tmux -L tmux-speedrun-*` after it exits.
 - Canonical-answer/crypto invariants, ISO1/DET1/LIFE1/PR1/SUP1/OS1 unchanged.
+
+---
+
+## 10. Revision 4 — PR #46 third feedback: continuous practice mode + login origin
+
+The third PR #46 feedback comment (2026-07-05T21:29) confirms challenge 0 is now fully playable and
+reports two remaining issues. Both are inside `cli/`; no web, API, generator, or canonical-answer
+changes.
+
+### 10.1 Practice mode should behave like challenge — one continuous session (reported case 1) — UX
+
+**Report:** "most commands seem to trigger ending the tmux session. For example, the prompt is
+'rename current window' and when completing the practice command, it does a detach from tmux to then
+re-attach. I don't think this is a good UX… The practice mode should basically behave the same as a
+challenge (the operations mostly produce the tmux real results), except… we should cycle through
+every available command a single time, and the hotkeys to execute the command are displayed. Right
+now we display the practice mode hotkeys correctly, but the behavior needs improvement."
+
+**Root cause (verified):** practice is structured as **one isolated server per drill**.
+`practice.ts` (`cli/src/commands/practice.ts:49-70`) loops over `createPracticeItems(...)` and, for
+**each** item, calls `createIsolatedTmuxServer(...)`, runs a `PracticeController` over that single
+item, then `server.teardown()` in `finally`. Each `PracticeController.run()` uses the shared
+`runAttachLoop`, which on step completion (`controller.ts:91-96`) issues `detach-client` to end the
+attach. So every drill ends by detaching the client, tearing down that drill's server, spinning up a
+fresh server, and re-attaching for the next drill — the exact "detach then re-attach on almost every
+command" the user sees. (This is the §3.1 decision "keep practice's per-item server; put the loop
+inside each item"; it is now superseded for the reported UX reason.)
+
+Challenge mode does **not** have this problem: it creates **one** server and runs **one**
+`runAttachLoop` over **all** steps (`challenge.ts:54-59`); the loop only detaches on _final_
+completion, so between steps the prompt is replaced in place with no detach (defect 1, §3.3). The
+fix is to give practice the identical shape.
+
+**Fix — a single continuous practice run over a flattened step sequence.** Restructure practice so
+the whole drill sequence runs in **one** server / **one** `runAttachLoop`, exactly like challenge:
+
+- **`PracticeController` takes `items: PracticeItem[]`** (the full ordered drill list) instead of a
+  single `item`. Its `StepEngine` flattens all items into a linear list of `(item, step)` pairs and
+  tracks a single global `index` across the whole sequence:
+  - `isComplete()` → `index >= flat.length`.
+  - `view()` → the current pair's step, with the **already-shipped §9.2 hint** unchanged: `command`
+    steps append `— ${shortcut}` (lookup from `COMMAND_SHORTCUTS`); `copy-mode-action` steps keep
+    their verbatim prompt. `index`/`total` are the global position, so the status line shows
+    `[3/25] Rename the current window — prefix + ,` — the running progress the user needs to see
+    "every available command a single time."
+  - `detectionStep()` / `seedInput()` → the **current pair's item** `seedInput` (only the appended
+    copy-paste item carries one; all other drills have `undefined`, unchanged behavior).
+  - `trySubmit()` → unchanged per-step matching (`command` step: `candidates.includes(commandName)`;
+    `copy-mode-action` step: `enteredCopyMode` / `bufferAdded` / `pasteObserved`). On match, `index++`.
+- **`practice.ts`** creates **one** `createIsolatedTmuxServer({ initialSession: 'practice' })`,
+  constructs one `TmuxObserver` + `StatusLine` + `PracticeController({ items, … })`, runs it once,
+  and tears the server down once in `finally`. The current per-item `for` loop, the per-item
+  `createIsolatedTmuxServer`/`teardown`, and the per-item `info("\n{title} — {description}")` banner
+  are removed. Keep the pre-run intro `info(...)` (now: `<n> drills` / "Press the tmux keys…" /
+  "detaching re-attaches automatically; Ctrl-C to quit") and the closing `Completed <c>/<total>`
+  summary (derived from the controller result: completed ⇒ all; aborted ⇒ report the run stopped).
+  The category filter and `EXIT_USAGE`/empty-set handling are unchanged.
+
+Why this is safe and correct:
+
+- **Continuity is exactly what challenge already does** — practice now inherits the same
+  single-attach-loop lifecycle, so detach/kill-session/kill-server **drills** are handled by the
+  loop's classify→recover→re-attach path (§3.1) instead of by a teardown between drills. The user
+  stays attached across the whole practice run; only genuine detach/kill drills (and final
+  completion) ever end an attach, identically to challenge.
+- **ONESHOT (OS1, §8.1) makes a shared, accumulating session viable.** Because every command is
+  completable from _any_ reachable state via input-based (write-first) detection, running all drills
+  in one session — where state accumulates (extra windows/panes/sessions from `new-window`,
+  `split-*`, `new-session`, etc.) — cannot strand a later drill. This is the precondition that lets
+  practice drop the "fresh session per drill" isolation without reintroducing stuck steps.
+- **Ordering & seed:** drills run in `createPracticeItems` order (TMUX_COMMANDS order, with the
+  copy-paste sequence appended last), so per-step `seedInput` is only ever the copy-paste seed when
+  those steps are current — matching today's per-item behavior.
+
+`practice-flow.ts` (shared with the web practice page) is **not** modified — the flattening and hint
+composition stay in the CLI `PracticeController`/`practice.ts`, consistent with §9.2's scope rule.
+
+### 10.2 `login` uses the wrong origin (reported case 2) — BUG
+
+**Report:** "For the login command, the incorrect URL is used, the redirect url for github login is
+`https://tmux-speedrun.xyz/`."
+
+**Root cause (verified):** `login.ts` builds the browser URL as
+`${baseUrl}/api/auth/cli/login?port=…&state=…` (`login.ts:20`), where `baseUrl` comes from
+`resolveConfig` → the pinned `DEFAULT_API_ORIGIN` (`config.ts:18`), currently
+`https://tmux-speedrun.vercel.app`. So an unconfigured `tmux-speedrun login` opens the Vercel preview
+origin instead of the canonical production domain, and the GitHub OAuth callback redirects through
+the wrong host.
+
+**Fix — repoint the pinned production origin.** Change `DEFAULT_API_ORIGIN` in `cli/src/config.ts`
+to `https://tmux-speedrun.xyz` (no trailing slash — `trimTrailingSlash` normalizes regardless, and
+path joins already prepend `/api/...`). This is the single source of the base origin for **all** CLI
+API calls (login, challenge session, leaderboard, record), so it aligns every request with the
+canonical domain, not just login. The `--server` flag and `TMUX_SPEEDRUN_API` env override remain the
+supported dev escape hatches (e.g. `http://localhost:5173`). No other file references the old origin
+(verified by grep); there is no `config.test.ts` asserting the constant.
+
+### 10.3 Files to change (delta on §4/§8.4/§9.5)
+
+| File                              | Change                                                                                                                                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli/src/tmux/controller.ts`      | §10.1: `PracticeController` accepts `items: PracticeItem[]`; `StepEngine` flattens all items to a single global-index sequence (hint composition & matching kept) |
+| `cli/src/commands/practice.ts`    | §10.1: one server + one `PracticeController` run for the whole drill list (remove per-item server/teardown loop and per-item banner); adjust intro/summary output |
+| `cli/src/config.ts`               | §10.2: `DEFAULT_API_ORIGIN = 'https://tmux-speedrun.xyz'`                                                                                                          |
+| tests (§10.4)                     | practice controller/command test; existing practice/controller tests updated for the new `items` shape                                                            |
+
+No changes: `config.ts`'s hook/alias machinery, `observer.ts`, `detector.ts`, `server.ts`,
+`status-line.ts`, `debug.ts`, web `src/` (incl. `practice-flow.ts`), API, generator,
+canonical answers.
+
+### 10.4 Testing (delta on §6/§8.5/§9.6)
+
+- **Unit — practice engine (`controller` test)**: with two or more `PracticeItem`s, the flattened
+  `StepEngine` progresses a **single global index** across items (advancing item A's step then item
+  B's step) without any intervening detach; `view()` reports global `index`/`total` and appends the
+  `shortcut` hint for `command` steps only (`copy-mode-action` prompts verbatim); `seedInput()`
+  returns the copy-paste seed only while a copy-paste step is current; a `command` step matches on
+  `candidates.includes(commandName)`. Update any existing `PracticeController` test that constructs
+  it with a single `item` to the new `items` array shape.
+- **Unit — practice command wiring** (light): `practice.ts` constructs exactly **one** isolated
+  server for the whole run (guards the reported "detach between drills" regression at the structural
+  level — e.g. assert `createIsolatedTmuxServer` is called once for a multi-drill category via
+  injected/spied factory, or cover via the controller-level test if the command isn't unit-seamed).
+- **Unit — login origin**: assert `resolveConfig({})`/`DEFAULT_API_ORIGIN` yields
+  `https://tmux-speedrun.xyz` and that the login URL is built against it (if `login.ts` isn't already
+  unit-seamed, a `config` unit assertion on the constant suffices); `--server`/`TMUX_SPEEDRUN_API`
+  overrides still win.
+- **Manual acceptance (feedback verbatim)**: run `tmux-speedrun practice` and confirm completing a
+  drill (e.g. "rename current window") advances **in place** to the next drill with **no**
+  detach/re-attach flicker, the whole command set is cycled once, and each drill shows its hotkey;
+  detach/kill-session drills still recover and continue (challenge-parity). `tmux-speedrun login`
+  (no flags) opens `https://tmux-speedrun.xyz/api/auth/cli/login?...`. `cd cli && npm test`,
+  `npm run typecheck`, and `npx prettier --check` on branch-touched files green (integration suite
+  needs tmux installed).
+
+### 10.5 Risks & edge cases (delta on §7/§8.6/§9.7)
+
+- **Accumulating practice session state**: running every command in one session grows tmux state
+  (extra windows/panes/sessions). ONESHOT (OS1) guarantees each remaining drill is still completable;
+  no per-drill reset is needed or wanted (a reset would reintroduce the detach the user is asking us
+  to remove). If a specific later drill is ever found un-completable from accumulated state, that is
+  an OS1 gap to fix in the detection channel, not a reason to restore per-item servers.
+- **Detach/kill drills mid-practice**: identical to challenge — the run loop's ~1s Ctrl-C notice +
+  recovery applies. Acceptable and consistent (the intro already tells the user detaching
+  re-attaches automatically).
+- **Login origin**: `https://tmux-speedrun.xyz` must actually serve `/api/auth/cli/login` and the
+  OAuth callback (it is the canonical production deployment); this is a pinned-constant change only —
+  the loopback receiver, CSRF `state`, and token handling are unchanged.
+- ISO1/DET1/LIFE1/PR1/SUP1/OS1 and the canonical-answer/crypto invariants unchanged.
