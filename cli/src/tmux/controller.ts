@@ -17,6 +17,7 @@ import type { StatusLine } from '../ui/status-line';
 import type { StateDelta } from '../engine/types';
 import type { DecryptedStep } from '$lib/client/challenge-core';
 import type { PracticeItem } from '$lib/data/practice-flow';
+import { expectedSinkEventsFor, RUNNER_ATTACH_COMMAND } from './config';
 
 export type ChallengeRunResult = { completed: boolean; finish?: FinishResponse; aborted?: boolean };
 
@@ -33,7 +34,7 @@ export type StepEngine = {
 };
 
 export type RunLoopDeps = {
-	server: Pick<IsolatedTmuxServer, 'attach' | 'isAlive' | 'ensureRunning'>;
+	server: Pick<IsolatedTmuxServer, 'attach' | 'isAlive' | 'ensureRunning' | 'liveHooks'>;
 	observer: Pick<TmuxObserver, 'watch' | 'resetBaseline' | 'drainDelta' | 'exec' | 'expectEvents'>;
 	ui: Pick<StatusLine, 'setPrompt' | 'clear'>;
 	engine: StepEngine;
@@ -117,7 +118,7 @@ export async function runAttachLoop(deps: RunLoopDeps): Promise<RunLoopResult> {
 		// are deliberately NOT suppressed: the runner's re-attach IS the user's
 		// post-detach flow and may legitimately satisfy an attach-session step.
 		if (firstAttach) {
-			observer.expectEvents(['client-attached', 'after-attach-session']);
+			observer.expectEvents(expectedSinkEventsFor([RUNNER_ATTACH_COMMAND], server.liveHooks));
 		}
 
 		// 7. Attach until the client exits — for any reason.

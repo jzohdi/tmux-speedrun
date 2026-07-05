@@ -99,7 +99,7 @@ export class TmuxObserver {
 	 * fire an installed hook while a run is live must go through this.
 	 */
 	exec(args: string[]): Promise<TmuxResult> {
-		this.expectEvents(expectedSinkEventsFor(args));
+		this.expectEvents(expectedSinkEventsFor(args, this.server.liveHooks));
 		return this.server.exec(args);
 	}
 

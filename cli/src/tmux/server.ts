@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { tmuxExec, type TmuxResult } from './client';
-import { buildIsolatedConfig } from './config';
+import { buildIsolatedConfig, RUNNER_ATTACH_COMMAND, SINK_HOOKS } from './config';
 
 export type IsolatedTmuxServer = {
 	socketName: string;
@@ -39,23 +39,33 @@ export type IsolatedTmuxServer = {
 		restartedServer: boolean;
 		createdSession: boolean;
 	}>;
+	/** The SINK_HOOKS entries the running tmux accepted. */
+	liveHooks: ReadonlySet<string>;
 	/** kill-server on THIS socket + remove temp dir. Idempotent; ignores "no server". */
 	teardown(): Promise<void>;
 };
 
+export function sanitizedClientEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const { TMUX: _tmux, TMUX_PANE: _tmuxPane, ...rest } = env;
+	return { ...rest };
+}
+
 export async function createIsolatedTmuxServer(opts?: {
 	initialSession?: string;
+	spawnImpl?: typeof spawn;
 }): Promise<IsolatedTmuxServer> {
 	const socketName = `tmux-speedrun-${randomBytes(4).toString('hex')}`;
 	const tempDir = mkdtempSync(join(tmpdir(), 'tmux-speedrun-'));
 	const confPath = join(tempDir, 'tmux.conf');
 	const eventSink = join(tempDir, 'events.log');
 	const initialSession = opts?.initialSession ?? 'speedrun';
+	const spawnImpl = opts?.spawnImpl ?? spawn;
 
 	writeFileSync(confPath, buildIsolatedConfig({ eventSink }).text, { mode: 0o600 });
 	writeFileSync(eventSink, '', { mode: 0o600 });
 
 	let toreDown = false;
+	let liveHooks: ReadonlySet<string> = new Set(SINK_HOOKS);
 	const exec = (args: string[]) => tmuxExec(socketName, args, { conf: confPath });
 
 	const isAlive = async (): Promise<boolean> => {
@@ -78,10 +88,10 @@ export async function createIsolatedTmuxServer(opts?: {
 	// user's attach never sees an error screen.
 	const absorbConfigErrors = (): Promise<void> =>
 		new Promise((resolve) => {
-			const child = spawn(
+			const child = spawnImpl(
 				'tmux',
-				['-L', socketName, '-f', confPath, '-C', 'attach-session', ';', 'detach-client'],
-				{ stdio: 'ignore' }
+				['-L', socketName, '-f', confPath, '-C', RUNNER_ATTACH_COMMAND, ';', 'detach-client'],
+				{ env: sanitizedClientEnv(process.env), stdio: 'ignore' }
 			);
 			const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
 			const done = () => {
@@ -91,6 +101,19 @@ export async function createIsolatedTmuxServer(opts?: {
 			child.on('error', done);
 			child.on('close', done);
 		});
+
+	const captureLiveHooks = async (): Promise<void> => {
+		try {
+			const result = await exec(['show-hooks', '-g']);
+			if (result.code !== 0) {
+				liveHooks = new Set(SINK_HOOKS);
+				return;
+			}
+			liveHooks = parseLiveHooks(result.stdout);
+		} catch {
+			liveHooks = new Set(SINK_HOOKS);
+		}
+	};
 
 	const teardown = async (): Promise<void> => {
 		if (toreDown) return;
@@ -134,6 +157,7 @@ export async function createIsolatedTmuxServer(opts?: {
 	// Create the initial session detached so we can configure it before attach.
 	await exec(['new-session', '-d', '-s', initialSession]);
 	await absorbConfigErrors();
+	await captureLiveHooks();
 
 	// After teardown, nothing may touch the socket again: the signal-path
 	// teardown races the run loop, and an ensureRunning/exec slipping through
@@ -153,9 +177,12 @@ export async function createIsolatedTmuxServer(opts?: {
 		attach(target?: string): Promise<{ code: number | null }> {
 			if (toreDown) return Promise.resolve({ code: 1 });
 			return new Promise((resolve, reject) => {
-				const args = ['-L', socketName, '-f', confPath, 'attach-session'];
+				const args = ['-L', socketName, '-f', confPath, RUNNER_ATTACH_COMMAND];
 				if (target) args.push('-t', target);
-				const child = spawn('tmux', args, { stdio: 'inherit' });
+				const child = spawnImpl('tmux', args, {
+					env: sanitizedClientEnv(process.env),
+					stdio: 'inherit'
+				});
 				child.on('error', reject);
 				child.on('close', (code) => resolve({ code }));
 			});
@@ -169,6 +196,7 @@ export async function createIsolatedTmuxServer(opts?: {
 				// come back with the restarted server.
 				await guardedExec(['new-session', '-d', '-s', session]);
 				await absorbConfigErrors();
+				await captureLiveHooks();
 				return { restartedServer: true, createdSession: true };
 			}
 			const list = await guardedExec(['list-sessions', '-F', '#{session_name}']);
@@ -179,6 +207,34 @@ export async function createIsolatedTmuxServer(opts?: {
 			}
 			return { restartedServer: false, createdSession: false };
 		},
+		get liveHooks() {
+			return liveHooks;
+		},
 		teardown
 	};
 }
+
+function parseLiveHooks(stdout: string): ReadonlySet<string> {
+	const live = new Set<string>();
+	for (const hook of NOTIFICATION_HOOKS) {
+		live.add(hook);
+	}
+	for (const line of stdout.split('\n')) {
+		const normalized = line.trim().replace(/^set-hook\s+-g\s+/, '');
+		for (const hook of SINK_HOOKS) {
+			if (normalized.startsWith(`${hook} `) || normalized.startsWith(`${hook}[`)) {
+				live.add(hook);
+			}
+		}
+	}
+	return live;
+}
+
+const NOTIFICATION_HOOKS = [
+	'client-attached',
+	'client-detached',
+	'session-closed',
+	'window-renamed',
+	'pane-mode-changed',
+	'pane-focus-in'
+] satisfies readonly string[];

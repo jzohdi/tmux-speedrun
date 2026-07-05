@@ -17,6 +17,7 @@
 
 import type { DecryptedStep } from '$lib/client/challenge-core';
 import type { PaneInfo, StateDelta } from '../engine/types';
+import { ZOOM_KEY_EVENT } from './config';
 
 /** Synthetic event injected by the run loop when the private server died during an attach. */
 export const SERVER_DIED_EVENT = 'speedrun-server-died';
@@ -67,7 +68,8 @@ const EVENT_CANDIDATES: Record<string, readonly string[]> = {
 	'client-attached': ['attach-session'],
 	'after-attach-session': ['attach-session'],
 	'after-switch-client': ['attach-session', 'next-session', 'previous-session'],
-	[SERVER_DIED_EVENT]: ['kill-server', 'kill-session']
+	[SERVER_DIED_EVENT]: ['kill-server', 'kill-session'],
+	[ZOOM_KEY_EVENT]: ['toggle-zoom']
 };
 
 /**

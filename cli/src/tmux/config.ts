@@ -13,6 +13,19 @@
 
 export type GeneratedConfig = { text: string };
 
+export type KeyRebind = {
+	key: string;
+	repeat?: boolean;
+	events: readonly string[];
+	command: string;
+};
+
+export type CommandAlias = {
+	names: readonly string[];
+	events: readonly string[];
+	command: string;
+};
+
 /**
  * Every hook installed in the generated conf; each writes its own name as one
  * line to the event sink. Covers each pool command's underlying tmux command
@@ -74,23 +87,108 @@ export const SINK_HOOKS: readonly string[] = [
  */
 export const WINDOW_NAV_TRIGGER = 'window-nav-trigger';
 
+/** Sink event written by the `z` rebind; resize-pane has no after-hook. */
+export const ZOOM_KEY_EVENT = 'zoom-key';
+
+/** Private alias used only by the runner to reach the real attach-session command. */
+export const RUNNER_ATTACH_COMMAND = 'speedrun-attach';
+
+export const KEY_REBINDS: readonly KeyRebind[] = [
+	...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({
+		key: String(n),
+		events: ['after-select-window'],
+		command: `select-window -t :=${n}`
+	})),
+	{ key: 'n', events: ['after-next-window'], command: 'next-window' },
+	{ key: 'p', events: ['after-previous-window'], command: 'previous-window' },
+	{ key: 'l', events: ['after-last-window'], command: 'last-window' },
+	{ key: "';'", events: ['after-last-pane'], command: 'last-pane' },
+	{ key: "'{'", events: ['after-swap-pane'], command: 'swap-pane -U' },
+	{ key: "'}'", events: ['after-swap-pane'], command: 'swap-pane -D' },
+	{ key: 'C-o', events: ['after-rotate-window'], command: 'rotate-window' },
+	{ key: "'!'", events: ['after-break-pane'], command: 'break-pane' },
+	{ key: "':'", events: ['after-command-prompt'], command: 'command-prompt' },
+	{ key: 't', events: ['after-clock-mode'], command: 'clock-mode' },
+	{ key: 'w', events: ['after-choose-tree'], command: 'choose-tree -Zw' },
+	{ key: 's', events: ['after-choose-tree'], command: 'choose-tree -Zs' },
+	{ key: "'('", events: ['after-switch-client'], command: 'switch-client -p' },
+	{ key: "')'", events: ['after-switch-client'], command: 'switch-client -n' },
+	{ key: 'Up', repeat: true, events: ['after-select-pane'], command: 'select-pane -U' },
+	{ key: 'Down', repeat: true, events: ['after-select-pane'], command: 'select-pane -D' },
+	{ key: 'Left', repeat: true, events: ['after-select-pane'], command: 'select-pane -L' },
+	{ key: 'Right', repeat: true, events: ['after-select-pane'], command: 'select-pane -R' },
+	{ key: 'o', events: ['after-select-pane'], command: 'select-pane -t :.+' },
+	{ key: 'z', events: [ZOOM_KEY_EVENT], command: 'resize-pane -Z' },
+	{ key: "']'", events: ['after-paste-buffer'], command: 'paste-buffer' },
+	{ key: 'q', events: ['after-display-panes'], command: 'display-panes' },
+	{ key: "'?'", events: ['after-list-keys'], command: 'list-keys' }
+];
+
+export const COMMAND_ALIASES: readonly CommandAlias[] = [
+	{ names: ['show-buffer', 'showb'], events: ['after-show-buffer'], command: 'show-buffer' },
+	{ names: ['source-file', 'source'], events: ['after-source-file'], command: 'source-file' },
+	{ names: ['kill-session'], events: ['after-kill-session'], command: 'kill-session' },
+	{ names: ['select-window', 'selectw'], events: ['after-select-window'], command: 'select-window' },
+	{ names: ['next-window', 'next'], events: ['after-next-window'], command: 'next-window' },
+	{
+		names: ['previous-window', 'prev'],
+		events: ['after-previous-window'],
+		command: 'previous-window'
+	},
+	{ names: ['last-window', 'last'], events: ['after-last-window'], command: 'last-window' },
+	{ names: ['new-session', 'new'], events: ['after-new-session'], command: 'new-session -d' },
+	{
+		names: ['attach-session', 'attach', 'a'],
+		events: ['after-attach-session'],
+		command: 'switch-client'
+	},
+	{ names: ['list-sessions', 'ls'], events: ['after-list-sessions'], command: 'list-sessions' },
+	{ names: ['list-windows', 'lsw'], events: ['after-list-windows'], command: 'list-windows' },
+	{ names: ['list-buffers', 'lsb'], events: ['after-list-buffers'], command: 'list-buffers' },
+	{ names: ['delete-buffer', 'deleteb'], events: ['after-delete-buffer'], command: 'delete-buffer' },
+	{ names: ['capture-pane', 'capturep'], events: ['after-capture-pane'], command: 'capture-pane' },
+	{ names: ['join-pane', 'joinp'], events: ['after-join-pane'], command: 'join-pane' },
+	{ names: ['swap-window', 'swapw'], events: ['after-swap-window'], command: 'swap-window' },
+	{ names: ['list-keys', 'lsk'], events: ['after-list-keys'], command: 'list-keys' }
+];
+
 /**
- * Pure. Given tmux exec args, return the sink event lines that exec will
- * cause, for runner self-suppression accounting (interface §2.3, SUP1). The
- * command word is args[0] (full command names; the runner never uses aliases).
+ * Pure. Given tmux exec args and the set of hooks this tmux accepted, return
+ * the exact sink-line multiset that one runner exec produces.
  */
-export function expectedSinkEventsFor(args: string[]): string[] {
+export function expectedSinkEventsFor(args: string[], liveHooks: ReadonlySet<string>): string[] {
 	const command = args[0];
-	switch (command) {
-		case 'detach-client':
-			return ['client-detached'];
-		case 'attach-session':
-			return ['client-attached', 'after-attach-session'];
-		case 'kill-session':
-			return ['after-kill-session', 'session-closed'];
+	if (command === RUNNER_ATTACH_COMMAND) {
+		const events: string[] = [];
+		if (liveHooks.has('client-attached')) events.push('client-attached');
+		if (liveHooks.has('after-attach-session')) events.push('after-attach-session');
+		return events;
 	}
-	const hook = `after-${command}`;
-	return SINK_HOOKS.includes(hook) ? [hook] : [];
+
+	const alias = COMMAND_ALIASES.find((entry) => entry.names.includes(command));
+	const canonicalCommand = alias ? firstWord(alias.command) : command;
+	const events = alias ? [...alias.events] : [];
+	const hook = `after-${canonicalCommand}`;
+
+	if (SINK_HOOKS.includes(hook) && liveHooks.has(hook)) {
+		events.push(canonicalCommand === 'select-window' ? WINDOW_NAV_TRIGGER : hook);
+	}
+	if (
+		['next-window', 'previous-window', 'last-window'].includes(canonicalCommand) &&
+		liveHooks.has('after-select-window')
+	) {
+		// Real tmux also fires after-select-window for generic window movement;
+		// the hook writes only the neutral trigger so it never satisfies a step.
+		events.push(WINDOW_NAV_TRIGGER);
+	}
+	if (canonicalCommand === 'detach-client' && liveHooks.has('client-detached')) {
+		events.push('client-detached');
+	}
+	if (canonicalCommand === 'kill-session' && liveHooks.has('session-closed')) {
+		events.push('session-closed');
+	}
+
+	return events;
 }
 
 /**
@@ -121,48 +219,27 @@ export function expectedSinkEventsFor(args: string[]): string[] {
 export function buildIsolatedConfig(opts: { eventSink: string }): GeneratedConfig {
 	const sink = opts.eventSink;
 	const hookLines = SINK_HOOKS.map((evt) => {
+		if (evt === 'window-renamed') {
+			// Rename detection is state-diff based. This notification can arrive
+			// late after setup/new-session and is trigger-only, so keep it inert.
+			return `set-hook -g ${evt} 'run-shell "true # ${sink}"'`;
+		}
 		const line = evt === 'after-select-window' ? WINDOW_NAV_TRIGGER : evt;
 		return `set-hook -g ${evt} 'run-shell "echo ${line} >> ${sink} || true"'`;
 	});
 
-	const write = (events: string[]) =>
+	const write = (events: readonly string[]) =>
 		events.map((evt) => `echo ${evt} >> ${sink} || true`).join('; ');
 
-	const rebind = (key: string, events: string, command: string) =>
-		`bind-key ${key} { run-shell '${events}' ; ${command} }`;
-	const rebindLines = [
-		...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) =>
-			rebind(String(n), write(['after-select-window']), `select-window -t :=${n}`)
-		),
-		rebind('n', write(['after-next-window']), 'next-window'),
-		rebind('p', write(['after-previous-window']), 'previous-window'),
-		rebind('l', write(['after-last-window']), 'last-window'),
-		rebind("';'", write(['after-last-pane']), 'last-pane'),
-		rebind("'{'", write(['after-swap-pane']), 'swap-pane -U'),
-		rebind("'}'", write(['after-swap-pane']), 'swap-pane -D'),
-		rebind('C-o', write(['after-rotate-window']), 'rotate-window'),
-		rebind("'!'", write(['after-break-pane']), 'break-pane'),
-		rebind("':'", write(['after-command-prompt']), 'command-prompt'),
-		rebind('t', write(['after-clock-mode']), 'clock-mode'),
-		rebind('w', write(['after-choose-tree']), 'choose-tree -Zw'),
-		rebind('s', write(['after-choose-tree']), 'choose-tree -Zs'),
-		rebind("'('", write(['after-switch-client']), 'switch-client -p'),
-		rebind("')'", write(['after-switch-client']), 'switch-client -n')
-	];
+	const rebindLines = KEY_REBINDS.map((rebind) => {
+		const repeat = rebind.repeat ? '-r ' : '';
+		return `bind-key ${repeat}${rebind.key} { run-shell '${write(rebind.events)}' ; ${rebind.command} }`;
+	});
 
-	const aliasSpecs: [names: string[], events: string, command: string][] = [
-		[['show-buffer', 'showb'], write(['after-show-buffer']), 'show-buffer'],
-		[['source-file', 'source'], write(['after-source-file']), 'source-file'],
-		[['kill-session'], write(['after-kill-session']), 'kill-session'],
-		[['select-window', 'selectw'], write(['after-select-window']), 'select-window'],
-		[['next-window', 'next'], write(['after-next-window']), 'next-window'],
-		[['previous-window', 'prev'], write(['after-previous-window']), 'previous-window'],
-		[['last-window', 'last'], write(['after-last-window']), 'last-window']
-	];
-	const aliasConfigLines = aliasSpecs
-		.flatMap(([names, events, command]) =>
-			names.map((name) => `${name}=run-shell "${events}" ; ${command}`)
-		)
+	const eventAliasLines = COMMAND_ALIASES.flatMap((alias) =>
+		alias.names.map((name) => `${name}=run-shell "${write(alias.events)}" ; ${alias.command}`)
+	);
+	const aliasConfigLines = [`${RUNNER_ATTACH_COMMAND}=attach-session`, ...eventAliasLines]
 		.map((alias, i) => `set -s command-alias[${100 + i}] '${alias}'`);
 
 	const text = [
@@ -184,4 +261,9 @@ export function buildIsolatedConfig(opts: { eventSink: string }): GeneratedConfi
 	].join('\n');
 
 	return { text };
+}
+
+function firstWord(command: string): string {
+	const [word] = command.split(' ');
+	return word ?? command;
 }
