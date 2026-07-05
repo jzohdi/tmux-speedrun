@@ -17,6 +17,21 @@ Issue: jzohdi/tmux-speedrun#45 · Plan: `.agent/plan.md`
 > `expectedSinkEventsFor`), and the `speedrun-attach` private alias. Sections marked **SHIPPED**
 > describe code already on the branch — the tdd stage must not write failing tests against those
 > as if they were new; sections marked **R2** are the work this round.
+>
+> **Revision 3 (2026-07-05, PR #46 second feedback round — plan §9).** §1–§8 of the plan are
+> implemented, reviewed, and merged on this branch (through commit `7f3785f`); everything above and
+> below marked **SHIPPED** or **R2** is normative and must not be re-derived. The second PR #46
+> feedback (comment of 2026-07-05T16:26) reports four more problems, pinned here as **R3** and
+> collected in the new **§11**: (1) a **rename-window step gets stuck** with >1 window or duplicate
+> window names — the observer's name-set rename detection is replaced by **identity-based**
+> `(session,index)` matching (§11.1, amends §1/§4/§5.2.4); (2) **practice mode shows no hint** — the
+> CLI practice `StepEngine.view()` appends the command's `shortcut` (§11.2, amends §6.1); (3)
+> **`tmux new` must create AND switch to** a neighbouring session in both modes — an appended
+> `after-new-session` switch hook plus verified typed-form shim interception (§11.3, amends
+> §2.1/§2.2); (4) a new **`tmux-speedrun debug`** command that dumps game state (§11.4, NEW
+> `cli/src/commands/debug.ts`). Where §11 conflicts with an earlier section it wins. All work is in
+> `cli/`; no web (`src/`), API, generator, or canonical-answer changes (`practice-flow.ts` is
+> deliberately not modified — the hint is composed CLI-side).
 
 Legend: **NEW** = create · **ADAPT** = modify existing · **KEEP** = existing behavior preserved.
 
@@ -32,18 +47,27 @@ cli/src/tmux/config.ts         R2       SHIPPED: exit-empty off; @speedrun_promp
 cli/src/tmux/server.ts         R2       SHIPPED: isAlive(), ensureRunning(), attach() → { code }.
                                         R2: liveHooks; attach()/absorbConfigErrors() spawn via
                                         speedrun-attach with TMUX/TMUX_PANE stripped; spawnImpl seam (§3)
-cli/src/tmux/observer.ts       R2       SHIPPED: sink tailing, suppression queue, exec(), expectEvents(),
+cli/src/tmux/observer.ts       R3       SHIPPED: sink tailing, suppression queue, exec(), expectEvents(),
                                         resetBaseline(), drainDelta(), shared baseline, pane_mode.
-                                        R2: exec() threads server.liveHooks into accounting (§4)
+                                        R2: exec() threads server.liveHooks into accounting (§4).
+                                        R3: identity-based window-rename detection in diff() (§11.1)
+cli/src/tmux/config.ts (again) R3       R3: appended `after-new-session … switch-client` hook +
+                                        verified typed-form shim interception (§11.3)
 cli/src/tmux/detector.ts       R2       SHIPPED: event→candidate table; mode mapping; cascade kills;
                                         moved panes; SERVER_DIED_EVENT; window-nav event gating.
-                                        R2: ZOOM_KEY_EVENT → toggle-zoom entry (§5.1)
-cli/src/tmux/controller.ts     R2       SHIPPED: runAttachLoop(), StepEngine, controllers on the loop.
-                                        R2: first-attach expectEvents via the liveness-aware helper (§6.2)
-cli/src/ui/status-line.ts      SHIPPED  writes @speedrun_prompt user option; sanitize cap 118 — no R2 change
-cli/src/commands/challenge.ts  SHIPPED  notify wiring + abort messaging — no R2 change
-cli/src/commands/practice.ts   SHIPPED  in-item loop semantics — no R2 change (drills gain the R2
-                                        fixes for free via the shared candidates)
+                                        R2: ZOOM_KEY_EVENT → toggle-zoom entry (§5.1).
+                                        R3: no change (identity rename keeps the same delta shape, §11.1)
+cli/src/tmux/controller.ts     R3       SHIPPED: runAttachLoop(), StepEngine, controllers on the loop.
+                                        R2: first-attach expectEvents via the liveness-aware helper (§6.2).
+                                        R3: practice StepEngine.view() appends command shortcut hint (§11.2)
+cli/src/ui/status-line.ts      SHIPPED  writes @speedrun_prompt user option; sanitize cap 118 — no R2/R3 change
+cli/src/commands/challenge.ts  SHIPPED  notify wiring + abort messaging — no R2/R3 change
+cli/src/commands/practice.ts   SHIPPED  in-item loop semantics — no R2/R3 change (drills gain the R2/R3
+                                        fixes for free via the shared candidates + shared config)
+cli/src/commands/debug.ts      NEW  R3  `tmux-speedrun debug` — dumps env, live/dead hooks, config
+                                        summary, and a live event→candidate trace (§11.4)
+cli/src/index.ts               R3       register the `debug` command (§11.4)
+cli/src/commands/help.ts       R3       document the `debug` command (§11.4)
 cli/src/tmux/client.ts         KEEP     tmuxExec / tmuxVersion unchanged
 cli/src/api/challenge-session.ts KEEP   CliChallengeSession unchanged
 ```
@@ -905,3 +929,196 @@ complete end-to-end; `tmux new` advances a "start a new session" step from insid
 "attach to a session" step; one full challenge-0 run and one of challenge 3–5 with no stuck step;
 no orphan servers after terminal close. `cd cli && npm test` + `npm run typecheck` clean — run on
 a machine **with tmux installed** (the integration suite skips silently without it).
+
+---
+
+## 11. Revision 3 — PR #46 second feedback (plan §9)
+
+Four fixes. All in `cli/`. Where §11 conflicts with an earlier section, §11 wins. No change to
+canonical answer strings, the key chain, crypto, the generator, the API, or the web app.
+`practice-flow.ts` (shared with web) is **not** modified.
+
+### 11.1 Identity-based window-rename detection (BUG — amends §1, §4, §5.2.4)
+
+**Problem:** `observer.diff` currently detects window renames by comparing the two snapshots'
+window-**name lists** as sets (`detectRename(prev.windows.map(w=>w.name), next.windows.map(w=>w.name))`,
+`observer.ts:186`). With more than one window this fails whenever any name is shared: renaming one of
+two `zsh` windows to `fast-orbit-69` yields `removed=[]` (a `zsh` remains) so no rename is detected,
+and the challenge rename step can never advance. It only worked with a single window (names can't
+collide). Reported case 1.
+
+**Contract (ADAPT `observer.diff`):**
+
+- `StateDelta.renamedWindow` keeps its shape `{ from: string; to: string } | undefined` (§1) — **no
+  type change**, so the detector (§5.2.4) and its tests are unchanged.
+- Detection basis changes from name-set membership to **window identity**. `TmuxState.windows`
+  already carries `{ session, index, name, active }` (types.ts:23), so identity
+  `key = \`${session}:${index}\`` is available with no new tmux query.
+- Algorithm: build `Map<key, name>` from `prev.windows`; for each `next.window` whose `key` exists in
+  **both** maps, if `prevName !== nextName` that window was renamed. Emit
+  `renamedWindow = { from: prevName, to: nextName }`. If several changed in one delta (rare — one
+  rename per ~150 ms tick), return a single result (any of them; prefer the last in `next` order for
+  determinism) — the detector only needs `renamedWindow.to` to equal `step.requiredInput`, and
+  `deriveCandidates` stays pure/deterministic over `(delta, step)` (DET1).
+- **Sessions are unaffected**: tmux enforces unique session names, so
+  `renamedSession = detectRename(prev.sessions, next.sessions)` stays as-is (keep the existing
+  name-set `detectRename` for sessions only).
+
+**Edge cases (must hold):** a window renamed to a name a sibling already has is still detected
+(identity, not name, is the key); a rename in the same tick as a window add/remove is not confused
+with the add/remove (only keys present in **both** snapshots are compared); a window that changes
+`index` with an unchanged `name` (e.g. after a sibling kill) is **not** a rename (its key changed, so
+it isn't matched). ONESHOT (OS1) holds: one rename action advances the step from any window count.
+
+`hasChange` still returns true on `renamedWindow` (§4, unchanged).
+
+### 11.2 Practice-mode command hint (UX — amends §6.1)
+
+**Problem:** practice steps render only `step.prompt` (the command description); the user is never
+shown the keystrokes/typed form. Reported case 2.
+
+**Contract (ADAPT `PracticeController`'s `StepEngine.view()` in `controller.ts:258`):** compose the
+hint CLI-side (do **not** touch the shared `practice-flow.ts`).
+
+- Build a `commandName → shortcut` lookup once from `TMUX_COMMANDS` (imported from
+  `$lib/data/tmux-commands`).
+- For a `kind: 'command'` step, `view()` returns
+  `{ prompt: \`${step.prompt} — ${shortcut}\`, index, total }` (e.g.
+  `Rename the current window — prefix + ,`). If a `commandName` has no `TMUX_COMMANDS` match
+  (shouldn't happen), fall back to the bare `step.prompt` (no trailing separator).
+- For a `kind: 'copy-mode-action'` step, `view()` returns `step.prompt` **verbatim** (it is already a
+  step-by-step instruction — no shortcut appended).
+- Only `view()`'s `prompt` changes; `detectionStep()`, `seedInput()`, `trySubmit()` are unchanged.
+- **Challenge mode is not given hints** (`ChallengeController` tests recall) — its `view()` is
+  unchanged; no shortcut is leaked into the challenge prompt.
+- The composed prompt flows through `StatusLine.sanitize` (truncate 118, `#`→`##`, §7) as today —
+  keep hints concise; no extra handling needed.
+
+### 11.3 `new-session` create-and-switch + verified shim interception (amends §2.1, §2.2)
+
+Two requirements from reported case 3: (a) the nested-session error must never surface and the step
+must always advance (the §2.4a `new-session → new-session -d` shim's job — **verify it actually
+fires** for the user's typed forms); (b) the user must be **switched into** the newly created
+session, which `new-session -d` alone does not do.
+
+**(a) Verify/repair typed-form shim interception (config-level).** The user still saw
+`sessions should be nested with care`, meaning for their invocation the `new`/`new-session`
+`command-alias` did **not** win over tmux's builtin lookup. Implementation must reproduce
+`tmux new` / `tmux new-session` / `tmux new -s <name>` (and, for completeness, `attach` / `a` /
+`attach-session` / `ls` / `list-sessions`) from a client with `$TMUX` set on the target tmux and
+confirm the alias intercepts (no nested error, step advances). If a form is not intercepted (e.g. a
+tmux version resolves the builtin/abbreviation before the `command-alias` array, or a lower-index
+default entry shadows `set -s command-alias[100+]`), repair so interception reliably wins — options:
+assign at the front of the array, add the exact spellings the user types, or (last resort) a key-table
+rebind. The §11.5 integration assertion must exercise the **typed nested-guard path** (a `$TMUX`-set
+client), so a regression fails CI instead of stranding the user with the nested error.
+
+**(b) Switch into the new session via an appended `after-new-session` hook (config text, §2.1).**
+`after-new-session` is one of the **live** hooks (must be confirmed present in `server.liveHooks` at
+implementation — §3). Append, kept separate from the existing sink-writing `after-new-session` hook
+via `-ga`:
+
+```
+set-hook -ga after-new-session 'switch-client -t "#{hook_session}"'
+```
+
+Normative properties:
+
+- **No accounting change.** `switch-client` run **from a hook** does not fire `after-switch-client`
+  (tmux never runs `after-*` hooks for hook-issued commands — the property §3.2 already relies on),
+  so this adds **no** sink line: `expectedSinkEventsFor(['new-session'], liveHooks)` (§2.3) is
+  **unchanged** (still alias-write `after-new-session` + live-hook `after-new-session`-if-live). Do
+  not add a rule for it.
+- **Runner-origin detached creates are safe.** For the initial server-start `new-session -d` and
+  `ensureRunning`'s recovery `new-session` there is no attached client at that instant, so the hook's
+  `switch-client` is a harmless no-op / quiet error — and it runs inside the loop's drain →
+  `resetBaseline()` fast-forward window (§2.4, load-bearing) so it can't produce a spurious delta.
+  Verify on real tmux that it does not emit a visible warning that would pollute the user's first
+  attach; if it warns, gate the hook on a client check (e.g. `#{?client_...}`) — pin in step 0.
+- **`#{hook_session}`** is the expected format for the newly created session inside
+  `after-new-session`; confirm against the running tmux (a bare `switch-client` may also suffice
+  since the new session is the hook's current target). Implementation detail to pin in step 0.
+- Both modes get this from the shared `buildIsolatedConfig`, satisfying "for both modes" with no
+  per-command duplication (the feedback's belief that practice lacks the override is addressed by
+  making the override actually fire — both modes already build the same isolated config).
+
+`after-new-session` stays in `SINK_HOOKS` (§2.2) — the appended switch hook is a **second** binding
+on the same event, not a replacement.
+
+### 11.4 `tmux-speedrun debug` command (NEW — `cli/src/commands/debug.ts`)
+
+A diagnostic that reuses the existing server/observer/detector stack so it exercises exactly the code
+paths a stuck command flows through. Registered in `cli/src/index.ts` and documented in `help.ts`.
+
+```ts
+/** `tmux-speedrun debug [--verbose]` — print game/tmux diagnostics; exit 0 ok, 2 preflight, 1 runtime. */
+export function debugCommand(argv: string[]): Promise<number>;
+```
+
+Behavior:
+
+1. **Environment**: tmux version (`tmuxVersion()`), OS/platform, and the `requireInteractiveTmux`
+   preflight result (do not hard-fail on the TTY check for the non-attach diagnostics — but the live
+   trace in step 3 needs a TTY; degrade gracefully).
+2. **Isolated-server diagnostics**: `createIsolatedTmuxServer()`, then print `socketName`, `confPath`,
+   `eventSink`, and the **live vs. dead hook partition** `server.liveHooks` ∩ / ∖ `SINK_HOOKS` (the
+   single most useful "why isn't my command detected" signal). Under `--verbose`, also print the full
+   generated config text and the `KEY_REBINDS` / `COMMAND_ALIASES` tables.
+3. **Live event/candidate trace** (core value): attach interactively (reusing the isolated server)
+   and, via a `TmuxObserver.watch` callback, print each observed delta's `commandEvents` and the
+   `deriveCandidates(delta, step)` output to the **launching terminal** (through `notify`), so the
+   user presses keys and sees exactly what the detector sees. Drive it with a trivial
+   always-incomplete `StepEngine` (or a direct `watch`) — no challenge session, no API. On
+   detach / Ctrl-C, tear down.
+4. Always `teardown()` in `finally` — no orphan server / temp dir (LIFE1).
+
+Scope guard: obeys **ISO1** (private socket only); **must not** contact the API, leaderboard, or
+crypto; read-only w.r.t. the user's real tmux. Because it shares the observer/detector, it is also a
+regression aid for §11.1/§11.3 (renaming a window or running `tmux new` in `debug` prints the
+`rename-window` / `new-session` candidate).
+
+Split the pure assembly (env + live/dead-hook partition + config summary → formatted string) into a
+unit-testable function; the attach/trace path is integration/manual.
+
+### 11.5 Test surface for R3 (delta on §10 / §10-R2)
+
+Unit (no tmux):
+
+- `observer.test.ts` (extend — §11.1 regression, the "never again" net): `diff` detects
+  `renamedWindow` when two windows share the pre-rename name and one is renamed
+  (`windows [zsh@0, zsh@1] → [zsh@0, fast-orbit-69@1]` ⇒ `{ from: 'zsh', to: 'fast-orbit-69' }`);
+  detects it across two ticks when both are renamed; detects it when a window is renamed while an
+  unrelated-named sibling exists; does **not** report a rename for a pure window add/remove or for an
+  index change with an unchanged name. Session rename via `detectRename` unaffected.
+- `detector.test.ts` (extend): with identity-based `renamedWindow`, `rename-window:<text>` is emitted
+  only when `to === requiredInput` (the existing tightened-rename test at `detector.test.ts:155`/`406`
+  still passes); bare `rename-window` still present for practice. No new detector behavior.
+- `config.test.ts` (extend — §11.3): generated text contains the appended
+  `set-hook -ga after-new-session 'switch-client …'` line **and** still the original sink-writing
+  `after-new-session` hook; `after-new-session` remains in `SINK_HOOKS`; assert
+  `expectedSinkEventsFor(['new-session'], liveHooks)` is **unchanged** by the appended switch hook.
+- practice-hint (`controller` unit or a small practice test — §11.2): practice `view()` for a
+  `command` step includes the command's `shortcut` (`— <shortcut>` suffix); a `copy-mode-action`
+  step's prompt is returned verbatim (no bogus hint); challenge `view()` is unchanged (no shortcut
+  leaked).
+- `debug` (§11.4): the pure diagnostic-assembly function (env + live/dead-hook partition + config
+  summary) is unit-testable without tmux; the attach/trace path is integration/manual.
+
+Integration (`live-server.integration.test.ts`, tmux-gated, no TTY):
+
+1. §11.1 at the tmux level: a scripted rename of a window when a same-named sibling exists produces a
+   `renamedWindow` delta.
+2. §11.3: a scripted client with `TMUX` set runs `tmux new` / `tmux new-session -s x` → **no**
+   `sessions should be nested with care` error, a real detached session appears, the sink got
+   `after-new-session`, **and** the appended switch hook moved the client to the new session (assert
+   the active session changed to it). Same script confirms `attach` / `a` / `ls` typed forms do not
+   error under the nested guard (§11.3a).
+
+Manual acceptance (feedback verbatim): complete challenge 0 including a rename step **with two
+windows present** without killing the session; practice mode shows the hotkey/typed form for every
+drill; `tmux new` in both challenge and practice creates a session, **switches into it**, and
+advances with no nested error; `tmux-speedrun debug` prints version, live/dead hooks, and a live
+event→candidate trace as keys are pressed, and tears down cleanly (no orphan `tmux -L
+tmux-speedrun-*`). `cd cli && npm test`, `npm run typecheck`, and `npx prettier --check` on all
+branch-touched files must be green (run where tmux is installed — the integration suite skips
+silently otherwise).
