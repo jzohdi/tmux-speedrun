@@ -384,6 +384,21 @@ describe('deriveCandidates — moved panes (issue #45, interface §5.2.3)', () =
 	});
 });
 
+describe('deriveCandidates — R2 events (issue #45 ONESHOT round, interface §5.1)', () => {
+	it("the z rebind's 'zoom-key' event → toggle-zoom (single-pane zoom is a no-op: no zoomToggled, no hook)", () => {
+		const candidates = deriveCandidates(delta({ commandEvents: ['zoom-key'] }), simpleStep);
+		expect(candidates).toContain('toggle-zoom');
+	});
+
+	it("WINDOW_NAV_TRIGGER ('window-nav-trigger') alone is trigger-only — a generic hook fire can never satisfy a step", () => {
+		const candidates = deriveCandidates(
+			delta({ commandEvents: ['window-nav-trigger'] }),
+			simpleStep
+		);
+		expect(candidates).toEqual([]);
+	});
+});
+
 describe('deriveCandidates — renames tightened to the required text (issue #45, interface §5.2.4)', () => {
 	it('a window rename to the WRONG text emits no rename candidate', () => {
 		const step: DecryptedStep = { prompt: 'Rename the window', requiredInput: 'right-name' };

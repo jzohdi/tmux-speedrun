@@ -69,8 +69,14 @@ afterEach(() => {
 /**
  * Fake isolated server: canned exec responses (zero panes/buffers so the
  * canned lines parse under ANY future -F format) + a REAL temp sink file.
+ * `liveHooks` is the R2 surface (interface §3): the SINK_HOOKS entries the
+ * running tmux actually accepted — MUTABLE here, because the set changes
+ * after an ensureRunning restart and exec() must read the current one.
  */
-function makeFakeServer(overrides?: { exec?: (args: string[]) => Promise<TmuxResult> }) {
+function makeFakeServer(overrides?: {
+	exec?: (args: string[]) => Promise<TmuxResult>;
+	liveHooks?: string[];
+}) {
 	const dir = mkdtempSync(join(tmpdir(), 'speedrun-observer-test-'));
 	const sinkPath = join(dir, 'events.log');
 	writeFileSync(sinkPath, '');
@@ -88,18 +94,21 @@ function makeFakeServer(overrides?: { exec?: (args: string[]) => Promise<TmuxRes
 		}
 	};
 
+	const liveHooks = new Set<string>(overrides?.liveHooks ?? []);
+
 	const server = {
 		socketName: 'test-socket',
 		confPath: join(dir, 'tmux.conf'),
 		eventSink: sinkPath,
 		exec,
+		liveHooks,
 		attach: async () => {
 			throw new Error('attach is not used in observer tests');
 		},
 		teardown: async () => {}
 	} as unknown as IsolatedTmuxServer;
 
-	return { server, sinkPath, execLog };
+	return { server, sinkPath, execLog, liveHooks };
 }
 
 function paneX(paneId: string, over: Partial<PaneInfo> & { mode?: string | null } = {}): PaneInfo {
@@ -275,6 +284,57 @@ describe('sink tailing + suppression queue (interface §4.2–§4.3)', () => {
 		const d = await obs.drainDelta({ settleMs: 0 });
 		expect(d.commandEvents).toEqual(['after-select-window']);
 	}, 10_000);
+});
+
+describe('liveness-aware suppression accounting (R2, interface §2.3 + §4.3)', () => {
+	// With list-sessions/list-buffers/show-buffer now ALIAS-intercepted, the
+	// observer's own 150ms poll writes alias lines every tick — and on a tmux
+	// where the after-* hook is ALSO live, one exec writes TWO lines. Accounting
+	// must consume the exact per-machine multiset, or a spurious "user" event
+	// leaks every tick and can SELF-COMPLETE a step (the review's balance case).
+
+	it('one runner exec on a hook-live tmux suppresses BOTH its alias and hook sink lines', async () => {
+		const f = makeFakeServer({ liveHooks: ['after-show-buffer'] });
+		const obs = obsX(new TmuxObserver(f.server));
+		await obs.exec(['show-buffer']);
+		// the alias interceptor AND the live after-show-buffer hook each wrote one line
+		appendFileSync(f.sinkPath, 'after-show-buffer\nafter-show-buffer\n');
+		const d = await obs.drainDelta({ settleMs: 0 });
+		expect(
+			d.commandEvents,
+			'a runner poll exec leaked a spurious user event (self-completion risk)'
+		).toEqual([]);
+	});
+
+	it("a runner select-window exec suppresses its alias event AND the live hook's neutral WINDOW_NAV_TRIGGER", async () => {
+		const f = makeFakeServer({ liveHooks: ['after-select-window'] });
+		const obs = obsX(new TmuxObserver(f.server));
+		await obs.exec(['select-window', '-t', ':=1']);
+		appendFileSync(f.sinkPath, 'after-select-window\nwindow-nav-trigger\n');
+		const d = await obs.drainDelta({ settleMs: 0 });
+		expect(d.commandEvents).toEqual([]);
+	});
+
+	it('on a hook-dead tmux the exec accounts the alias write only — an identical USER line still surfaces', async () => {
+		const f = makeFakeServer({ liveHooks: [] });
+		const obs = obsX(new TmuxObserver(f.server));
+		await obs.exec(['show-buffer']);
+		appendFileSync(f.sinkPath, 'after-show-buffer\nafter-show-buffer\n');
+		const d = await obs.drainDelta({ settleMs: 0 });
+		expect(d.commandEvents).toEqual(['after-show-buffer']);
+	});
+
+	it("exec() reads the server's CURRENT liveHooks on every call (the set changes after a restart)", async () => {
+		const f = makeFakeServer({ liveHooks: ['after-show-buffer'] });
+		const obs = obsX(new TmuxObserver(f.server));
+		await obs.exec(['show-buffer']); // expects alias + hook (2 lines)
+		f.liveHooks.clear(); // the restarted tmux rejected the hook this time
+		await obs.exec(['show-buffer']); // expects the alias line only (1 line)
+		appendFileSync(f.sinkPath, 'after-show-buffer\n'.repeat(4));
+		const d = await obs.drainDelta({ settleMs: 0 });
+		// 3 accounted lines suppressed; exactly one genuine user line survives
+		expect(d.commandEvents).toEqual(['after-show-buffer']);
+	});
 });
 
 describe('resetBaseline — recovery boundary (interface §4)', () => {

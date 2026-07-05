@@ -89,6 +89,8 @@ function makeHarness(opts: {
 	/** Canonical answer per step, in order. */
 	answers: string[];
 	attaches: AttachSpec[];
+	/** SINK_HOOKS entries this fake tmux "accepted" (R2, interface §3). */
+	liveHooks?: string[];
 	loopOverrides?: Record<string, unknown>;
 }) {
 	const ops: string[] = [];
@@ -122,6 +124,9 @@ function makeHarness(opts: {
 	// completion detach-client) must go through observer.exec, the
 	// suppression-accounted path (invariant SUP1).
 	const server = {
+		// R2: the loop derives the first-attach suppression list from this set
+		// via expectedSinkEventsFor([RUNNER_ATTACH_COMMAND], liveHooks).
+		liveHooks: new Set(opts.liveHooks ?? ['client-attached', 'after-attach-session']),
 		attach: async () => {
 			const spec = opts.attaches[attachCount];
 			attachCount++;
@@ -350,6 +355,22 @@ describe('runAttachLoop — lifecycle decoupled from any single attach (defect 3
 		const expectCalls = h.ops.filter((op) => op.startsWith('expectEvents:'));
 		expect(expectCalls).toEqual(['expectEvents:client-attached,after-attach-session']);
 		assertOrder(h.ops, 'expectEvents:', 'attach:1');
+	});
+
+	it('first-attach suppression is LIVENESS-AWARE — derived from server.liveHooks, not a hardcoded list (R2, interface §6.2 step 6)', async () => {
+		const loop = requireLoop();
+		const h = makeHarness({
+			answers: ['detach'],
+			attaches: [{ drainEvents: ['client-detached'] }],
+			// this tmux rejected the after-attach-session hook: expecting it anyway
+			// would leave a stale suppression entry that could swallow a later
+			// REAL user attach event (interface §2.3 rule 1)
+			liveHooks: ['client-attached']
+		});
+		const result = await loop(h.deps);
+		expect(result).toMatchObject({ completed: true, aborted: false });
+		const expectCalls = h.ops.filter((op) => op.startsWith('expectEvents:'));
+		expect(expectCalls).toEqual(['expectEvents:client-attached']);
 	});
 });
 
