@@ -1,15 +1,22 @@
 /**
- * Failing tests for the R3 practice-mode command hint (issue #45, plan §9.2,
- * interface §11.2): the practice `StepEngine.view()` must append the command's
- * `shortcut` (e.g. `Rename the current window — prefix + ,`) so the drill tells
- * the user HOW to perform each command. Challenge mode is deliberately NOT
- * given hints (it tests recall), and `copy-mode-action` steps — already
- * step-by-step instructions — keep their prompt verbatim.
+ * Failing tests for R4 continuous practice mode (issue #45, PR #46 third
+ * feedback round, interface §12.1) PLUS the migrated R3 practice-hint tests
+ * (interface §11.2).
  *
- * The controllers already exist; these tests exercise the composed prompt
- * through `ui.setPrompt`, which the run loop calls with `engine.view()` before
- * the first attach. Fakes stand in for the server/observer/ui; the run
- * completes on the first attach's drain so the loop returns immediately.
+ * R4 restructures `PracticeController` to take the WHOLE ordered drill list
+ * (`items: PracticeItem[]`) instead of a single `item`, and to run it in ONE
+ * continuous `runAttachLoop` over a flattened `(item, step)` sequence with a
+ * single GLOBAL index. The reported bug: with one server + one loop *per drill*,
+ * every drill ends by detaching the client, tearing down its server, and
+ * re-attaching for the next drill — the "detach/re-attach on almost every
+ * command" the user reports. Challenge mode never had this because it runs one
+ * loop over all steps, replacing the prompt in place.
+ *
+ * These tests exercise the REAL `PracticeController` (no module mocks) against
+ * lightweight fakes for server/observer/ui. Because the constructor now takes
+ * `items`, every construction here uses the new shape; the shipped R3 hint
+ * tests are migrated to a single-element `items` list (interface §10 note:
+ * update shipped tests to the new contract rather than preserve the stale one).
  *
  * TMUX_COMMANDS is imported by real path (not `$lib`) so the suite runs under a
  * bare vitest invocation too (see oneshot.test.ts for the same rationale).
@@ -58,12 +65,16 @@ function makeDelta(over: Partial<StateDelta> = {}): StateDelta {
 type PromptView = { prompt: string; index: number; total: number };
 
 /**
- * Drive a controller to completion on its first attach, capturing every
- * `ui.setPrompt` view. `completingDelta` is what the post-attach drain returns
- * — its derived candidates advance (and complete) the single-step run.
+ * Fakes that drive the real `runAttachLoop`: every attach ends immediately and
+ * the post-attach drain returns `completingDelta`, which advances whatever step
+ * is current. A run over N flattened steps therefore takes N attach iterations,
+ * advancing exactly one step per iteration — with no detach between drills.
  */
 function makeFakes(completingDelta: StateDelta) {
 	const promptViews: PromptView[] = [];
+	const execCalls: string[][] = [];
+	const drainSeedInputs: (string | undefined)[] = [];
+	let clearCount = 0;
 
 	const server = {
 		liveHooks: new Set(['client-attached', 'after-attach-session']),
@@ -75,8 +86,14 @@ function makeFakes(completingDelta: StateDelta) {
 	const observer = {
 		watch: () => ({ stop: () => {} }),
 		resetBaseline: async () => {},
-		drainDelta: async () => completingDelta,
-		exec: async () => ({ stdout: '', stderr: '', code: 0 }),
+		drainDelta: async (opts?: { seedInput?: string }) => {
+			drainSeedInputs.push(opts?.seedInput);
+			return completingDelta;
+		},
+		exec: async (args: string[]) => {
+			execCalls.push(args);
+			return { stdout: '', stderr: '', code: 0 };
+		},
 		expectEvents: () => {}
 	} as unknown as TmuxObserver;
 
@@ -84,43 +101,53 @@ function makeFakes(completingDelta: StateDelta) {
 		setPrompt: async (view: PromptView) => {
 			promptViews.push(view);
 		},
-		clear: async () => {},
+		clear: async () => {
+			clearCount++;
+		},
 		flash: async () => {}
 	} as unknown as StatusLine;
 
-	return { server, observer, ui, promptViews };
+	return {
+		server,
+		observer,
+		ui,
+		promptViews,
+		execCalls,
+		drainSeedInputs,
+		getClearCount: () => clearCount
+	};
 }
 
-async function runPractice(item: PracticeItem, completingDelta: StateDelta): Promise<PromptView[]> {
-	const { server, observer, ui, promptViews } = makeFakes(completingDelta);
-	await new PracticeController({ server, observer, item, ui }).run();
-	return promptViews;
+/** Fast-forward: the re-attach delay between drills is trimmed so multi-step
+ *  runs don't sleep the default 1000 ms per iteration. */
+function commandStepItem(id: string, commandName: string): PracticeItem {
+	const cmd = TMUX_COMMANDS.find((c) => c.name === commandName)!;
+	return {
+		id,
+		category: cmd.category,
+		title: commandName,
+		description: cmd.description,
+		steps: [{ id, kind: 'command', prompt: cmd.description, commandName }]
+	} as unknown as PracticeItem;
 }
 
-describe('PracticeController — command-step hint (R3, interface §11.2)', () => {
+describe('PracticeController — R3 command-step hint, migrated to items[] (interface §11.2)', () => {
 	it('appends the command shortcut to a `command` step prompt', async () => {
 		const cmd = TMUX_COMMANDS.find((c) => c.name === 'rename-window')!;
-		const item: PracticeItem = {
-			id: 'rename-window',
-			category: 'window',
-			title: 'rename-window',
-			description: cmd.description,
-			steps: [
-				{
-					id: 'rename-window',
-					kind: 'command',
-					prompt: cmd.description,
-					commandName: 'rename-window'
-				}
-			]
-		} as unknown as PracticeItem;
+		const item = commandStepItem('rename-window', 'rename-window');
 
-		const views = await runPractice(item, makeDelta({ commandEvents: ['after-rename-window'] }));
+		const f = makeFakes(makeDelta({ commandEvents: ['after-rename-window'] }));
+		await new PracticeController({
+			server: f.server,
+			observer: f.observer,
+			items: [item],
+			ui: f.ui
+		} as never).run();
 
-		expect(views.length, 'the run loop never rendered a prompt').toBeGreaterThan(0);
+		expect(f.promptViews.length, 'the run loop never rendered a prompt').toBeGreaterThan(0);
 		// e.g. "Rename the current window — prefix + ,"
-		expect(views[0].prompt).toContain(cmd.description);
-		expect(views[0].prompt, 'practice must surface the keystroke/typed form').toContain(
+		expect(f.promptViews[0].prompt).toContain(cmd.description);
+		expect(f.promptViews[0].prompt, 'practice must surface the keystroke/typed form').toContain(
 			cmd.shortcut
 		);
 	});
@@ -138,9 +165,122 @@ describe('PracticeController — command-step hint (R3, interface §11.2)', () =
 			]
 		} as unknown as PracticeItem;
 
-		const views = await runPractice(item, makeDelta({ enteredCopyMode: true }));
+		const f = makeFakes(makeDelta({ enteredCopyMode: true }));
+		await new PracticeController({
+			server: f.server,
+			observer: f.observer,
+			items: [item],
+			ui: f.ui
+		} as never).run();
 
-		expect(views[0].prompt).toBe(prompt);
+		expect(f.promptViews[0].prompt).toBe(prompt);
+	});
+});
+
+describe('PracticeController — R4 continuous run over all drills (interface §12.1)', () => {
+	it('progresses a single GLOBAL index across items with no detach between drills', async () => {
+		const items = [
+			commandStepItem('new-window', 'new-window'),
+			commandStepItem('rename-window', 'rename-window')
+		];
+		// One delta that advances either command step (both after-hooks present).
+		const delta = makeDelta({ commandEvents: ['after-new-window', 'after-rename-window'] });
+
+		const f = makeFakes(delta);
+		const result = await new PracticeController({
+			server: f.server,
+			observer: f.observer,
+			items,
+			ui: f.ui
+		} as never).run();
+
+		expect(result.completed, 'the whole drill list should complete in one run').toBe(true);
+
+		// The status line always shows the GLOBAL total (2), never a per-item
+		// total of 1 — proof the engine flattened both items into one sequence.
+		expect(f.promptViews.length).toBeGreaterThan(0);
+		for (const v of f.promptViews) {
+			expect(v.total, 'view.total must be the global step count').toBe(2);
+		}
+		const indices = f.promptViews.map((v) => v.index);
+		expect(indices, 'the global index must reach the second drill').toContain(1);
+
+		// The second drill's prompt was rendered in the SAME run (we advanced into
+		// it without a fresh controller / server).
+		const renameDesc = TMUX_COMMANDS.find((c) => c.name === 'rename-window')!.description;
+		expect(f.promptViews.some((v) => v.prompt.includes(renameDesc))).toBe(true);
+
+		// Continuity guarantee: `detach-client` is issued ONCE, only at final
+		// completion — NOT once per drill (the reported regression).
+		const detachExecs = f.execCalls.filter((a) => a[0] === 'detach-client');
+		expect(detachExecs.length, 'detach must happen once for the whole run, not per drill').toBe(1);
+		expect(f.getClearCount(), 'the prompt is cleared once, at completion').toBe(1);
+	});
+
+	it('view() reports the global index/total and appends the shortcut hint only for command steps', async () => {
+		const renameItem = commandStepItem('rename-window', 'rename-window');
+		const copyPrompt = 'Start the selection.';
+		const copyItem: PracticeItem = {
+			id: 'copy-paste-sequence',
+			category: 'misc',
+			title: 'copy-mode / paste-buffer',
+			description: 'copy/paste',
+			seedInput: 'hi',
+			steps: [
+				{ id: 'begin-selection', kind: 'copy-mode-action', prompt: copyPrompt, action: 'begin-selection' }
+			]
+		} as unknown as PracticeItem;
+
+		const delta = makeDelta({ commandEvents: ['after-rename-window'], enteredCopyMode: true });
+		const f = makeFakes(delta);
+		await new PracticeController({
+			server: f.server,
+			observer: f.observer,
+			items: [renameItem, copyItem],
+			ui: f.ui
+		} as never).run();
+
+		for (const v of f.promptViews) {
+			expect(v.total, 'global total across both items').toBe(2);
+		}
+		const renameShortcut = TMUX_COMMANDS.find((c) => c.name === 'rename-window')!.shortcut;
+		expect(
+			f.promptViews.some((v) => v.prompt.includes(renameShortcut)),
+			'command step must show its shortcut hint'
+		).toBe(true);
+		// The copy-mode-action step is rendered verbatim (no hint separator).
+		expect(
+			f.promptViews.some((v) => v.prompt === copyPrompt),
+			'copy-mode-action prompt must be verbatim'
+		).toBe(true);
+	});
+
+	it('seedInput is the copy-paste seed only while a copy-paste step is current', async () => {
+		const renameItem = commandStepItem('rename-window', 'rename-window'); // no seedInput
+		const copyItem: PracticeItem = {
+			id: 'copy-paste-sequence',
+			category: 'misc',
+			title: 'copy-mode / paste-buffer',
+			description: 'copy/paste',
+			seedInput: 'hi',
+			steps: [
+				{ id: 'begin-selection', kind: 'copy-mode-action', prompt: 'Start the selection.', action: 'begin-selection' }
+			]
+		} as unknown as PracticeItem;
+
+		const delta = makeDelta({ commandEvents: ['after-rename-window'], enteredCopyMode: true });
+		const f = makeFakes(delta);
+		await new PracticeController({
+			server: f.server,
+			observer: f.observer,
+			items: [renameItem, copyItem],
+			ui: f.ui
+		} as never).run();
+
+		// The loop resolves one step per attach; the seedInput handed to the drain
+		// reflects the current pair's ITEM seed — undefined for the command drill,
+		// 'hi' only while the copy-paste drill is current.
+		expect(f.drainSeedInputs).toEqual([undefined, 'hi']);
 	});
 });
 
@@ -164,12 +304,17 @@ describe('ChallengeController — prompt is NOT hinted (R3, interface §11.2 —
 			finish: async () => ({}) as unknown
 		} as unknown as CliChallengeSession;
 
-		const { server, observer, ui, promptViews } = makeFakes(
-			makeDelta({ commandEvents: ['after-rename-window'] })
-		);
-		await new ChallengeController({ server, observer, session, ui }).run();
+		const f = makeFakes(makeDelta({ commandEvents: ['after-rename-window'] }));
+		await new ChallengeController({
+			server: f.server,
+			observer: f.observer,
+			session,
+			ui: f.ui
+		}).run();
 
-		expect(promptViews[0].prompt).toBe(prompt);
-		expect(promptViews[0].prompt, 'challenge must not append a hint separator').not.toContain('—');
+		expect(f.promptViews[0].prompt).toBe(prompt);
+		expect(f.promptViews[0].prompt, 'challenge must not append a hint separator').not.toContain(
+			'—'
+		);
 	});
 });
