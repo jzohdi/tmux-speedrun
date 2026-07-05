@@ -23,6 +23,7 @@
 	// string executed when the hint is clicked — no separate mapping (per #31).
 	const hints: Hint[] = [
 		{ command: 'tsr ls', description: 'list challenges' },
+		{ command: 'tsr lb', description: 'view leaderboards' },
 		{ command: 'tsr start <id>', description: 'begin a challenge' },
 		{ command: 'tsr practice', description: 'learn step by step' },
 		{ command: 'tsr config', description: 'customize tmux.conf' },
