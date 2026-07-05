@@ -1,20 +1,33 @@
 /**
- * Challenge/practice status line (issue #35, interface §8/§5.2).
+ * Challenge/practice status line (issue #35 §8; issue #45 defect 1, §7).
  *
- * Surfaces the current step prompt + progress in the isolated tmux server's
- * status bar (so the attached user sees it without leaving tmux), and can flash
- * a popup message on advance.
+ * The prompt has exactly ONE source of truth: the `@speedrun_prompt` user
+ * option, referenced once by the config's static `status-left`. StatusLine
+ * only ever writes that option — never `status-left` — so tmux owns the
+ * redraw and prompts can never stack (invariant PR1).
  */
 
 import type { IsolatedTmuxServer } from '../tmux/server';
 
+export type PromptView = { prompt: string; index: number; total: number };
+
 export class StatusLine {
 	constructor(private server: IsolatedTmuxServer) {}
 
-	/** Update the persistent status-left with the step prompt + progress. */
-	async setPrompt(prompt: string, stepIndex: number, totalSteps: number): Promise<void> {
-		const left = `[${stepIndex + 1}/${totalSteps}] ${prompt}`;
-		await this.server.exec(['set', '-g', 'status-left', sanitize(left)]);
+	/** Write the step prompt + progress to @speedrun_prompt (idempotent). */
+	async setPrompt(view: PromptView): Promise<void>;
+	async setPrompt(prompt: string, stepIndex: number, totalSteps: number): Promise<void>;
+	async setPrompt(
+		promptOrView: string | PromptView,
+		stepIndex?: number,
+		totalSteps?: number
+	): Promise<void> {
+		const view: PromptView =
+			typeof promptOrView === 'object'
+				? promptOrView
+				: { prompt: promptOrView, index: stepIndex!, total: totalSteps! };
+		const left = `[${view.index + 1}/${view.total}] ${view.prompt}`;
+		await this.server.exec(['set', '-g', '@speedrun_prompt', sanitize(left)]);
 	}
 
 	/** Briefly flash a transient message (e.g. "not quite, try again"). */
@@ -24,11 +37,14 @@ export class StatusLine {
 
 	/** Clear the prompt (e.g. on completion). */
 	async clear(): Promise<void> {
-		await this.server.exec(['set', '-g', 'status-left', '[tmux-speedrun] ']);
+		await this.server.exec(['set', '-g', '@speedrun_prompt', '']);
 	}
 }
 
-/** tmux status strings can't contain raw newlines; collapse whitespace. */
+/**
+ * Collapse whitespace, truncate to fit status-left-length 120, and escape `#`
+ * (the value is expanded as a tmux format string by the static status-left).
+ */
 function sanitize(text: string): string {
-	return text.replace(/\s+/g, ' ').slice(0, 160);
+	return text.replace(/\s+/g, ' ').slice(0, 118).replaceAll('#', '##');
 }

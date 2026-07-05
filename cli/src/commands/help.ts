@@ -18,6 +18,7 @@ ${bold('Commands:')}
   ${cyan('leaderboard')} [id]     Show the leaderboard (all challenges, or one by id)
   ${cyan('practice')} [category]  Practice tmux commands offline against native tmux
   ${cyan('challenge')} <id>       Run challenge 0–5 against native tmux
+  ${cyan('debug')} [--verbose]    Dump tmux/game diagnostics (live/dead hooks, event trace)
 
 ${bold('Options:')}
   --server <url>   Override the API base URL (or set TMUX_SPEEDRUN_API)

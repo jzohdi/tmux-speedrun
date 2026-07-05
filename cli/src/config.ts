@@ -15,7 +15,7 @@ export type ResolvedConfig = { baseUrl: string; configDir: string };
  * `TMUX_SPEEDRUN_API` env var (used for dev against `http://localhost:5173`).
  * Update this constant to the canonical deployment origin.
  */
-export const DEFAULT_API_ORIGIN = 'https://tmux-speedrun.vercel.app';
+export const DEFAULT_API_ORIGIN = 'https://tmux-speedrun.xyz';
 
 /** Strip a trailing slash so path joins produce clean URLs. */
 function trimTrailingSlash(url: string): string {

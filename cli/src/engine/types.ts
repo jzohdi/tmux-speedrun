@@ -15,6 +15,7 @@ export type PaneInfo = {
 	height: number;
 	zoomed: boolean; // #{window_zoomed_flag}
 	inMode: boolean; // #{pane_in_mode}
+	mode?: string | null; // #{pane_mode} — 'copy-mode' | 'view-mode' | 'clock-mode' | 'tree-mode' | ... | null
 };
 
 export type TmuxState = {
@@ -41,8 +42,24 @@ export type StateDelta = {
 	activeWindowChanged: boolean;
 	activeSessionChanged: boolean;
 	zoomToggled: boolean;
+	/** True only for real copy/view mode; clock/tree modes set `enteredMode` instead. */
 	enteredCopyMode: boolean;
 	bufferAdded?: string;
 	bufferRemoved: boolean;
 	pasteObserved?: boolean;
+	/**
+	 * Sink event names observed since the previous delta (installed hook names,
+	 * one per occurrence, in file order), after runner-origin suppression. May
+	 * also contain synthetic events injected by the run loop (SERVER_DIED_EVENT).
+	 * Always present ([] when none).
+	 */
+	commandEvents: string[];
+	/** Raw #{pane_mode} of a pane that newly entered a mode this delta. */
+	enteredMode?: string;
+	/** Panes present in both snapshots whose (sessionName, windowIndex) changed. */
+	movedPanes: {
+		paneId: string;
+		from: { session: string; windowIndex: number };
+		to: { session: string; windowIndex: number };
+	}[];
 };

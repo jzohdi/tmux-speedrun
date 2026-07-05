@@ -24,6 +24,7 @@ import { whoamiCommand } from './commands/whoami';
 import { leaderboardCommand } from './commands/leaderboard';
 import { practiceCommand } from './commands/practice';
 import { challengeCommand } from './commands/challenge';
+import { debugCommand } from './commands/debug';
 
 const COMMANDS: Record<string, Command> = {
 	help: helpCommand,
@@ -32,7 +33,8 @@ const COMMANDS: Record<string, Command> = {
 	whoami: whoamiCommand,
 	leaderboard: leaderboardCommand,
 	practice: practiceCommand,
-	challenge: challengeCommand
+	challenge: challengeCommand,
+	debug: debugCommand
 };
 
 async function main(): Promise<number> {

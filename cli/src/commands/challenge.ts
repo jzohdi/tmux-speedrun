@@ -47,14 +47,15 @@ export const challengeCommand: Command = {
 
 		info(
 			bold(`Challenge ${id}`) +
-				` — ${session.totalSteps()} steps. Drive your tmux to solve each one.`
+				` — ${session.totalSteps()} steps. Drive your tmux to solve each one.` +
+				' Steps that detach or kill tmux re-attach automatically; press Ctrl-C here to quit.'
 		);
 
 		const server = await createIsolatedTmuxServer({ initialSession: 'challenge' });
 		try {
 			const observer = new TmuxObserver(server);
 			const ui = new StatusLine(server);
-			const controller = new ChallengeController({ server, observer, session, ui });
+			const controller = new ChallengeController({ server, observer, session, ui, notify: info });
 			const result = await controller.run();
 
 			if (!result.completed || !result.finish) {

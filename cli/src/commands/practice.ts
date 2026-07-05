@@ -40,34 +40,31 @@ export const practiceCommand: Command = {
 		}
 
 		info(
-			bold('Practice mode') + ` — ${items.length} drills. Press the tmux keys to complete each.`
+			bold('Practice mode') +
+				` — ${items.length} drills. Press the tmux keys to complete each.` +
+				' Detaching re-attaches automatically; press Ctrl-C here to quit.'
 		);
 
-		let completed = 0;
-		for (const item of items) {
-			const server = await createIsolatedTmuxServer({ initialSession: 'practice' });
-			try {
-				info(`\n${bold(item.title)} — ${item.description}`);
-				const observer = new TmuxObserver(server);
-				const ui = new StatusLine(server);
-				const controller = new PracticeController({ server, observer, item, ui });
-				const result = await controller.run();
-				if (result.completed) {
-					completed++;
-					success(`Done: ${item.title}`);
-				} else {
-					info(`Skipped: ${item.title}`);
-					break; // user detached — stop the run
-				}
-			} catch (err) {
-				error(`Practice failed: ${(err as Error).message}`);
-				return EXIT_RUNTIME;
-			} finally {
-				await server.teardown();
+		// The WHOLE drill list runs in ONE isolated server / ONE PracticeController /
+		// ONE attach loop, so drills advance in place with no detach/re-attach
+		// between commands (challenge parity — interface §12.1).
+		const server = await createIsolatedTmuxServer({ initialSession: 'practice' });
+		try {
+			const observer = new TmuxObserver(server);
+			const ui = new StatusLine(server);
+			const controller = new PracticeController({ server, observer, items, ui, notify: info });
+			const result = await controller.run();
+			if (result.completed) {
+				success(`\nCompleted all ${items.length} drills.`);
+			} else {
+				info(`\nPractice stopped before all ${items.length} drills were completed.`);
 			}
+			return EXIT_OK;
+		} catch (err) {
+			error(`Practice failed: ${(err as Error).message}`);
+			return EXIT_RUNTIME;
+		} finally {
+			await server.teardown();
 		}
-
-		info(`\nCompleted ${completed}/${items.length} drills.`);
-		return EXIT_OK;
 	}
 };
