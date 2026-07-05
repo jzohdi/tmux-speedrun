@@ -239,33 +239,37 @@ export class ChallengeController {
 export class PracticeController {
 	private server: IsolatedTmuxServer;
 	private observer: TmuxObserver;
-	private item: PracticeItem;
+	private items: PracticeItem[];
 	private ui: StatusLine;
 	private notify?: (message: string) => void;
 
 	constructor(args: {
 		server: IsolatedTmuxServer;
 		observer: TmuxObserver;
-		item: PracticeItem;
+		items: PracticeItem[];
 		ui: StatusLine;
 		notify?: (message: string) => void;
 	}) {
 		this.server = args.server;
 		this.observer = args.observer;
-		this.item = args.item;
+		this.items = args.items;
 		this.ui = args.ui;
 		this.notify = args.notify;
 	}
 
 	async run(): Promise<{ completed: boolean; aborted?: boolean }> {
-		const item = this.item;
-		const total = item.steps.length;
+		// Flatten every drill into one linear (item, step) sequence tracked by a
+		// single GLOBAL index, so the whole practice set runs in ONE continuous
+		// attach loop — the prompt is replaced in place between drills, exactly
+		// like challenge, with no detach/re-attach per command (interface §12.1).
+		const flat = this.items.flatMap((item) => item.steps.map((step) => ({ item, step })));
+		const total = flat.length;
 		let index = 0;
 
 		const engine: StepEngine = {
 			isComplete: () => index >= total,
 			view: () => {
-				const step = item.steps[index];
+				const { step } = flat[index];
 				// Only `command` steps get a shortcut hint; `copy-mode-action` steps
 				// already carry a step-by-step instruction and keep their prompt verbatim.
 				const shortcut =
@@ -273,10 +277,13 @@ export class PracticeController {
 				const prompt = shortcut ? `${step.prompt} — ${shortcut}` : step.prompt;
 				return { prompt, index, total };
 			},
-			detectionStep: () => ({ prompt: item.steps[index].prompt, seedInput: item.seedInput }),
-			seedInput: () => item.seedInput,
+			detectionStep: () => ({
+				prompt: flat[index].step.prompt,
+				seedInput: flat[index].item.seedInput
+			}),
+			seedInput: () => flat[index]?.item.seedInput,
 			trySubmit: async (candidates, delta) => {
-				const step = item.steps[index];
+				const { step } = flat[index];
 				const matched =
 					step.kind === 'command'
 						? candidates.includes(step.commandName)
