@@ -1,12 +1,20 @@
 # Plan: Make CLI challenge runs playable end-to-end (issue #45)
 
-Issue: jzohdi/tmux-speedrun#45
+Issue: jzohdi/tmux-speedrun#45 · PR: #46
 
 > This plan replaces the previous `.agent/plan.md` (which covered the now-merged issue #35/#41 CLI
 > work, commit `5cca21f`). The existing `.agent/interface.md` also belongs to that shipped work; the
 > interface stage for this issue will overwrite it. All work is in `cli/` — the web app, API, and
 > challenge generator are **not** changed (the encrypted step chain and canonical answer strings are
 > shared with the web and must stay byte-identical).
+>
+> **Revision 2 (2026-07-05, PR #46 feedback round).** §1–§7 describe the work already implemented
+> and reviewed on this branch (commit `ce38036`) — they are kept as the record the shipped code
+> follows; do not re-do them. The reviewer feedback on PR #46 is addressed by **§8**, which is the
+> work remaining: three more reproducible ways a step can get stuck (nested `new-session`, nested
+> `attach`, single-pane `select-pane`) plus the general mandate that **no challenge step may ever
+> require multiple actions or be impossible to progress**. §8 amends the §3.2 detection channel and
+> the §4 file list; where §8 contradicts an earlier section or `.agent/interface.md`, §8 wins.
 
 ---
 
@@ -177,6 +185,9 @@ The sink becomes a real channel instead of a write-only file:
   **rebinds in the generated config** that run the default command plus the sink logger — the
   isolated config owns the server, so rebinds are safe and invisible to the user. State-diff
   candidates remain as a safety net throughout.
+  *Revision 2:* fallback coverage must be driven by the documented input forms, not by hook
+  liveness alone — §8 extends this channel with nested-context shims, more rebinds/aliases, and
+  liveness-aware suppression accounting.
 
 ### 3.3 Prompt rendering (defect 1)
 
@@ -209,6 +220,9 @@ The sink becomes a real channel instead of a write-only file:
 | `cli/src/tmux/detector.test.ts` + new tests | see §6 |
 
 No web (`src/`) changes. No API or generator changes.
+
+*Revision 2:* the PR #46 feedback round adds further changes to `config.ts`, `server.ts`,
+`observer.ts`, `detector.ts`, `controller.ts` and the test files — see §8.4.
 
 ## 5. Implementation order
 
@@ -264,3 +278,224 @@ No web (`src/`) changes. No API or generator changes.
 - **Shared canonical answers**: no changes to answer strings or the crypto chain — the CLI must
   keep matching the server generator exactly; all fixes are detection-side over-emission, which
   trial-decrypt filters by design.
+
+---
+
+## 8. Revision 2 — PR #46 feedback: one-action completability (ONESHOT)
+
+Reviewer feedback on PR #46 (comment of 2026-07-05) reports three more steps that get stuck, and
+mandates: *"Make sure that all commands work similar to above and do not require multiple steps.
+Make sure no challenge step can cause a challenge to get stuck."* Two non-blocking review comments
+(missing `q`/`?` fallbacks; suppression-balance drift when a hook and an interceptor both write)
+belong to the same defect class and are fixed here by the same mechanisms.
+
+### 8.1 New invariant — ONESHOT
+
+> Every pool command's step must be completable by performing **any one** of its documented input
+> forms (the `shortcut` strings in `src/lib/data/tmux-commands.ts`: the `prefix + <key>` presses
+> and the `tmux <command>` typed forms, plus canonical full names and tmux's builtin short aliases)
+> **exactly once, from any reachable run state** — including the minimal state (1 session, 1
+> window, 1 pane, attached, 0 buffers). Detection must therefore be **input-based** (the input
+> itself writes its sink event *before* the underlying command runs, via rebind or alias), so an
+> invocation that no-ops or errors in the current state still advances the step.
+
+The only exception is the copy-paste sequence step, whose prompt documents a multi-action
+procedure by design (type the seed text, copy it in copy mode, paste it) — it stays as shipped.
+
+### 8.2 Root causes of the three reported cases
+
+1. **`new-session` step stuck** — prompt e.g. "Start a new tmux session", documented form
+   `tmux new -s <name>`, typed in a pane. The pane's `$TMUX` points at the private server (good —
+   ISO1), but tmux's client nested-session guard refuses `new-session` when `$TMUX` is set
+   ("sessions should be nested with care, unset $TMUX to force"). The command **never executes**:
+   no `after-new-session` hook, no `sessionCountDelta` — and there is no alias interceptor for
+   `new-session`/`new` to write an input event. Stuck.
+2. **`select-pane` step stuck with a single pane** — prompt e.g. "Move to a different pane",
+   documented form `prefix + Arrow`. The arrow keys got **no write-first rebind** (unlike
+   n/p/l/0-9); the installed `after-select-pane` hook is one of the `after-*` names real tmux
+   rejects/never fires here, and the state-diff channel (`activePaneChanged`) needs a second pane
+   to exist. With one pane, all channels are silent. Stuck (the user currently has to split first —
+   exactly the "multiple steps" the feedback forbids).
+3. **`attach-session` step stuck** — prompt e.g. "Attach to an existing session", documented forms
+   `tmux attach -t <name>` / `tmux a`. Same nested guard refuses `attach-session` from inside;
+   nothing happens. Today the step is only completable by detaching and letting the runner
+   re-attach (multi-step and undiscoverable). Stuck in practice.
+
+Common shape: the shipped §3.2 channel covered *hook-or-fallback per command*, but coverage was
+driven by which hooks the dev tmux accepted, not by the documented input forms — and the two
+nested-guard commands need their default in-challenge behavior **overridden**, not just observed.
+
+### 8.3 Fixes
+
+All inside `cli/`; no web, API, generator, or canonical-answer changes. All new interception uses
+the two already-shipped, review-verified patterns in `config.ts` (write-first key rebinds and
+command-alias interceptors; aliases resolve before builtin names on the verified tmux and are
+exercised per-machine by the integration suite, §8.5).
+
+**(a) Nested-context command shims** — override tmux's nested guard inside the run, per feedback:
+
+- `new-session`, `new` → alias to `run-shell "<write after-new-session>" ; new-session -d`.
+  `-d` legitimately bypasses the nested guard, so a **real (detached, non-nested) session is
+  created on the private server** and the step advances via the alias event (plus
+  `sessionCountDelta > 0` as a net). Trailing user args attach to the final command
+  (`tmux new -s foo` → `new-session -d -s foo`; a duplicated `-d` is accepted by tmux).
+  Optionally chain `display-message 'new session created in the background'` (unhooked, safe) so
+  the user sees feedback.
+- `attach-session`, `attach`, `a` → alias to `run-shell "<write after-attach-session>" ;
+  switch-client`. Inside the attach, "attach to a session" morally *is* switching this client:
+  `tmux attach -t <name>` becomes `switch-client -t <name>`; the bare forms are a harmless
+  current-session switch. Even if the trailing command errors, the write-first event has already
+  advanced the step.
+- **Runner-attach collision (critical):** the runner itself invokes `attach-session` in **two**
+  places, and the new alias would rewrite both into a non-attaching `switch-client`:
+  1. `server.attach()` (`server.ts:156`) — every user attach would die.
+  2. `absorbConfigErrors()` (`server.ts:79-93`) — the throwaway `-C attach-session ;
+     detach-client` control client would never attach, so the config errors that `SINK_HOOKS`
+     deliberately queues (the `after-*` names the running tmux rejects) would no longer be
+     absorbed and would be shown on the user's first real attach after **every** server start and
+     every `ensureRunning()` restart (`server.ts:171` absorbs too) — violating the
+     exactly-one-prompt criterion on every run.
+
+  Both call sites therefore go through a **private alias** `speedrun-attach=attach-session`
+  defined in the generated conf (exact-name alias lookup; expansion does not recurse), and both
+  spawns **strip `TMUX`/`TMUX_PANE` from the child env** so the real `attach-session` never trips
+  the nested guard when the CLI itself is launched from inside a user's tmux (a latent same-kind
+  blocker: preflight does not forbid that, and today such a launch would break `attach()` via the
+  rapid-exit guard and break the absorb the same way). Hook events are unchanged — the private
+  alias runs the real command — so first-attach suppression (loop step 6) keeps expecting
+  `client-attached`/`after-attach-session`, and the absorb client's own sink writes stay harmless:
+  at server creation the observer is constructed after the absorb and starts reading at the sink's
+  then-current size (`observer.ts:90`), and on an `ensureRunning` restart the loop's drain →
+  recover → `resetBaseline()` ordering (already load-bearing per (d)) fast-forwards past them.
+
+**(b) Write-first key rebinds** for every documented `prefix + <key>` that lacked one — same shape
+as the shipped n/p/l/number rebinds (sink write **before** the default command, so no-op/failing
+invocations still advance):
+
+| key(s) | writes | then runs | unblocks |
+|---|---|---|---|
+| `Up` `Down` `Left` `Right` (keep `-r` repeat flag) | `after-select-pane` | `select-pane -U/-D/-L/-R` | **feedback case 2** (single pane) |
+| `o` (default next-pane key, common muscle memory) | `after-select-pane` | `select-pane -t :.+` | same |
+| `z` | new trigger constant (e.g. `ZOOM_KEY_EVENT = 'zoom-key'`, WINDOW_NAV_TRIGGER pattern) | `resize-pane -Z` | `toggle-zoom` with a single pane (zoom is impossible → no `zoomToggled`, no hook) |
+| `]` | `after-paste-buffer` | `paste-buffer` | `paste-buffer` with zero buffers (command errors) |
+| `q` | `after-display-panes` | `display-panes` | review comment: no fallback if hook dead |
+| `?` | `after-list-keys` | `list-keys` | review comment: no fallback if hook dead |
+
+Detector: one new `EVENT_CANDIDATES` entry — `ZOOM_KEY_EVENT → toggle-zoom`. All other events
+above already have entries.
+
+**(c) Typed-form alias interceptors** for the remaining documented typed forms (write-first, then
+the real command; trailing args attach):
+
+| alias names | writes | unblocks in minimal state |
+|---|---|---|
+| `list-sessions`, `ls` | `after-list-sessions` | typed form on a tmux where the hook is dead |
+| `list-windows`, `lsw` | `after-list-windows` | same |
+| `list-buffers`, `lsb` | `after-list-buffers` | same |
+| `delete-buffer`, `deleteb` | `after-delete-buffer` | command errors with zero buffers |
+| `capture-pane`, `capturep` | `after-capture-pane` | hook-dead machines (bufferAdded stays as net) |
+| `join-pane`, `joinp` | `after-join-pane` | command errors with a single window |
+| `swap-window`, `swapw` | `after-swap-window` | command errors with a single window |
+| `list-keys`, `lsk` | `after-list-keys` | hook-dead machines |
+
+`kill-server` needs no alias (SERVER_DIED_EVENT synthesis already covers it); `list-panes`,
+`show-options`, `set-option`, `display-message`, `refresh-client` must stay hook-free AND
+alias-free (SUP1 — the poll and `isAlive` need guaranteed-silent commands).
+
+**(d) Liveness-aware suppression accounting** — aliasing `list-sessions`/`list-buffers` full names
+makes the reviewer's balance caveat a real bug: the observer's poll execs those every 150 ms, and
+on a tmux where the `after-*` hook is *also* live, one exec writes **two** sink lines against one
+suppression entry — leaking a spurious user event per tick that could **self-complete** steps (the
+opposite failure of "stuck", equally forbidden). Fix structurally, closing both review caveats:
+
+- After config load at server start (in/next to `absorbConfigErrors`) and after every
+  `ensureRunning` restart, run `show-hooks -g` once and parse which `SINK_HOOKS` entries the
+  running tmux actually accepted → `liveHooks: ReadonlySet<string>` exposed on the server. On
+  parse failure, fall back to the current static SINK_HOOKS-membership behavior (documented).
+- `expectedSinkEventsFor(args, liveHooks)` returns the **exact multiset** of sink lines a runner
+  exec produces: alias-origin writes (static — derived from the same alias table `config.ts` owns,
+  keyed by the full command names the runner uses) **plus** the live-hook write (`after-<cmd>` only
+  if in `liveHooks`; `after-select-window`'s live line is `WINDOW_NAV_TRIGGER`) **plus**
+  notification writes (`detach-client` → `client-detached`; `attach-session` → `client-attached` +
+  `after-attach-session`; `kill-session` → `session-closed` — each gated on liveness uniformly).
+  The observer threads the server's `liveHooks` into every accounting call.
+- Recovery-path execs (`ensureRunning`'s `new-session` now hits the new alias) stay safe without
+  accounting: they run between drain and the next loop-top `resetBaseline()`, which fast-forwards
+  the sink past their lines — note this ordering as load-bearing in the code.
+
+**(e) Full-pool ONESHOT audit** — the response to "…more". Every `TMUX_COMMANDS` entry, its
+documented forms, and its channel **after** this round, from the minimal state:
+
+| commands | channel from minimal state | status |
+|---|---|---|
+| `new-session`, `attach-session` | nested-context shims (a) | **fixed this round** |
+| `select-pane` | arrow/`o` rebinds (b) | **fixed this round** |
+| `toggle-zoom`, `paste-buffer`, `display-panes`, `list-keys` | new rebinds (b) | **fixed this round** |
+| `join-pane`, `swap-window`, `delete-buffer`, `list-buffers`, `capture-pane`, typed `list-sessions`/`list-windows`/`list-keys` forms | new aliases (c) | **fixed this round** |
+| `detach`, `kill-session`, `kill-server` | client-detached / cascade+recovery / SERVER_DIED (§3.1) | OK as shipped |
+| `select-window`, `next-window`, `previous-window`, `last-window`, `last-pane`, `swap-pane`, `rotate-panes`, `break-pane`, `command-prompt`, `show-time`, `list-windows` (key), `list-sessions` (key), `next-session`, `previous-session` | shipped write-first rebinds | OK as shipped |
+| `show-buffer`, `reload-config`, `kill-session` (typed) | shipped aliases (+ (d) accounting) | OK as shipped |
+| `new-window`, `split-vertical`, `split-horizontal`, `kill-window`, `kill-pane`, `rename-window`, `rename-session`, `copy-mode` | always performable from minimal state; state-diff/cascade channels fire (kill-window/kill-pane on the last window/pane cascade into the session kill and recover via the §3.1 loop) | OK as shipped |
+| copy-paste sequence step | documented multi-action procedure | exempt by design (§8.1) |
+
+### 8.4 Files to change (delta on §4)
+
+| File | Change |
+|---|---|
+| `cli/src/tmux/config.ts` | shims (a); rebinds (b); aliases (c); `speedrun-attach`; `ZOOM_KEY_EVENT`; `expectedSinkEventsFor(args, liveHooks)`; export the rebind/alias tables so tests can assert coverage |
+| `cli/src/tmux/server.ts` | capture `liveHooks` via `show-hooks -g` at start + after restart; `attach()` **and** `absorbConfigErrors()` both spawn via `speedrun-attach` with `TMUX`/`TMUX_PANE` stripped from the child env |
+| `cli/src/tmux/observer.ts` | thread `liveHooks` into accounting calls |
+| `cli/src/tmux/detector.ts` | `ZOOM_KEY_EVENT → toggle-zoom` entry |
+| `cli/src/tmux/controller.ts` | first-attach `expectEvents` goes through the liveness-aware helper (minor) |
+| tests (§8.5) | `config.test.ts`, `observer.test.ts`, `detector.test.ts`, `live-server.integration.test.ts` |
+
+No changes: `status-line.ts`, `engine/types.ts`, `challenge.ts`/`practice.ts` (practice drills gain
+the same fixes for free — its `commandName` matching consumes the same candidates), web `src/`.
+`.agent/interface.md` §2.2/§2.3 are amended by this section where they conflict (notably the
+`expectedSinkEventsFor` signature).
+
+### 8.5 Testing (delta on §6)
+
+- **Unit — ONESHOT completeness (the "never again" net)**: a pure test that parses every
+  `TMUX_COMMANDS.shortcut` string and asserts each documented input form is covered by a rebind
+  table entry, an alias table entry, or an explicit named exemption (state-diff-guaranteed
+  commands and the copy-paste sequence). A future pool command added without a channel fails CI.
+- **Unit**: `expectedSinkEventsFor` liveness matrix (alias+live-hook double count — the
+  `show-buffer` case from review; dead-hook alias-only; `WINDOW_NAV_TRIGGER` rewrite; notification
+  gating); detector `ZOOM_KEY_EVENT` mapping; config text contains the new rebinds/aliases/shims
+  and `speedrun-attach`.
+- **Integration (tmux-gated, no TTY)**: (1) per aliased typed form, one scripted exec produces
+  **exactly** the `expectedSinkEventsFor` multiset of sink lines — pins per-machine hook/alias
+  balance (the reviewer's requested assertion, generalized); (2) `list-keys` output shows every
+  rebound key running the sink write plus the right final command; (3) `show-hooks -g` parsing
+  works and every SINK_HOOKS entry is live **or** its dependent documented forms are covered by
+  rebind/alias (liveness drift fails tests instead of stranding a step); (4) nested-shim behavior:
+  a scripted client with `TMUX` set in its env runs `new-session` → a real detached session
+  appears (no nested error) and the sink got `after-new-session`; (5) config-error absorption
+  still works with the attach aliases installed: after server start **and** after a scripted
+  `ensureRunning` restart, a fresh control client attaching via `speedrun-attach` sees no queued
+  config-error output.
+- **Manual acceptance (feedback verbatim)**: in a live run — `tmux new` on a "start a new session"
+  step creates a session and advances; `prefix + Arrow` advances a "select a different pane" step
+  with a single pane; `tmux a` advances an "attach to a session" step; plus one full end-to-end
+  run of challenge 0 and one of 3–5 with no stuck step. `cd cli && npm test` and
+  `npm run typecheck` green on a machine **with tmux installed** (review caveat: the integration
+  suite skips silently without tmux — CI/verification must run where tmux exists).
+
+### 8.6 Risks & edge cases (delta on §7)
+
+- **Alias-shadow behavior across tmux versions**: interception of builtin names/aliases is
+  verified on 3.6a and now pinned per-machine by integration test (1); if a version resolves
+  builtins first, the typed-form channel degrades to the hook channel — test (3) surfaces that as
+  a failure rather than a silent stuck step.
+- **Self-completion (over-detection)** is now a first-class risk alongside stuck steps: the
+  liveness-aware accounting (d) plus integration test (1) guard it; never add a hook or alias for
+  commands the runner polls without updating `expectedSinkEventsFor`'s tables.
+- **Shim semantics**: `new-session -d` leaves the user in their current session (the new one is
+  visible via `tmux ls`/status); `switch-client` with a bad `-t` errors after the event write —
+  both acceptable: the step advances on the documented input, which is the contract the feedback
+  sets.
+- **Runner attach must never be intercepted**: `server.attach()` and `absorbConfigErrors()` may
+  only use `speedrun-attach`; add a regression test asserting both spawns use it (and strip
+  `TMUX`/`TMUX_PANE`).
+- ISO1/DET1/LIFE1/PR1/SUP1 and the canonical-answer/crypto invariants are unchanged.
