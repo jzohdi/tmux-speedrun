@@ -43,7 +43,7 @@ attach — with no orphaned private servers on any exit path.
   `finally`. So a `detach` or `kill-session` step ends the run instead of advancing it.
 - The generated config (`cli/src/tmux/config.ts`) does **not** set `exit-empty off`, so killing the
   last session kills the private server (tmux default). After that every observer exec fails and is
-  silently swallowed (`observer.ts:180` catch), so the kill can never even be *observed*: the
+  silently swallowed (`observer.ts:180` catch), so the kill can never even be _observed_: the
   detector's `kill-session` candidate requires a post-kill snapshot showing fewer sessions, which
   requires a running server.
 - The detector has **no candidate at all for `detach`** (`#{session_attached}` is fetched but
@@ -79,15 +79,15 @@ Challenge 0's generator guarantees **every** beginner command appears at least o
 (`generator.ts` step 2; pool = all 16 beginner commands), so every challenge-0 run contains steps
 that today emit **no candidate ever**:
 
-| Step (canonical answer) | How the user performs it | Why undetected today |
-|---|---|---|
-| `detach` | `prefix + d` | no state change; no candidate; kills attach (§2.1) |
-| `attach-session` | re-attach after detach (runner does it), or `switch-client -t` | no candidate; in-pane `tmux attach` is refused (nested `$TMUX`) |
-| `list-sessions` | `tmux ls` typed in a pane (targets the isolated server via `$TMUX`) | no state change |
-| `list-windows` | `prefix + w` (runs `choose-tree -Zw`) or `tmux lsw` | tree mode sets `pane_in_mode` → wrongly emits only `copy-mode` |
-| `show-time` | `prefix + t` (runs `clock-mode`) | clock mode → wrongly emits only `copy-mode` |
-| `kill-session` (last session) | `tmux kill-session` | server exits (no `exit-empty off`) → unobservable (§2.1) |
-| `select-window` (no-op case) | `prefix + 0` | §2.2 |
+| Step (canonical answer)       | How the user performs it                                            | Why undetected today                                            |
+| ----------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `detach`                      | `prefix + d`                                                        | no state change; no candidate; kills attach (§2.1)              |
+| `attach-session`              | re-attach after detach (runner does it), or `switch-client -t`      | no candidate; in-pane `tmux attach` is refused (nested `$TMUX`) |
+| `list-sessions`               | `tmux ls` typed in a pane (targets the isolated server via `$TMUX`) | no state change                                                 |
+| `list-windows`                | `prefix + w` (runs `choose-tree -Zw`) or `tmux lsw`                 | tree mode sets `pane_in_mode` → wrongly emits only `copy-mode`  |
+| `show-time`                   | `prefix + t` (runs `clock-mode`)                                    | clock mode → wrongly emits only `copy-mode`                     |
+| `kill-session` (last session) | `tmux kill-session`                                                 | server exits (no `exit-empty off`) → unobservable (§2.1)        |
+| `select-window` (no-op case)  | `prefix + 0`                                                        | §2.2                                                            |
 
 Higher pools add more of the same kind: `list-keys`, `display-panes`, `command-prompt`,
 `reload-config` (`source-file`), `kill-server` (server death — currently fatal), and silent-state
@@ -162,7 +162,7 @@ The sink becomes a real channel instead of a write-only file:
   suppression queue — every runner exec of a hooked command pushes its expected event name(s); sink
   reading skips one matching entry. This is deterministic and tmux-version-independent (do **not**
   rely on `#{client_tty}`/`#{hook_client}` expansion in hook commands; may be used later as
-  refinement only). Note tmux does not fire `after-` hooks for commands run *from* hooks, so the
+  refinement only). Note tmux does not fire `after-` hooks for commands run _from_ hooks, so the
   hooks' own `run-shell`s don't recurse.
 - **Detector** (`detector.ts`): add a pure event→candidate table on top of the existing state-diff
   candidates (over-emission is always safe — trial-decrypt in `challenge-session.ts` is the
@@ -185,7 +185,7 @@ The sink becomes a real channel instead of a write-only file:
   **rebinds in the generated config** that run the default command plus the sink logger — the
   isolated config owns the server, so rebinds are safe and invisible to the user. State-diff
   candidates remain as a safety net throughout.
-  *Revision 2:* fallback coverage must be driven by the documented input forms, not by hook
+  _Revision 2:_ fallback coverage must be driven by the documented input forms, not by hook
   liveness alone — §8 extends this channel with nested-context shims, more rebinds/aliases, and
   liveness-aware suppression accounting.
 
@@ -207,21 +207,21 @@ The sink becomes a real channel instead of a write-only file:
 
 ## 4. Files to change
 
-| File | Change |
-|---|---|
-| `cli/src/tmux/config.ts` | `exit-empty off`; static `status-left '#{@speedrun_prompt}'`; expanded hook list (+ any fallback rebinds) |
-| `cli/src/tmux/server.ts` | `isAlive()`/restart-on-same-socket primitive; `attach()` exit info; keep teardown + signal handlers (unchanged semantics) |
-| `cli/src/tmux/observer.ts` | sink tailing + drain; suppression queue; `commandEvents` in deltas; `#{pane_mode}` in `PANE_FORMAT`; `resetBaseline()` |
-| `cli/src/engine/types.ts` | `StateDelta.commandEvents`; `PaneInfo.mode` |
-| `cli/src/tmux/detector.ts` | event→candidate table; mode-kind mapping; cascade-kill and moved-pane over-emission |
-| `cli/src/tmux/controller.ts` | run-loop refactor shared by challenge + practice; exit classification; synthetic `kill-server`; prompt re-assertion; re-attach notice + abort window; loop-failure guard |
-| `cli/src/ui/status-line.ts` | write `@speedrun_prompt` instead of `status-left`; align sanitize cap |
-| `cli/src/commands/challenge.ts`, `cli/src/commands/practice.ts` | adapt to loop results/messaging; practice keeps per-item servers with in-item loop |
-| `cli/src/tmux/detector.test.ts` + new tests | see §6 |
+| File                                                            | Change                                                                                                                                                                   |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cli/src/tmux/config.ts`                                        | `exit-empty off`; static `status-left '#{@speedrun_prompt}'`; expanded hook list (+ any fallback rebinds)                                                                |
+| `cli/src/tmux/server.ts`                                        | `isAlive()`/restart-on-same-socket primitive; `attach()` exit info; keep teardown + signal handlers (unchanged semantics)                                                |
+| `cli/src/tmux/observer.ts`                                      | sink tailing + drain; suppression queue; `commandEvents` in deltas; `#{pane_mode}` in `PANE_FORMAT`; `resetBaseline()`                                                   |
+| `cli/src/engine/types.ts`                                       | `StateDelta.commandEvents`; `PaneInfo.mode`                                                                                                                              |
+| `cli/src/tmux/detector.ts`                                      | event→candidate table; mode-kind mapping; cascade-kill and moved-pane over-emission                                                                                      |
+| `cli/src/tmux/controller.ts`                                    | run-loop refactor shared by challenge + practice; exit classification; synthetic `kill-server`; prompt re-assertion; re-attach notice + abort window; loop-failure guard |
+| `cli/src/ui/status-line.ts`                                     | write `@speedrun_prompt` instead of `status-left`; align sanitize cap                                                                                                    |
+| `cli/src/commands/challenge.ts`, `cli/src/commands/practice.ts` | adapt to loop results/messaging; practice keeps per-item servers with in-item loop                                                                                       |
+| `cli/src/tmux/detector.test.ts` + new tests                     | see §6                                                                                                                                                                   |
 
 No web (`src/`) changes. No API or generator changes.
 
-*Revision 2:* the PR #46 feedback round adds further changes to `config.ts`, `server.ts`,
+_Revision 2:_ the PR #46 feedback round adds further changes to `config.ts`, `server.ts`,
 `observer.ts`, `detector.ts`, `controller.ts` and the test files — see §8.4.
 
 ## 5. Implementation order
@@ -242,7 +242,7 @@ No web (`src/`) changes. No API or generator changes.
 ## 6. Testing
 
 - **Unit (vitest, `cd cli && npm test`)**:
-  - detector: event→candidate mapping (incl. `after-select-window` with *no* state change → defect 2
+  - detector: event→candidate mapping (incl. `after-select-window` with _no_ state change → defect 2
     regression test); mode-kind mapping (clock/tree ≠ copy); cascade-kill over-emission; join/swap
     /rotate via events.
   - observer: sink parsing + offset tailing; suppression queue (runner poll events dropped, user
@@ -267,14 +267,14 @@ No web (`src/`) changes. No API or generator changes.
   the poll keeps providing state deltas regardless.
 - **Runner-origin events masquerading as user actions** → exec-accounting suppression (§3.2) +
   `resetBaseline()` after recovery; test both explicitly. The one intentional exception: the
-  runner's re-attach may satisfy an `attach-session` step (that *is* the user's post-detach flow).
+  runner's re-attach may satisfy an `attach-session` step (that _is_ the user's post-detach flow).
 - **Auto re-attach can trap the user** in an unwinnable run → the ~1s Ctrl-C window + notice each
   cycle, and the consecutive-failure guard.
 - **Isolation (ISO1)**: recovery must only ever use the run's private socket; teardown/exit
   handlers already reference the socket name and stay valid across server restarts (verify the
   temp dir isn't removed until final teardown).
-- **Ordering races** between poll, sink, and recovery → the loop serializes: drain/diff *before*
-  recovery, reset baseline *after*, single `advancing` critical section for submits.
+- **Ordering races** between poll, sink, and recovery → the loop serializes: drain/diff _before_
+  recovery, reset baseline _after_, single `advancing` critical section for submits.
 - **Shared canonical answers**: no changes to answer strings or the crypto chain — the CLI must
   keep matching the server generator exactly; all fixes are detection-side over-emission, which
   trial-decrypt filters by design.
@@ -284,8 +284,8 @@ No web (`src/`) changes. No API or generator changes.
 ## 8. Revision 2 — PR #46 feedback: one-action completability (ONESHOT)
 
 Reviewer feedback on PR #46 (comment of 2026-07-05) reports three more steps that get stuck, and
-mandates: *"Make sure that all commands work similar to above and do not require multiple steps.
-Make sure no challenge step can cause a challenge to get stuck."* Two non-blocking review comments
+mandates: _"Make sure that all commands work similar to above and do not require multiple steps.
+Make sure no challenge step can cause a challenge to get stuck."_ Two non-blocking review comments
 (missing `q`/`?` fallbacks; suppression-balance drift when a hook and an interceptor both write)
 belong to the same defect class and are fixed here by the same mechanisms.
 
@@ -296,7 +296,7 @@ belong to the same defect class and are fixed here by the same mechanisms.
 > and the `tmux <command>` typed forms, plus canonical full names and tmux's builtin short aliases)
 > **exactly once, from any reachable run state** — including the minimal state (1 session, 1
 > window, 1 pane, attached, 0 buffers). Detection must therefore be **input-based** (the input
-> itself writes its sink event *before* the underlying command runs, via rebind or alias), so an
+> itself writes its sink event _before_ the underlying command runs, via rebind or alias), so an
 > invocation that no-ops or errors in the current state still advances the step.
 
 The only exception is the copy-paste sequence step, whose prompt documents a multi-action
@@ -321,7 +321,7 @@ procedure by design (type the seed text, copy it in copy mode, paste it) — it 
    nothing happens. Today the step is only completable by detaching and letting the runner
    re-attach (multi-step and undiscoverable). Stuck in practice.
 
-Common shape: the shipped §3.2 channel covered *hook-or-fallback per command*, but coverage was
+Common shape: the shipped §3.2 channel covered _hook-or-fallback per command_, but coverage was
 driven by which hooks the dev tmux accepted, not by the documented input forms — and the two
 nested-guard commands need their default in-challenge behavior **overridden**, not just observed.
 
@@ -342,7 +342,7 @@ exercised per-machine by the integration suite, §8.5).
   Optionally chain `display-message 'new session created in the background'` (unhooked, safe) so
   the user sees feedback.
 - `attach-session`, `attach`, `a` → alias to `run-shell "<write after-attach-session>" ;
-  switch-client`. Inside the attach, "attach to a session" morally *is* switching this client:
+switch-client`. Inside the attach, "attach to a session" morally _is_ switching this client:
   `tmux attach -t <name>` becomes `switch-client -t <name>`; the bare forms are a harmless
   current-session switch. Even if the trailing command errors, the write-first event has already
   advanced the step.
@@ -350,7 +350,7 @@ exercised per-machine by the integration suite, §8.5).
   places, and the new alias would rewrite both into a non-attaching `switch-client`:
   1. `server.attach()` (`server.ts:156`) — every user attach would die.
   2. `absorbConfigErrors()` (`server.ts:79-93`) — the throwaway `-C attach-session ;
-     detach-client` control client would never attach, so the config errors that `SINK_HOOKS`
+detach-client` control client would never attach, so the config errors that `SINK_HOOKS`
      deliberately queues (the `after-*` names the running tmux rejects) would no longer be
      absorbed and would be shown on the user's first real attach after **every** server start and
      every `ensureRunning()` restart (`server.ts:171` absorbs too) — violating the
@@ -372,14 +372,14 @@ exercised per-machine by the integration suite, §8.5).
 as the shipped n/p/l/number rebinds (sink write **before** the default command, so no-op/failing
 invocations still advance):
 
-| key(s) | writes | then runs | unblocks |
-|---|---|---|---|
-| `Up` `Down` `Left` `Right` (keep `-r` repeat flag) | `after-select-pane` | `select-pane -U/-D/-L/-R` | **feedback case 2** (single pane) |
-| `o` (default next-pane key, common muscle memory) | `after-select-pane` | `select-pane -t :.+` | same |
-| `z` | new trigger constant (e.g. `ZOOM_KEY_EVENT = 'zoom-key'`, WINDOW_NAV_TRIGGER pattern) | `resize-pane -Z` | `toggle-zoom` with a single pane (zoom is impossible → no `zoomToggled`, no hook) |
-| `]` | `after-paste-buffer` | `paste-buffer` | `paste-buffer` with zero buffers (command errors) |
-| `q` | `after-display-panes` | `display-panes` | review comment: no fallback if hook dead |
-| `?` | `after-list-keys` | `list-keys` | review comment: no fallback if hook dead |
+| key(s)                                             | writes                                                                                | then runs                 | unblocks                                                                          |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------- |
+| `Up` `Down` `Left` `Right` (keep `-r` repeat flag) | `after-select-pane`                                                                   | `select-pane -U/-D/-L/-R` | **feedback case 2** (single pane)                                                 |
+| `o` (default next-pane key, common muscle memory)  | `after-select-pane`                                                                   | `select-pane -t :.+`      | same                                                                              |
+| `z`                                                | new trigger constant (e.g. `ZOOM_KEY_EVENT = 'zoom-key'`, WINDOW_NAV_TRIGGER pattern) | `resize-pane -Z`          | `toggle-zoom` with a single pane (zoom is impossible → no `zoomToggled`, no hook) |
+| `]`                                                | `after-paste-buffer`                                                                  | `paste-buffer`            | `paste-buffer` with zero buffers (command errors)                                 |
+| `q`                                                | `after-display-panes`                                                                 | `display-panes`           | review comment: no fallback if hook dead                                          |
+| `?`                                                | `after-list-keys`                                                                     | `list-keys`               | review comment: no fallback if hook dead                                          |
 
 Detector: one new `EVENT_CANDIDATES` entry — `ZOOM_KEY_EVENT → toggle-zoom`. All other events
 above already have entries.
@@ -387,16 +387,16 @@ above already have entries.
 **(c) Typed-form alias interceptors** for the remaining documented typed forms (write-first, then
 the real command; trailing args attach):
 
-| alias names | writes | unblocks in minimal state |
-|---|---|---|
-| `list-sessions`, `ls` | `after-list-sessions` | typed form on a tmux where the hook is dead |
-| `list-windows`, `lsw` | `after-list-windows` | same |
-| `list-buffers`, `lsb` | `after-list-buffers` | same |
-| `delete-buffer`, `deleteb` | `after-delete-buffer` | command errors with zero buffers |
-| `capture-pane`, `capturep` | `after-capture-pane` | hook-dead machines (bufferAdded stays as net) |
-| `join-pane`, `joinp` | `after-join-pane` | command errors with a single window |
-| `swap-window`, `swapw` | `after-swap-window` | command errors with a single window |
-| `list-keys`, `lsk` | `after-list-keys` | hook-dead machines |
+| alias names                | writes                | unblocks in minimal state                     |
+| -------------------------- | --------------------- | --------------------------------------------- |
+| `list-sessions`, `ls`      | `after-list-sessions` | typed form on a tmux where the hook is dead   |
+| `list-windows`, `lsw`      | `after-list-windows`  | same                                          |
+| `list-buffers`, `lsb`      | `after-list-buffers`  | same                                          |
+| `delete-buffer`, `deleteb` | `after-delete-buffer` | command errors with zero buffers              |
+| `capture-pane`, `capturep` | `after-capture-pane`  | hook-dead machines (bufferAdded stays as net) |
+| `join-pane`, `joinp`       | `after-join-pane`     | command errors with a single window           |
+| `swap-window`, `swapw`     | `after-swap-window`   | command errors with a single window           |
+| `list-keys`, `lsk`         | `after-list-keys`     | hook-dead machines                            |
 
 `kill-server` needs no alias (SERVER_DIED_EVENT synthesis already covers it); `list-panes`,
 `show-options`, `set-option`, `display-message`, `refresh-client` must stay hook-free AND
@@ -404,7 +404,7 @@ alias-free (SUP1 — the poll and `isAlive` need guaranteed-silent commands).
 
 **(d) Liveness-aware suppression accounting** — aliasing `list-sessions`/`list-buffers` full names
 makes the reviewer's balance caveat a real bug: the observer's poll execs those every 150 ms, and
-on a tmux where the `after-*` hook is *also* live, one exec writes **two** sink lines against one
+on a tmux where the `after-*` hook is _also_ live, one exec writes **two** sink lines against one
 suppression entry — leaking a spurious user event per tick that could **self-complete** steps (the
 opposite failure of "stuck", equally forbidden). Fix structurally, closing both review caveats:
 
@@ -426,28 +426,28 @@ opposite failure of "stuck", equally forbidden). Fix structurally, closing both 
 **(e) Full-pool ONESHOT audit** — the response to "…more". Every `TMUX_COMMANDS` entry, its
 documented forms, and its channel **after** this round, from the minimal state:
 
-| commands | channel from minimal state | status |
-|---|---|---|
-| `new-session`, `attach-session` | nested-context shims (a) | **fixed this round** |
-| `select-pane` | arrow/`o` rebinds (b) | **fixed this round** |
-| `toggle-zoom`, `paste-buffer`, `display-panes`, `list-keys` | new rebinds (b) | **fixed this round** |
-| `join-pane`, `swap-window`, `delete-buffer`, `list-buffers`, `capture-pane`, typed `list-sessions`/`list-windows`/`list-keys` forms | new aliases (c) | **fixed this round** |
-| `detach`, `kill-session`, `kill-server` | client-detached / cascade+recovery / SERVER_DIED (§3.1) | OK as shipped |
-| `select-window`, `next-window`, `previous-window`, `last-window`, `last-pane`, `swap-pane`, `rotate-panes`, `break-pane`, `command-prompt`, `show-time`, `list-windows` (key), `list-sessions` (key), `next-session`, `previous-session` | shipped write-first rebinds | OK as shipped |
-| `show-buffer`, `reload-config`, `kill-session` (typed) | shipped aliases (+ (d) accounting) | OK as shipped |
-| `new-window`, `split-vertical`, `split-horizontal`, `kill-window`, `kill-pane`, `rename-window`, `rename-session`, `copy-mode` | always performable from minimal state; state-diff/cascade channels fire (kill-window/kill-pane on the last window/pane cascade into the session kill and recover via the §3.1 loop) | OK as shipped |
-| copy-paste sequence step | documented multi-action procedure | exempt by design (§8.1) |
+| commands                                                                                                                                                                                                                                 | channel from minimal state                                                                                                                                                          | status                  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `new-session`, `attach-session`                                                                                                                                                                                                          | nested-context shims (a)                                                                                                                                                            | **fixed this round**    |
+| `select-pane`                                                                                                                                                                                                                            | arrow/`o` rebinds (b)                                                                                                                                                               | **fixed this round**    |
+| `toggle-zoom`, `paste-buffer`, `display-panes`, `list-keys`                                                                                                                                                                              | new rebinds (b)                                                                                                                                                                     | **fixed this round**    |
+| `join-pane`, `swap-window`, `delete-buffer`, `list-buffers`, `capture-pane`, typed `list-sessions`/`list-windows`/`list-keys` forms                                                                                                      | new aliases (c)                                                                                                                                                                     | **fixed this round**    |
+| `detach`, `kill-session`, `kill-server`                                                                                                                                                                                                  | client-detached / cascade+recovery / SERVER_DIED (§3.1)                                                                                                                             | OK as shipped           |
+| `select-window`, `next-window`, `previous-window`, `last-window`, `last-pane`, `swap-pane`, `rotate-panes`, `break-pane`, `command-prompt`, `show-time`, `list-windows` (key), `list-sessions` (key), `next-session`, `previous-session` | shipped write-first rebinds                                                                                                                                                         | OK as shipped           |
+| `show-buffer`, `reload-config`, `kill-session` (typed)                                                                                                                                                                                   | shipped aliases (+ (d) accounting)                                                                                                                                                  | OK as shipped           |
+| `new-window`, `split-vertical`, `split-horizontal`, `kill-window`, `kill-pane`, `rename-window`, `rename-session`, `copy-mode`                                                                                                           | always performable from minimal state; state-diff/cascade channels fire (kill-window/kill-pane on the last window/pane cascade into the session kill and recover via the §3.1 loop) | OK as shipped           |
+| copy-paste sequence step                                                                                                                                                                                                                 | documented multi-action procedure                                                                                                                                                   | exempt by design (§8.1) |
 
 ### 8.4 Files to change (delta on §4)
 
-| File | Change |
-|---|---|
-| `cli/src/tmux/config.ts` | shims (a); rebinds (b); aliases (c); `speedrun-attach`; `ZOOM_KEY_EVENT`; `expectedSinkEventsFor(args, liveHooks)`; export the rebind/alias tables so tests can assert coverage |
-| `cli/src/tmux/server.ts` | capture `liveHooks` via `show-hooks -g` at start + after restart; `attach()` **and** `absorbConfigErrors()` both spawn via `speedrun-attach` with `TMUX`/`TMUX_PANE` stripped from the child env |
-| `cli/src/tmux/observer.ts` | thread `liveHooks` into accounting calls |
-| `cli/src/tmux/detector.ts` | `ZOOM_KEY_EVENT → toggle-zoom` entry |
-| `cli/src/tmux/controller.ts` | first-attach `expectEvents` goes through the liveness-aware helper (minor) |
-| tests (§8.5) | `config.test.ts`, `observer.test.ts`, `detector.test.ts`, `live-server.integration.test.ts` |
+| File                         | Change                                                                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cli/src/tmux/config.ts`     | shims (a); rebinds (b); aliases (c); `speedrun-attach`; `ZOOM_KEY_EVENT`; `expectedSinkEventsFor(args, liveHooks)`; export the rebind/alias tables so tests can assert coverage                  |
+| `cli/src/tmux/server.ts`     | capture `liveHooks` via `show-hooks -g` at start + after restart; `attach()` **and** `absorbConfigErrors()` both spawn via `speedrun-attach` with `TMUX`/`TMUX_PANE` stripped from the child env |
+| `cli/src/tmux/observer.ts`   | thread `liveHooks` into accounting calls                                                                                                                                                         |
+| `cli/src/tmux/detector.ts`   | `ZOOM_KEY_EVENT → toggle-zoom` entry                                                                                                                                                             |
+| `cli/src/tmux/controller.ts` | first-attach `expectEvents` goes through the liveness-aware helper (minor)                                                                                                                       |
+| tests (§8.5)                 | `config.test.ts`, `observer.test.ts`, `detector.test.ts`, `live-server.integration.test.ts`                                                                                                      |
 
 No changes: `status-line.ts`, `engine/types.ts`, `challenge.ts`/`practice.ts` (practice drills gain
 the same fixes for free — its `commandName` matching consumes the same candidates), web `src/`.

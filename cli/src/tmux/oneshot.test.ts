@@ -160,15 +160,12 @@ describe('ONESHOT completeness — every documented input form has a channel (OS
 			}
 		}
 		for (const key of Object.keys(KEY_EXEMPTIONS)) {
-			expect(allKeys.has(key), `stale key exemption '${key}' — no command documents it`).toBe(
-				true
-			);
+			expect(allKeys.has(key), `stale key exemption '${key}' — no command documents it`).toBe(true);
 		}
 		for (const word of Object.keys(TYPED_EXEMPTIONS)) {
-			expect(
-				allWords.has(word),
-				`stale typed exemption '${word}' — no command documents it`
-			).toBe(true);
+			expect(allWords.has(word), `stale typed exemption '${word}' — no command documents it`).toBe(
+				true
+			);
 		}
 	});
 });

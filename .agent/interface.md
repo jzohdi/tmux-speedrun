@@ -60,44 +60,51 @@ Tests (handed to `tdd`, §10): SHIPPED — `cli/src/tmux/detector.test.ts`, `obs
 
 ```ts
 export type PaneInfo = {
-  paneId: string;          // #{pane_id}
-  sessionName: string;
-  windowIndex: number;
-  windowName: string;
-  active: boolean;
-  left: number; top: number; width: number; height: number;
-  zoomed: boolean;
-  inMode: boolean;         // KEEP: #{pane_in_mode}
-  mode: string | null;     // NEW:  #{pane_mode} — 'copy-mode' | 'view-mode' | 'clock-mode'
-                           //       | 'tree-mode' | ... | null when not in a mode
+	paneId: string; // #{pane_id}
+	sessionName: string;
+	windowIndex: number;
+	windowName: string;
+	active: boolean;
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+	zoomed: boolean;
+	inMode: boolean; // KEEP: #{pane_in_mode}
+	mode: string | null; // NEW:  #{pane_mode} — 'copy-mode' | 'view-mode' | 'clock-mode'
+	//       | 'tree-mode' | ... | null when not in a mode
 };
 
-export type TmuxState = { /* KEEP — unchanged shape */ };
+export type TmuxState = {
+	/* KEEP — unchanged shape */
+};
 
 export type StateDelta = {
-  // ... all existing fields KEEP, plus:
+	// ... all existing fields KEEP, plus:
 
-  /**
-   * NEW. Sink event names observed since the previous delta (installed hook names, one per
-   * occurrence, in file order), after runner-origin suppression (§4.3). May also contain
-   * synthetic events injected by the run loop (SERVER_DIED_EVENT). Always present ([] when none).
-   */
-  commandEvents: string[];
+	/**
+	 * NEW. Sink event names observed since the previous delta (installed hook names, one per
+	 * occurrence, in file order), after runner-origin suppression (§4.3). May also contain
+	 * synthetic events injected by the run loop (SERVER_DIED_EVENT). Always present ([] when none).
+	 */
+	commandEvents: string[];
 
-  /**
-   * NEW. Raw #{pane_mode} of a pane that newly entered a mode this delta (undefined when none).
-   * `enteredCopyMode` is REDEFINED as: enteredMode is 'copy-mode' or 'view-mode' (clock/tree
-   * modes no longer set it — they map to their own candidates, §5.2).
-   */
-  enteredMode?: string;
+	/**
+	 * NEW. Raw #{pane_mode} of a pane that newly entered a mode this delta (undefined when none).
+	 * `enteredCopyMode` is REDEFINED as: enteredMode is 'copy-mode' or 'view-mode' (clock/tree
+	 * modes no longer set it — they map to their own candidates, §5.2).
+	 */
+	enteredMode?: string;
 
-  /**
-   * NEW. Panes present in both snapshots whose (sessionName, windowIndex) changed —
-   * i.e. a pane was MOVED (join-pane / break-pane / swap-pane / swap-window). Always present.
-   */
-  movedPanes: { paneId: string;
-                from: { session: string; windowIndex: number };
-                to:   { session: string; windowIndex: number } }[];
+	/**
+	 * NEW. Panes present in both snapshots whose (sessionName, windowIndex) changed —
+	 * i.e. a pane was MOVED (join-pane / break-pane / swap-pane / swap-window). Always present.
+	 */
+	movedPanes: {
+		paneId: string;
+		from: { session: string; windowIndex: number };
+		to: { session: string; windowIndex: number };
+	}[];
 };
 ```
 
@@ -129,7 +136,7 @@ plus (all **SHIPPED** unless marked R2):
 - one `bind-key` line per `KEY_REBINDS` entry and one `command-alias` line per name in each
   `COMMAND_ALIASES` entry — `buildIsolatedConfig` derives these lines **solely from the exported
   tables** (§2.4), which are the single source of truth shared with `expectedSinkEventsFor`.
-- **R2**: the private runner alias `speedrun-attach=attach-session` (§2.4c). It is *not* part of
+- **R2**: the private runner alias `speedrun-attach=attach-session` (§2.4c). It is _not_ part of
   `COMMAND_ALIASES` (it writes no sink events; alias expansion does not recurse, so it reaches the
   real `attach-session` even though that name is itself intercepted).
 
@@ -176,6 +183,7 @@ export const ZOOM_KEY_EVENT = 'zoom-key';
 ```
 
 Constraints:
+
 - **Never** install hooks — **nor command aliases** (R2) — for commands the runner executes without
   accounting: `set-option`, `show-options`, `show-hooks`, `display-message`, `list-panes`,
   `refresh-client` (invariant SUP1, §9). These are the runner's guaranteed-silent commands
@@ -221,18 +229,18 @@ tests that exec shim spellings in such contexts must expect the rule-2 subset (�
 
 ```ts
 export type KeyRebind = {
-  key: string;                 // bind-key key spec as written in the conf (e.g. '0', "';'", 'C-o', 'Up')
-  repeat?: boolean;            // emit `bind-key -r` (kept for the arrow keys, matching tmux defaults)
-  events: readonly string[];   // sink lines written BEFORE the command runs (write-first)
-  command: string;             // the default command then run
+	key: string; // bind-key key spec as written in the conf (e.g. '0', "';'", 'C-o', 'Up')
+	repeat?: boolean; // emit `bind-key -r` (kept for the arrow keys, matching tmux defaults)
+	events: readonly string[]; // sink lines written BEFORE the command runs (write-first)
+	command: string; // the default command then run
 };
 export const KEY_REBINDS: readonly KeyRebind[];
 
 export type CommandAlias = {
-  names: readonly string[];    // every intercepted spelling (full command name first)
-  events: readonly string[];   // sink lines written BEFORE the command runs (write-first)
-  command: string;             // real command the alias runs; TRAILING USER ARGS ATTACH TO IT —
-                               // therefore it must be the LAST command in the alias expansion
+	names: readonly string[]; // every intercepted spelling (full command name first)
+	events: readonly string[]; // sink lines written BEFORE the command runs (write-first)
+	command: string; // real command the alias runs; TRAILING USER ARGS ATTACH TO IT —
+	// therefore it must be the LAST command in the alias expansion
 };
 export const COMMAND_ALIASES: readonly CommandAlias[];
 ```
@@ -244,57 +252,57 @@ no-op (`prefix+0` on the already-active window, `prefix+Left` with one pane) or 
 **(a) Nested-context shims** (R2 — override tmux's nested-session guard inside the run; the two
 commands the guard refuses when `$TMUX` is set, per the PR #46 feedback):
 
-| `names` | `events` | `command` | notes |
-|---|---|---|---|
-| `new-session`, `new` | `after-new-session` | `new-session -d` | `-d` legitimately bypasses the nested guard: a real detached session is created on the private server. `tmux new -s foo` → `new-session -d -s foo` (a duplicated `-d` is accepted). No trailing `display-message` may be chained — user args would attach to it instead of `new-session`. |
-| `attach-session`, `attach`, `a` | `after-attach-session` | `switch-client` | Inside the attach, "attach" morally is switching this client: `tmux attach -t x` → `switch-client -t x`; bare forms are a harmless same-session switch. An erroring invocation still advances via the write-first event. |
+| `names`                         | `events`               | `command`        | notes                                                                                                                                                                                                                                                                                     |
+| ------------------------------- | ---------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new-session`, `new`            | `after-new-session`    | `new-session -d` | `-d` legitimately bypasses the nested guard: a real detached session is created on the private server. `tmux new -s foo` → `new-session -d -s foo` (a duplicated `-d` is accepted). No trailing `display-message` may be chained — user args would attach to it instead of `new-session`. |
+| `attach-session`, `attach`, `a` | `after-attach-session` | `switch-client`  | Inside the attach, "attach" morally is switching this client: `tmux attach -t x` → `switch-client -t x`; bare forms are a harmless same-session switch. An erroring invocation still advances via the write-first event.                                                                  |
 
 **(b) Key rebinds** — full normative `KEY_REBINDS` contents (SHIPPED rows first, R2 rows marked):
 
-| key(s) | events | command | |
-|---|---|---|---|
-| `0`…`9` | `after-select-window` | `select-window -t :=<n>` | SHIPPED |
-| `n` / `p` / `l` | `after-next-window` / `after-previous-window` / `after-last-window` | `next-window` / `previous-window` / `last-window` | SHIPPED |
-| `';'` | `after-last-pane` | `last-pane` | SHIPPED |
-| `'{'` / `'}'` | `after-swap-pane` | `swap-pane -U` / `swap-pane -D` | SHIPPED |
-| `C-o` | `after-rotate-window` | `rotate-window` | SHIPPED |
-| `'!'` | `after-break-pane` | `break-pane` | SHIPPED |
-| `':'` | `after-command-prompt` | `command-prompt` | SHIPPED |
-| `t` | `after-clock-mode` | `clock-mode` | SHIPPED |
-| `w` / `s` | `after-choose-tree` | `choose-tree -Zw` / `choose-tree -Zs` | SHIPPED |
-| `'('` / `')'` | `after-switch-client` | `switch-client -p` / `switch-client -n` | SHIPPED |
-| `Up` `Down` `Left` `Right` (repeat: true) | `after-select-pane` | `select-pane -U/-D/-L/-R` | **R2** — feedback case 2: single-pane no-op still advances |
-| `o` | `after-select-pane` | `select-pane -t :.+` | **R2** |
-| `z` | `ZOOM_KEY_EVENT` | `resize-pane -Z` | **R2** — single-pane zoom is a no-op: no `zoomToggled`, so the event is the only channel |
-| `']'` | `after-paste-buffer` | `paste-buffer` | **R2** — errors with zero buffers |
-| `q` | `after-display-panes` | `display-panes` | **R2** — review comment: no fallback if hook dead |
-| `'?'` | `after-list-keys` | `list-keys` | **R2** — review comment: same |
+| key(s)                                    | events                                                              | command                                           |                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `0`…`9`                                   | `after-select-window`                                               | `select-window -t :=<n>`                          | SHIPPED                                                                                  |
+| `n` / `p` / `l`                           | `after-next-window` / `after-previous-window` / `after-last-window` | `next-window` / `previous-window` / `last-window` | SHIPPED                                                                                  |
+| `';'`                                     | `after-last-pane`                                                   | `last-pane`                                       | SHIPPED                                                                                  |
+| `'{'` / `'}'`                             | `after-swap-pane`                                                   | `swap-pane -U` / `swap-pane -D`                   | SHIPPED                                                                                  |
+| `C-o`                                     | `after-rotate-window`                                               | `rotate-window`                                   | SHIPPED                                                                                  |
+| `'!'`                                     | `after-break-pane`                                                  | `break-pane`                                      | SHIPPED                                                                                  |
+| `':'`                                     | `after-command-prompt`                                              | `command-prompt`                                  | SHIPPED                                                                                  |
+| `t`                                       | `after-clock-mode`                                                  | `clock-mode`                                      | SHIPPED                                                                                  |
+| `w` / `s`                                 | `after-choose-tree`                                                 | `choose-tree -Zw` / `choose-tree -Zs`             | SHIPPED                                                                                  |
+| `'('` / `')'`                             | `after-switch-client`                                               | `switch-client -p` / `switch-client -n`           | SHIPPED                                                                                  |
+| `Up` `Down` `Left` `Right` (repeat: true) | `after-select-pane`                                                 | `select-pane -U/-D/-L/-R`                         | **R2** — feedback case 2: single-pane no-op still advances                               |
+| `o`                                       | `after-select-pane`                                                 | `select-pane -t :.+`                              | **R2**                                                                                   |
+| `z`                                       | `ZOOM_KEY_EVENT`                                                    | `resize-pane -Z`                                  | **R2** — single-pane zoom is a no-op: no `zoomToggled`, so the event is the only channel |
+| `']'`                                     | `after-paste-buffer`                                                | `paste-buffer`                                    | **R2** — errors with zero buffers                                                        |
+| `q`                                       | `after-display-panes`                                               | `display-panes`                                   | **R2** — review comment: no fallback if hook dead                                        |
+| `'?'`                                     | `after-list-keys`                                                   | `list-keys`                                       | **R2** — review comment: same                                                            |
 
 **(c) Typed-form aliases** — full normative `COMMAND_ALIASES` contents = the shims (a) plus:
 
-| `names` | `events` | `command` | |
-|---|---|---|---|
-| `show-buffer`, `showb` | `after-show-buffer` | `show-buffer` | SHIPPED |
-| `source-file`, `source` | `after-source-file` | `source-file` | SHIPPED |
-| `kill-session` | `after-kill-session` | `kill-session` | SHIPPED |
-| `select-window`, `selectw` | `after-select-window` | `select-window` | SHIPPED |
-| `next-window`, `next` | `after-next-window` | `next-window` | SHIPPED |
-| `previous-window`, `prev` | `after-previous-window` | `previous-window` | SHIPPED |
-| `last-window`, `last` | `after-last-window` | `last-window` | SHIPPED |
-| `list-sessions`, `ls` | `after-list-sessions` | `list-sessions` | **R2** |
-| `list-windows`, `lsw` | `after-list-windows` | `list-windows` | **R2** |
-| `list-buffers`, `lsb` | `after-list-buffers` | `list-buffers` | **R2** |
-| `delete-buffer`, `deleteb` | `after-delete-buffer` | `delete-buffer` | **R2** — errors with zero buffers |
-| `capture-pane`, `capturep` | `after-capture-pane` | `capture-pane` | **R2** |
-| `join-pane`, `joinp` | `after-join-pane` | `join-pane` | **R2** — errors with one window |
-| `swap-window`, `swapw` | `after-swap-window` | `swap-window` | **R2** — errors with one window |
-| `list-keys`, `lsk` | `after-list-keys` | `list-keys` | **R2** |
+| `names`                    | `events`                | `command`         |                                   |
+| -------------------------- | ----------------------- | ----------------- | --------------------------------- |
+| `show-buffer`, `showb`     | `after-show-buffer`     | `show-buffer`     | SHIPPED                           |
+| `source-file`, `source`    | `after-source-file`     | `source-file`     | SHIPPED                           |
+| `kill-session`             | `after-kill-session`    | `kill-session`    | SHIPPED                           |
+| `select-window`, `selectw` | `after-select-window`   | `select-window`   | SHIPPED                           |
+| `next-window`, `next`      | `after-next-window`     | `next-window`     | SHIPPED                           |
+| `previous-window`, `prev`  | `after-previous-window` | `previous-window` | SHIPPED                           |
+| `last-window`, `last`      | `after-last-window`     | `last-window`     | SHIPPED                           |
+| `list-sessions`, `ls`      | `after-list-sessions`   | `list-sessions`   | **R2**                            |
+| `list-windows`, `lsw`      | `after-list-windows`    | `list-windows`    | **R2**                            |
+| `list-buffers`, `lsb`      | `after-list-buffers`    | `list-buffers`    | **R2**                            |
+| `delete-buffer`, `deleteb` | `after-delete-buffer`   | `delete-buffer`   | **R2** — errors with zero buffers |
+| `capture-pane`, `capturep` | `after-capture-pane`    | `capture-pane`    | **R2**                            |
+| `join-pane`, `joinp`       | `after-join-pane`       | `join-pane`       | **R2** — errors with one window   |
+| `swap-window`, `swapw`     | `after-swap-window`     | `swap-window`     | **R2** — errors with one window   |
+| `list-keys`, `lsk`         | `after-list-keys`       | `list-keys`       | **R2**                            |
 
 Plus the private, event-free runner alias (R2), NOT in `COMMAND_ALIASES`:
 
 ```ts
 /** The only spelling the runner may use to attach a real client (§3). */
-export const RUNNER_ATTACH_COMMAND = 'speedrun-attach';   // conf: speedrun-attach=attach-session
+export const RUNNER_ATTACH_COMMAND = 'speedrun-attach'; // conf: speedrun-attach=attach-session
 ```
 
 `kill-server` needs no alias (`SERVER_DIED_EVENT` synthesis covers it). Aliasing
@@ -312,36 +320,38 @@ lines — this ordering is load-bearing and must be noted in the code.
 
 ```ts
 export type IsolatedTmuxServer = {
-  socketName: string;
-  confPath: string;
-  eventSink: string;                       // KEEP — plain file path; readable even when server dead
-  exec(args: string[]): Promise<TmuxResult>;
+	socketName: string;
+	confPath: string;
+	eventSink: string; // KEEP — plain file path; readable even when server dead
+	exec(args: string[]): Promise<TmuxResult>;
 
-  /** ADAPT: resolves with the tmux client's exit code when the attach ends (any reason). */
-  attach(target?: string): Promise<{ code: number | null }>;
+	/** ADAPT: resolves with the tmux client's exit code when the attach ends (any reason). */
+	attach(target?: string): Promise<{ code: number | null }>;
 
-  /** NEW: true iff the private server responds on this socket (e.g. list-sessions exits 0). */
-  isAlive(): Promise<boolean>;
+	/** NEW: true iff the private server responds on this socket (e.g. list-sessions exits 0). */
+	isAlive(): Promise<boolean>;
 
-  /**
-   * NEW: idempotent recovery primitive. Ensure the private server is running on the SAME socket
-   * (a plain exec with `-f` re-sources the conf, restarting a dead server) and ≥ 1 session exists
-   * (create `new-session -d -s <session ?? initialSession>` when empty). Reports what it did.
-   * Never touches any other socket (ISO1). Must not throw on an already-healthy server.
-   */
-  ensureRunning(opts?: { session?: string }): Promise<{ restartedServer: boolean; createdSession: boolean }>;
+	/**
+	 * NEW: idempotent recovery primitive. Ensure the private server is running on the SAME socket
+	 * (a plain exec with `-f` re-sources the conf, restarting a dead server) and ≥ 1 session exists
+	 * (create `new-session -d -s <session ?? initialSession>` when empty). Reports what it did.
+	 * Never touches any other socket (ISO1). Must not throw on an already-healthy server.
+	 */
+	ensureRunning(opts?: {
+		session?: string;
+	}): Promise<{ restartedServer: boolean; createdSession: boolean }>;
 
-  /**
-   * R2: the SINK_HOOKS entries the running tmux actually accepted (its settable-hook whitelist
-   * varies by version). Captured via one `show-hooks -g` exec after config load at server start
-   * (next to absorbConfigErrors) and RE-CAPTURED after every ensureRunning restart — implement as
-   * a getter over mutable state. Parse: entry h is live iff some output line starts with `h ` or
-   * `h[`. On capture failure (non-zero exit / unparseable / throw) fall back to the FULL
-   * SINK_HOOKS set (= the shipped static behavior; document this in the code).
-   */
-  liveHooks: ReadonlySet<string>;
+	/**
+	 * R2: the SINK_HOOKS entries the running tmux actually accepted (its settable-hook whitelist
+	 * varies by version). Captured via one `show-hooks -g` exec after config load at server start
+	 * (next to absorbConfigErrors) and RE-CAPTURED after every ensureRunning restart — implement as
+	 * a getter over mutable state. Parse: entry h is live iff some output line starts with `h ` or
+	 * `h[`. On capture failure (non-zero exit / unparseable / throw) fall back to the FULL
+	 * SINK_HOOKS set (= the shipped static behavior; document this in the code).
+	 */
+	liveHooks: ReadonlySet<string>;
 
-  teardown(): Promise<void>;               // KEEP — semantics, idempotency, signal handlers unchanged
+	teardown(): Promise<void>; // KEEP — semantics, idempotency, signal handlers unchanged
 };
 ```
 
@@ -361,12 +371,14 @@ R2 — runner attach spelling and nested-launch hardening (plan §8.3a, critical
    *  guard when the CLI itself is launched from inside a user's tmux. */
   export function sanitizedClientEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
   ```
+
 - `createIsolatedTmuxServer(opts?: { initialSession?: string; spawnImpl?: typeof spawn })` —
   R2 test seam: `spawnImpl` (default `node:child_process.spawn`) is used by the two client spawns
   above, so tests can record their args/env (§10-R2 regression: both use `speedrun-attach` +
   `sanitizedClientEnv`). The `exit`-backstop spawn keeps using the real `spawn`.
 
 Notes:
+
 - The temp dir (conf + sink) lives until `teardown()`; server restarts reuse it.
 - Signal handling KEEP verbatim: SIGINT/SIGTERM/SIGHUP → teardown → exit(130); `exit` backstop
   unchanged; teardown removes the process-wide handlers (SHIPPED — stale-handler orphan fix).
@@ -387,62 +399,71 @@ Notes:
 
 ```ts
 export class TmuxObserver {
-  constructor(server: IsolatedTmuxServer);
+	constructor(server: IsolatedTmuxServer);
 
-  /**
-   * NEW (R2-amended). Accounted exec: pushes expectedSinkEventsFor(args, this.server.liveHooks)
-   * onto the suppression queue, then delegates to server.exec(args). EVERY runner-origin exec
-   * that can fire an installed hook OR alias interceptor while a run is live MUST go through
-   * this (SUP1). snapshot() uses it internally. Threading liveHooks per call (not caching a
-   * snapshot of it) is required: the set changes after an ensureRunning restart.
-   */
-  exec(args: string[]): Promise<TmuxResult>;
+	/**
+	 * NEW (R2-amended). Accounted exec: pushes expectedSinkEventsFor(args, this.server.liveHooks)
+	 * onto the suppression queue, then delegates to server.exec(args). EVERY runner-origin exec
+	 * that can fire an installed hook OR alias interceptor while a run is live MUST go through
+	 * this (SUP1). snapshot() uses it internally. Threading liveHooks per call (not caching a
+	 * snapshot of it) is required: the set changes after an ensureRunning restart.
+	 */
+	exec(args: string[]): Promise<TmuxResult>;
 
-  /**
-   * NEW. Suppression accounting WITHOUT executing anything: pushes the given event names onto the
-   * suppression queue (§4.3), same TTL and size cap as exec(). For runner-origin actions that
-   * fire hooks but are not observer execs — the run loop's first server.attach() (a spawned
-   * interactive tmux client) is the canonical caller (loop step 6, §6.2).
-   */
-  expectEvents(events: string[]): void;
+	/**
+	 * NEW. Suppression accounting WITHOUT executing anything: pushes the given event names onto the
+	 * suppression queue (§4.3), same TTL and size cap as exec(). For runner-origin actions that
+	 * fire hooks but are not observer execs — the run loop's first server.attach() (a spawned
+	 * interactive tmux client) is the canonical caller (loop step 6, §6.2).
+	 */
+	expectEvents(events: string[]): void;
 
-  /** ADAPT: PANE_FORMAT gains #{pane_mode} (last field) → PaneInfo.mode ('' → null). */
-  snapshot(): Promise<TmuxState>;
+	/** ADAPT: PANE_FORMAT gains #{pane_mode} (last field) → PaneInfo.mode ('' → null). */
+	snapshot(): Promise<TmuxState>;
 
-  /**
-   * ADAPT: pure. ctx.commandEvents (default []) is copied into the delta verbatim; computes
-   * enteredMode / redefined enteredCopyMode (§1) and movedPanes. Everything else unchanged.
-   */
-  diff(prev: TmuxState, next: TmuxState,
-       ctx?: { seedInput?: string; commandEvents?: string[] }): StateDelta;
+	/**
+	 * ADAPT: pure. ctx.commandEvents (default []) is copied into the delta verbatim; computes
+	 * enteredMode / redefined enteredCopyMode (§1) and movedPanes. Everything else unchanged.
+	 */
+	diff(
+		prev: TmuxState,
+		next: TmuxState,
+		ctx?: { seedInput?: string; commandEvents?: string[] }
+	): StateDelta;
 
-  /**
-   * ADAPT: each tick = read new sink lines (offset tail, §4.2) → suppression filter (§4.3) →
-   * snapshot → diff(baseline, next, { commandEvents, seedInput: getSeedInput?.() }) → if
-   * hasChange, onDelta → baseline = next. Uses the OBSERVER-LEVEL baseline shared with
-   * resetBaseline()/drainDelta() (no more watch-local `prev`). Poll remains the only scheduler
-   * (150ms default); the sink adds events, not extra timers.
-   */
-  watch(onDelta: (d: StateDelta) => void,
-        opts?: { intervalMs?: number; getSeedInput?: () => string | undefined }): { stop(): void };
+	/**
+	 * ADAPT: each tick = read new sink lines (offset tail, §4.2) → suppression filter (§4.3) →
+	 * snapshot → diff(baseline, next, { commandEvents, seedInput: getSeedInput?.() }) → if
+	 * hasChange, onDelta → baseline = next. Uses the OBSERVER-LEVEL baseline shared with
+	 * resetBaseline()/drainDelta() (no more watch-local `prev`). Poll remains the only scheduler
+	 * (150ms default); the sink adds events, not extra timers.
+	 */
+	watch(
+		onDelta: (d: StateDelta) => void,
+		opts?: { intervalMs?: number; getSeedInput?: () => string | undefined }
+	): { stop(): void };
 
-  /**
-   * NEW. Recovery-boundary reset: wait settleMs (default 300) for straggling async run-shell
-   * writes, fast-forward the sink offset to EOF (discarding unread lines), clear the suppression
-   * queue, snapshot, and set it as the baseline. After this, only actions performed from now on
-   * can produce deltas. Never throws (dead server → baseline = EMPTY_STATE).
-   */
-  resetBaseline(opts?: { settleMs?: number }): Promise<void>;
+	/**
+	 * NEW. Recovery-boundary reset: wait settleMs (default 300) for straggling async run-shell
+	 * writes, fast-forward the sink offset to EOF (discarding unread lines), clear the suppression
+	 * queue, snapshot, and set it as the baseline. After this, only actions performed from now on
+	 * can produce deltas. Never throws (dead server → baseline = EMPTY_STATE).
+	 */
+	resetBaseline(opts?: { settleMs?: number }): Promise<void>;
 
-  /**
-   * NEW. Exit-classification read, called by the run loop after the attach ends and the watcher
-   * is stopped. Waits settleMs (default 300), reads remaining sink lines (suppression-filtered),
-   * appends opts.extraEvents (synthetic, NOT suppression-filtered), snapshots — or uses
-   * EMPTY_STATE = { sessions:[], windows:[], panes:[], activePaneId:null, activeWindow:null,
-   * buffers:[] } when the server is dead — diffs against the baseline, advances the baseline,
-   * and returns the delta (even when hasChange is false). Never throws.
-   */
-  drainDelta(opts?: { settleMs?: number; extraEvents?: string[]; seedInput?: string }): Promise<StateDelta>;
+	/**
+	 * NEW. Exit-classification read, called by the run loop after the attach ends and the watcher
+	 * is stopped. Waits settleMs (default 300), reads remaining sink lines (suppression-filtered),
+	 * appends opts.extraEvents (synthetic, NOT suppression-filtered), snapshots — or uses
+	 * EMPTY_STATE = { sessions:[], windows:[], panes:[], activePaneId:null, activeWindow:null,
+	 * buffers:[] } when the server is dead — diffs against the baseline, advances the baseline,
+	 * and returns the delta (even when hasChange is false). Never throws.
+	 */
+	drainDelta(opts?: {
+		settleMs?: number;
+		extraEvents?: string[];
+		seedInput?: string;
+	}): Promise<StateDelta>;
 }
 ```
 
@@ -489,48 +510,48 @@ export const SERVER_DIED_EVENT = 'speedrun-server-died';
 
 ### 5.1 Event → candidate table (NEW, evaluated for every entry of `delta.commandEvents`)
 
-| sink event | candidates added |
-|---|---|
-| `after-select-window` | `select-window` **(defect 2 fix — fires even when the target window was already active)** |
-| `after-next-window` | `next-window` |
-| `after-previous-window` | `previous-window` |
-| `after-last-window` | `last-window` |
-| `after-select-pane` | `select-pane`, `last-pane` |
-| `after-last-pane` | `last-pane` |
-| `after-list-sessions` | `list-sessions` |
-| `after-list-windows` | `list-windows` |
-| `after-choose-tree` | `list-windows`, `list-sessions` (prefix+w / prefix+s) |
-| `after-list-keys` | `list-keys` |
-| `after-list-buffers` | `list-buffers` |
-| `after-show-buffer` | `show-buffer` |
-| `after-delete-buffer` | `delete-buffer` |
-| `after-capture-pane` | `capture-pane` |
-| `after-paste-buffer` | `paste-buffer` |
-| `after-copy-mode` | `copy-mode` |
-| `after-clock-mode` | `show-time` |
-| `after-display-panes` | `display-panes` |
-| `after-command-prompt` | `command-prompt` |
-| `after-source-file` | `reload-config` |
-| `after-split-window` | `split-vertical`, `split-horizontal` |
-| `after-new-window` | `new-window` |
-| `after-new-session` | `new-session` |
-| `after-break-pane` | `break-pane` |
-| `after-join-pane` | `join-pane` |
-| `after-swap-pane` | `swap-pane` |
-| `after-swap-window` | `swap-window` |
-| `after-rotate-window` | `rotate-panes` |
-| `after-kill-pane` | `kill-pane` |
-| `after-kill-window` | `kill-window` |
-| `after-kill-session` | `kill-session` |
-| `after-rename-window` | `rename-window` (SHIPPED — bare form for practice matching; challenge answers are `rename-*:<text>`, §5.2.4) |
-| `after-rename-session` | `rename-session` (SHIPPED — same) |
-| `client-detached` | `detach` **(defect 3 — detach becomes detectable)** |
-| `client-attached` | `attach-session` |
-| `after-attach-session` | `attach-session` |
-| `after-switch-client` | `attach-session`, `next-session`, `previous-session` |
-| `SERVER_DIED_EVENT` | `kill-server`, `kill-session` |
-| `ZOOM_KEY_EVENT` (`zoom-key`) | `toggle-zoom` **(R2 — the only new detector entry this round)** |
-| any other event (`WINDOW_NAV_TRIGGER`, `session-closed`, `window-renamed`, `pane-mode-changed`, `pane-focus-in`, unknown) | *nothing* (trigger-only) |
+| sink event                                                                                                                | candidates added                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `after-select-window`                                                                                                     | `select-window` **(defect 2 fix — fires even when the target window was already active)**                    |
+| `after-next-window`                                                                                                       | `next-window`                                                                                                |
+| `after-previous-window`                                                                                                   | `previous-window`                                                                                            |
+| `after-last-window`                                                                                                       | `last-window`                                                                                                |
+| `after-select-pane`                                                                                                       | `select-pane`, `last-pane`                                                                                   |
+| `after-last-pane`                                                                                                         | `last-pane`                                                                                                  |
+| `after-list-sessions`                                                                                                     | `list-sessions`                                                                                              |
+| `after-list-windows`                                                                                                      | `list-windows`                                                                                               |
+| `after-choose-tree`                                                                                                       | `list-windows`, `list-sessions` (prefix+w / prefix+s)                                                        |
+| `after-list-keys`                                                                                                         | `list-keys`                                                                                                  |
+| `after-list-buffers`                                                                                                      | `list-buffers`                                                                                               |
+| `after-show-buffer`                                                                                                       | `show-buffer`                                                                                                |
+| `after-delete-buffer`                                                                                                     | `delete-buffer`                                                                                              |
+| `after-capture-pane`                                                                                                      | `capture-pane`                                                                                               |
+| `after-paste-buffer`                                                                                                      | `paste-buffer`                                                                                               |
+| `after-copy-mode`                                                                                                         | `copy-mode`                                                                                                  |
+| `after-clock-mode`                                                                                                        | `show-time`                                                                                                  |
+| `after-display-panes`                                                                                                     | `display-panes`                                                                                              |
+| `after-command-prompt`                                                                                                    | `command-prompt`                                                                                             |
+| `after-source-file`                                                                                                       | `reload-config`                                                                                              |
+| `after-split-window`                                                                                                      | `split-vertical`, `split-horizontal`                                                                         |
+| `after-new-window`                                                                                                        | `new-window`                                                                                                 |
+| `after-new-session`                                                                                                       | `new-session`                                                                                                |
+| `after-break-pane`                                                                                                        | `break-pane`                                                                                                 |
+| `after-join-pane`                                                                                                         | `join-pane`                                                                                                  |
+| `after-swap-pane`                                                                                                         | `swap-pane`                                                                                                  |
+| `after-swap-window`                                                                                                       | `swap-window`                                                                                                |
+| `after-rotate-window`                                                                                                     | `rotate-panes`                                                                                               |
+| `after-kill-pane`                                                                                                         | `kill-pane`                                                                                                  |
+| `after-kill-window`                                                                                                       | `kill-window`                                                                                                |
+| `after-kill-session`                                                                                                      | `kill-session`                                                                                               |
+| `after-rename-window`                                                                                                     | `rename-window` (SHIPPED — bare form for practice matching; challenge answers are `rename-*:<text>`, §5.2.4) |
+| `after-rename-session`                                                                                                    | `rename-session` (SHIPPED — same)                                                                            |
+| `client-detached`                                                                                                         | `detach` **(defect 3 — detach becomes detectable)**                                                          |
+| `client-attached`                                                                                                         | `attach-session`                                                                                             |
+| `after-attach-session`                                                                                                    | `attach-session`                                                                                             |
+| `after-switch-client`                                                                                                     | `attach-session`, `next-session`, `previous-session`                                                         |
+| `SERVER_DIED_EVENT`                                                                                                       | `kill-server`, `kill-session`                                                                                |
+| `ZOOM_KEY_EVENT` (`zoom-key`)                                                                                             | `toggle-zoom` **(R2 — the only new detector entry this round)**                                              |
+| any other event (`WINDOW_NAV_TRIGGER`, `session-closed`, `window-renamed`, `pane-mode-changed`, `pane-focus-in`, unknown) | _nothing_ (trigger-only)                                                                                     |
 
 All candidate strings above are exact `TMUX_COMMANDS` canonical names (note `rotate-window` →
 `rotate-panes`, `clock-mode` → `show-time`, `source-file` → `reload-config`, `choose-tree` → the
@@ -567,20 +588,20 @@ state-diff set remains as the no-events safety net.
 
 ```ts
 export type StepEngine = {
-  isComplete(): boolean;
-  /** Current step for display; index is 0-based. Only valid while !isComplete(). */
-  view(): { prompt: string; index: number; total: number };
-  /** The step object handed to deriveCandidates (challenge: the decrypted step;
-   *  practice: { prompt, seedInput } pseudo-step as today). */
-  detectionStep(): DecryptedStep;
-  seedInput(): string | undefined;
-  /**
-   * Try to advance one step. Challenge: session.submitAnswer(c) for each candidate in order,
-   * first success wins. Practice: 'command' step ⇒ candidates.includes(step.commandName);
-   * 'copy-mode-action' step ⇒ delta.enteredCopyMode || delta.bufferAdded !== undefined ||
-   * delta.pasteObserved === true (unchanged semantics). Returns true iff advanced.
-   */
-  trySubmit(candidates: string[], delta: StateDelta): Promise<boolean>;
+	isComplete(): boolean;
+	/** Current step for display; index is 0-based. Only valid while !isComplete(). */
+	view(): { prompt: string; index: number; total: number };
+	/** The step object handed to deriveCandidates (challenge: the decrypted step;
+	 *  practice: { prompt, seedInput } pseudo-step as today). */
+	detectionStep(): DecryptedStep;
+	seedInput(): string | undefined;
+	/**
+	 * Try to advance one step. Challenge: session.submitAnswer(c) for each candidate in order,
+	 * first success wins. Practice: 'command' step ⇒ candidates.includes(step.commandName);
+	 * 'copy-mode-action' step ⇒ delta.enteredCopyMode || delta.bufferAdded !== undefined ||
+	 * delta.pasteObserved === true (unchanged semantics). Returns true iff advanced.
+	 */
+	trySubmit(candidates: string[], delta: StateDelta): Promise<boolean>;
 };
 ```
 
@@ -588,18 +609,18 @@ export type StepEngine = {
 
 ```ts
 export type RunLoopDeps = {
-  server: Pick<IsolatedTmuxServer, 'attach' | 'isAlive' | 'ensureRunning' | 'liveHooks'>;  // R2: + liveHooks
-  observer: Pick<TmuxObserver, 'watch' | 'resetBaseline' | 'drainDelta' | 'exec' | 'expectEvents'>;
-  ui: StatusLine;
-  engine: StepEngine;
-  /** One-line notices printed to the launching terminal between attaches. Default: no-op. */
-  notify?: (message: string) => void;
-  /** Injectable time for tests. Defaults: real setTimeout / Date.now. */
-  clock?: { sleep(ms: number): Promise<void>; now(): number };
-  reattachDelayMs?: number;          // default 1000 — the Ctrl-C abort window
-  rapidExitMs?: number;              // default 2000 — attach shorter than this counts toward the guard
-  maxRapidExitsWithoutProgress?: number; // default 3 — then abort (tight-loop guard)
-  sessionName?: string;              // recovery session name (default server's initialSession)
+	server: Pick<IsolatedTmuxServer, 'attach' | 'isAlive' | 'ensureRunning' | 'liveHooks'>; // R2: + liveHooks
+	observer: Pick<TmuxObserver, 'watch' | 'resetBaseline' | 'drainDelta' | 'exec' | 'expectEvents'>;
+	ui: StatusLine;
+	engine: StepEngine;
+	/** One-line notices printed to the launching terminal between attaches. Default: no-op. */
+	notify?: (message: string) => void;
+	/** Injectable time for tests. Defaults: real setTimeout / Date.now. */
+	clock?: { sleep(ms: number): Promise<void>; now(): number };
+	reattachDelayMs?: number; // default 1000 — the Ctrl-C abort window
+	rapidExitMs?: number; // default 2000 — attach shorter than this counts toward the guard
+	maxRapidExitsWithoutProgress?: number; // default 3 — then abort (tight-loop guard)
+	sessionName?: string; // recovery session name (default server's initialSession)
 };
 
 export type RunLoopResult = { completed: boolean; aborted: boolean; abortReason?: string };
@@ -661,6 +682,7 @@ even when the client then exits within `rapidExitMs` and the drain itself advanc
 guard must never abort a run the user is actively progressing.
 
 Semantics pinned by the issue:
+
 - The loop **never** treats a client exit as end-of-run. It ends only via: completion (steps done),
   the rapid-exit guard, or process death (Ctrl-C/SIGTERM/SIGHUP → server.ts signal handlers →
   teardown → exit; the loop itself never observes those).
@@ -674,21 +696,30 @@ Semantics pinned by the issue:
 export type ChallengeRunResult = { completed: boolean; finish?: FinishResponse; aborted?: boolean };
 
 export class ChallengeController {
-  constructor(args: { server: IsolatedTmuxServer; observer: TmuxObserver;
-                      session: CliChallengeSession; ui: StatusLine;
-                      notify?: (m: string) => void });
-  /** Build the CliChallengeSession-backed StepEngine, delegate to runAttachLoop, then:
-   *  completed → { completed: true, finish: await session.finish() };
-   *  aborted   → { completed: false, aborted: true }. */
-  run(): Promise<ChallengeRunResult>;
+	constructor(args: {
+		server: IsolatedTmuxServer;
+		observer: TmuxObserver;
+		session: CliChallengeSession;
+		ui: StatusLine;
+		notify?: (m: string) => void;
+	});
+	/** Build the CliChallengeSession-backed StepEngine, delegate to runAttachLoop, then:
+	 *  completed → { completed: true, finish: await session.finish() };
+	 *  aborted   → { completed: false, aborted: true }. */
+	run(): Promise<ChallengeRunResult>;
 }
 
 export class PracticeController {
-  constructor(args: { server: IsolatedTmuxServer; observer: TmuxObserver;
-                      item: PracticeItem; ui: StatusLine; notify?: (m: string) => void });
-  /** PracticeItem-backed StepEngine + runAttachLoop. Detaching NO LONGER ends the item —
-   *  the loop re-attaches (practice detach/kill-session drills become completable). */
-  run(): Promise<{ completed: boolean; aborted?: boolean }>;
+	constructor(args: {
+		server: IsolatedTmuxServer;
+		observer: TmuxObserver;
+		item: PracticeItem;
+		ui: StatusLine;
+		notify?: (m: string) => void;
+	});
+	/** PracticeItem-backed StepEngine + runAttachLoop. Detaching NO LONGER ends the item —
+	 *  the loop re-attaches (practice detach/kill-session drills become completable). */
+	run(): Promise<{ completed: boolean; aborted?: boolean }>;
 }
 ```
 
@@ -704,16 +735,16 @@ Class shape and constructor KEEP. New behavior:
 
 ```ts
 class StatusLine {
-  /** set -g @speedrun_prompt '[i+1/total] <sanitized prompt>' — the config's static status-left
-   *  references it (§2.1); tmux owns the redraw. NEVER writes status-left. Overload/keep the
-   *  (prompt, stepIndex, totalSteps) signature; also accept a view object { prompt, index, total }. */
-  setPrompt(view: { prompt: string; index: number; total: number }): Promise<void>;
-  setPrompt(prompt: string, stepIndex: number, totalSteps: number): Promise<void>;
+	/** set -g @speedrun_prompt '[i+1/total] <sanitized prompt>' — the config's static status-left
+	 *  references it (§2.1); tmux owns the redraw. NEVER writes status-left. Overload/keep the
+	 *  (prompt, stepIndex, totalSteps) signature; also accept a view object { prompt, index, total }. */
+	setPrompt(view: { prompt: string; index: number; total: number }): Promise<void>;
+	setPrompt(prompt: string, stepIndex: number, totalSteps: number): Promise<void>;
 
-  flash(message: string): Promise<void>;   // KEEP (display-message)
+	flash(message: string): Promise<void>; // KEEP (display-message)
 
-  /** set -g @speedrun_prompt '' */
-  clear(): Promise<void>;
+	/** set -g @speedrun_prompt '' */
+	clear(): Promise<void>;
 }
 ```
 
@@ -753,7 +784,7 @@ Exit codes, arg validation, preflight (tmux ≥ 3.0, TTY): KEEP.
   loop re-asserts the current prompt before every attach (loop step 2).
 - **SUP1 (R2-amended)** — every runner-origin action that fires an installed hook **or an alias
   interceptor** is accounted with the exact per-machine multiset (`expectedSinkEventsFor(args,
-  liveHooks)`, §2.3): execs go through the observer's `exec()`, non-exec actions (the first
+liveHooks)`, §2.3): execs go through the observer's `exec()`, non-exec actions (the first
   attach's spawned client) through `expectEvents()` — or the events are neutralized by a
   subsequent `resetBaseline` (the only cover for `ensureRunning`'s internal execs, §2.4). The
   hook AND alias sets never cover the runner's guaranteed-silent commands (`set-option`,
@@ -796,7 +827,7 @@ Unit (vitest, `cd cli && npm test`, no tmux/network):
   ui.clear + suppressed detach-client, loop returns completed without re-attach; rapid-exit guard
   aborts after N, but a watcher-callback advance during a rapid attach resets it
   (`advancedThisIteration` counts mid-attach advances); `expectEvents(['client-attached',
-  'after-attach-session'])` called on the first attach only, never on recovery re-attaches.
+'after-attach-session'])` called on the first attach only, never on recovery re-attaches.
 - `config.test.ts` (new): generated text contains `exit-empty off`, `@speedrun_prompt` default +
   static `status-left '#{@speedrun_prompt}'`, one hook line per `SINK_HOOKS` entry, no hook for
   `set-option`/`display-message`/`list-panes`; `expectedSinkEventsFor` table (§2.3).

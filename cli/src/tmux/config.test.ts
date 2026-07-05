@@ -151,7 +151,7 @@ describe('SINK_HOOKS + generated hook lines (interface §2.2)', () => {
 		}
 	});
 
-	it("the after-select-window hook writes the neutral WINDOW_NAV_TRIGGER, never its own name (defect 2)", () => {
+	it('the after-select-window hook writes the neutral WINDOW_NAV_TRIGGER, never its own name (defect 2)', () => {
 		expect(WINDOW_NAV_TRIGGER).toBe('window-nav-trigger');
 		const text = buildIsolatedConfig({ eventSink: SINK }).text;
 		const line = text.split('\n').find((l) => l.startsWith('set-hook -g after-select-window '));
@@ -263,10 +263,7 @@ describe('KEY_REBINDS — write-first key rebinds (R2, interface §2.4b)', () =>
 					l.includes(rebind.command) &&
 					rebind.events.every((e) => l.includes(`echo ${e} >> ${SINK}`))
 			);
-			expect(
-				line,
-				`missing bind-key line for key ${rebind.key} (${rebind.command})`
-			).toBeDefined();
+			expect(line, `missing bind-key line for key ${rebind.key} (${rebind.command})`).toBeDefined();
 			if (rebind.repeat) {
 				expect(line, `bind-key line for ${rebind.key} must carry -r`).toContain('-r');
 			}
@@ -344,18 +341,19 @@ describe('COMMAND_ALIASES — typed-form interceptors + nested-context shims (R2
 		}
 	});
 
-	it("defines the private runner alias speedrun-attach=attach-session, OUTSIDE the event-writing tables", () => {
+	it('defines the private runner alias speedrun-attach=attach-session, OUTSIDE the event-writing tables', () => {
 		// The runner's own attach must reach the REAL attach-session (the
 		// user-facing spelling is shimmed to switch-client); alias expansion does
 		// not recurse, so this exact-name alias is the escape hatch (§2.4).
-		expect(RUNNER_ATTACH_COMMAND, "config.ts must export RUNNER_ATTACH_COMMAND (R2)").toBe(
+		expect(RUNNER_ATTACH_COMMAND, 'config.ts must export RUNNER_ATTACH_COMMAND (R2)').toBe(
 			'speedrun-attach'
 		);
 		expect(text).toContain('speedrun-attach=attach-session');
 		const names = (COMMAND_ALIASES ?? []).flatMap((a) => [...a.names]);
-		expect(names, 'speedrun-attach writes no events and must not be in COMMAND_ALIASES').not.toContain(
-			'speedrun-attach'
-		);
+		expect(
+			names,
+			'speedrun-attach writes no events and must not be in COMMAND_ALIASES'
+		).not.toContain('speedrun-attach');
 	});
 });
 
@@ -369,10 +367,9 @@ describe('COMMAND_ALIASES — typed-form interceptors + nested-context shims (R2
 
 describe('expectedSinkEventsFor(args, liveHooks) — exact per-machine multiset (R2, interface §2.3)', () => {
 	const events = (args: string[], live: string[]): string[] => {
-		expect(
-			typeof expectedSinkEventsFor,
-			'config.ts must export expectedSinkEventsFor'
-		).toBe('function');
+		expect(typeof expectedSinkEventsFor, 'config.ts must export expectedSinkEventsFor').toBe(
+			'function'
+		);
 		return [...expectedSinkEventsFor!(args, new Set(live))].sort();
 	};
 
@@ -392,9 +389,7 @@ describe('expectedSinkEventsFor(args, liveHooks) — exact per-machine multiset 
 			'after-list-sessions',
 			'after-list-sessions'
 		]);
-		expect(events(['list-sessions', '-F', '#{session_name}'], [])).toEqual([
-			'after-list-sessions'
-		]);
+		expect(events(['list-sessions', '-F', '#{session_name}'], [])).toEqual(['after-list-sessions']);
 		expect(events(['list-buffers', '-F', '#{buffer_name}'], [])).toEqual(['after-list-buffers']);
 	});
 
@@ -406,9 +401,11 @@ describe('expectedSinkEventsFor(args, liveHooks) — exact per-machine multiset 
 	});
 
 	it('kill-session: alias write + hook-if-live + session-closed-if-live', () => {
-		expect(
-			events(['kill-session', '-t', 'x'], ['after-kill-session', 'session-closed'])
-		).toEqual(['after-kill-session', 'after-kill-session', 'session-closed']);
+		expect(events(['kill-session', '-t', 'x'], ['after-kill-session', 'session-closed'])).toEqual([
+			'after-kill-session',
+			'after-kill-session',
+			'session-closed'
+		]);
 		expect(events(['kill-session', '-t', 'x'], ['session-closed'])).toEqual([
 			'after-kill-session',
 			'session-closed'
@@ -422,19 +419,17 @@ describe('expectedSinkEventsFor(args, liveHooks) — exact per-machine multiset 
 	});
 
 	it("speedrun-attach models the runner's REAL attach: gated notification + hook, nothing else", () => {
-		expect(
-			events(['speedrun-attach'], ['client-attached', 'after-attach-session'])
-		).toEqual(['after-attach-session', 'client-attached']);
+		expect(events(['speedrun-attach'], ['client-attached', 'after-attach-session'])).toEqual([
+			'after-attach-session',
+			'client-attached'
+		]);
 		expect(events(['speedrun-attach'], ['client-attached'])).toEqual(['client-attached']);
 		expect(events(['speedrun-attach'], [])).toEqual([]);
 	});
 
 	it('the attach-session SPELLING models the shim (switch-client) — never a real attach', () => {
 		expect(
-			events(
-				['attach-session'],
-				['client-attached', 'after-attach-session', 'after-switch-client']
-			)
+			events(['attach-session'], ['client-attached', 'after-attach-session', 'after-switch-client'])
 		).toEqual(['after-attach-session', 'after-switch-client']);
 		expect(events(['attach-session'], [])).toEqual(['after-attach-session']);
 		expect(events(['a'], [])).toEqual(['after-attach-session']);

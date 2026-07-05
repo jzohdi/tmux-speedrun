@@ -136,17 +136,13 @@ describe.skipIf(!hasTmux)('live isolated tmux server (issue #45 lifecycle)', () 
 type KeyRebindX = { key: string; repeat?: boolean; events: readonly string[]; command: string };
 type CommandAliasX = { names: readonly string[]; events: readonly string[]; command: string };
 
-const {
-	KEY_REBINDS,
-	COMMAND_ALIASES,
-	RUNNER_ATTACH_COMMAND,
-	expectedSinkEventsFor
-} = configModule as unknown as {
-	KEY_REBINDS?: readonly KeyRebindX[];
-	COMMAND_ALIASES?: readonly CommandAliasX[];
-	RUNNER_ATTACH_COMMAND?: string;
-	expectedSinkEventsFor?: (args: string[], liveHooks: ReadonlySet<string>) => string[];
-};
+const { KEY_REBINDS, COMMAND_ALIASES, RUNNER_ATTACH_COMMAND, expectedSinkEventsFor } =
+	configModule as unknown as {
+		KEY_REBINDS?: readonly KeyRebindX[];
+		COMMAND_ALIASES?: readonly CommandAliasX[];
+		RUNNER_ATTACH_COMMAND?: string;
+		expectedSinkEventsFor?: (args: string[], liveHooks: ReadonlySet<string>) => string[];
+	};
 
 type ServerR2 = IsolatedTmuxServer & { liveHooks?: ReadonlySet<string> };
 
@@ -199,9 +195,7 @@ describe.skipIf(!hasTmux)('live server — R2 ONESHOT round (plan §8.5)', () =>
 			0
 		);
 		for (const hook of live) {
-			expect(SINK_HOOKS, `liveHooks contains '${hook}' which is not in SINK_HOOKS`).toContain(
-				hook
-			);
+			expect(SINK_HOOKS, `liveHooks contains '${hook}' which is not in SINK_HOOKS`).toContain(hook);
 		}
 
 		// Version-drift net (§8.5 test 3): a hook this tmux rejected must not be
@@ -238,10 +232,9 @@ describe.skipIf(!hasTmux)('live server — R2 ONESHOT round (plan §8.5)', () =>
 
 	it('one scripted exec per aliased spelling writes EXACTLY the expected sink multiset (per-machine hook/alias balance, §8.5 test 1)', async () => {
 		expect(COMMAND_ALIASES, 'config.ts must export COMMAND_ALIASES (R2)').toBeDefined();
-		expect(
-			typeof expectedSinkEventsFor,
-			'config.ts must export expectedSinkEventsFor'
-		).toBe('function');
+		expect(typeof expectedSinkEventsFor, 'config.ts must export expectedSinkEventsFor').toBe(
+			'function'
+		);
 		const server = await create();
 		expect(server.liveHooks, 'server must expose liveHooks (R2, interface §3)').toBeDefined();
 		const live = server.liveHooks!;
@@ -251,7 +244,10 @@ describe.skipIf(!hasTmux)('live server — R2 ONESHOT round (plan §8.5)', () =>
 		await server.exec(['new-window', '-d', '-t', 'speedrun:1']);
 		await server.exec(['select-window', '-t', 'speedrun:1']);
 		await server.exec(['select-window', '-t', 'speedrun:0']);
-		const noopConf = join(tmpdir(), `speedrun-noop-${process.pid}-${Math.random().toString(36).slice(2)}.conf`);
+		const noopConf = join(
+			tmpdir(),
+			`speedrun-noop-${process.pid}-${Math.random().toString(36).slice(2)}.conf`
+		);
 		writeFileSync(noopConf, '# no-op sourced file\n');
 
 		// One exec per intercepted spelling. `errors: true` marks spellings whose
@@ -324,9 +320,7 @@ describe.skipIf(!hasTmux)('live server — R2 ONESHOT round (plan §8.5)', () =>
 					await sleep(400); // catch EXTRA writes too — extras are the self-completion bug
 					const got = sinkFrom(server, from).sort();
 					if (JSON.stringify(got) !== JSON.stringify(expected)) {
-						mismatches.push(
-							`${name}: expected [${expected.join(', ')}] got [${got.join(', ')}]`
-						);
+						mismatches.push(`${name}: expected [${expected.join(', ')}] got [${got.join(', ')}]`);
 					}
 				}
 			}

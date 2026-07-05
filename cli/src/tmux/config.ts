@@ -128,7 +128,11 @@ export const COMMAND_ALIASES: readonly CommandAlias[] = [
 	{ names: ['show-buffer', 'showb'], events: ['after-show-buffer'], command: 'show-buffer' },
 	{ names: ['source-file', 'source'], events: ['after-source-file'], command: 'source-file' },
 	{ names: ['kill-session'], events: ['after-kill-session'], command: 'kill-session' },
-	{ names: ['select-window', 'selectw'], events: ['after-select-window'], command: 'select-window' },
+	{
+		names: ['select-window', 'selectw'],
+		events: ['after-select-window'],
+		command: 'select-window'
+	},
 	{ names: ['next-window', 'next'], events: ['after-next-window'], command: 'next-window' },
 	{
 		names: ['previous-window', 'prev'],
@@ -145,7 +149,11 @@ export const COMMAND_ALIASES: readonly CommandAlias[] = [
 	{ names: ['list-sessions', 'ls'], events: ['after-list-sessions'], command: 'list-sessions' },
 	{ names: ['list-windows', 'lsw'], events: ['after-list-windows'], command: 'list-windows' },
 	{ names: ['list-buffers', 'lsb'], events: ['after-list-buffers'], command: 'list-buffers' },
-	{ names: ['delete-buffer', 'deleteb'], events: ['after-delete-buffer'], command: 'delete-buffer' },
+	{
+		names: ['delete-buffer', 'deleteb'],
+		events: ['after-delete-buffer'],
+		command: 'delete-buffer'
+	},
 	{ names: ['capture-pane', 'capturep'], events: ['after-capture-pane'], command: 'capture-pane' },
 	{ names: ['join-pane', 'joinp'], events: ['after-join-pane'], command: 'join-pane' },
 	{ names: ['swap-window', 'swapw'], events: ['after-swap-window'], command: 'swap-window' },
@@ -239,8 +247,9 @@ export function buildIsolatedConfig(opts: { eventSink: string }): GeneratedConfi
 	const eventAliasLines = COMMAND_ALIASES.flatMap((alias) =>
 		alias.names.map((name) => `${name}=run-shell "${write(alias.events)}" ; ${alias.command}`)
 	);
-	const aliasConfigLines = [`${RUNNER_ATTACH_COMMAND}=attach-session`, ...eventAliasLines]
-		.map((alias, i) => `set -s command-alias[${100 + i}] '${alias}'`);
+	const aliasConfigLines = [`${RUNNER_ATTACH_COMMAND}=attach-session`, ...eventAliasLines].map(
+		(alias, i) => `set -s command-alias[${100 + i}] '${alias}'`
+	);
 
 	const text = [
 		'# tmux-speedrun isolated challenge config (generated; do not edit)',
