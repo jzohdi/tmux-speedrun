@@ -413,3 +413,66 @@ describe('watch — the sink is a real change channel (issue #45 defect 2 plumbi
 		expect(received.some((d) => d.commandEvents?.includes('after-select-window'))).toBe(true);
 	}, 10_000);
 });
+
+describe('identity-based window-rename detection (R3, interface §11.1)', () => {
+	// The reported bug: `diff` detected window renames by comparing the two
+	// snapshots' window-NAME lists as sets, which fails whenever any window name
+	// is shared — renaming one of two `zsh` windows to `fast-orbit-69` yielded no
+	// `renamedWindow`, so the challenge rename step could never advance (it only
+	// worked with a single window). The fix keys on window IDENTITY
+	// (`session:index`, stable across a rename) instead of name-set membership.
+	const obs = () => obsX(new TmuxObserver(makeFakeServer().server));
+
+	const win = (index: number, name: string, session = 'main') => ({
+		session,
+		index,
+		name,
+		active: index === 0
+	});
+
+	it('detects a rename when two windows share the pre-rename name (the reported bug)', () => {
+		const prev = state({ windows: [win(0, 'zsh'), win(1, 'zsh')] });
+		const next = state({ windows: [win(0, 'zsh'), win(1, 'fast-orbit-69')] });
+		const d = obs().diff(prev, next);
+		expect(d.renamedWindow).toEqual({ from: 'zsh', to: 'fast-orbit-69' });
+	});
+
+	it('detects the rename across two ticks when BOTH windows end up sharing the new name', () => {
+		const o = obs();
+		const s0 = state({ windows: [win(0, 'zsh'), win(1, 'zsh')] });
+		const s1 = state({ windows: [win(0, 'zsh'), win(1, 'fast-orbit-69')] });
+		const s2 = state({ windows: [win(0, 'fast-orbit-69'), win(1, 'fast-orbit-69')] });
+		// tick 1: window 1 renamed
+		expect(o.diff(s0, s1).renamedWindow).toEqual({ from: 'zsh', to: 'fast-orbit-69' });
+		// tick 2: window 0 renamed to the SAME name the sibling already carries —
+		// name-set membership can't see this (both names present before and after),
+		// identity can (key main:0 changed name).
+		expect(o.diff(s1, s2).renamedWindow).toEqual({ from: 'zsh', to: 'fast-orbit-69' });
+	});
+
+	it('detects a rename while an unrelated-named sibling window exists', () => {
+		const prev = state({ windows: [win(0, 'zsh'), win(1, 'editor')] });
+		const next = state({ windows: [win(0, 'fast-orbit-69'), win(1, 'editor')] });
+		expect(obs().diff(prev, next).renamedWindow).toEqual({ from: 'zsh', to: 'fast-orbit-69' });
+	});
+
+	it('does NOT report a rename for a pure window add (an added window is not a rename)', () => {
+		const prev = state({ windows: [win(0, 'zsh')] });
+		const next = state({ windows: [win(0, 'zsh'), win(1, 'zsh')] });
+		expect(obs().diff(prev, next).renamedWindow).toBeUndefined();
+	});
+
+	it('does NOT report a rename when a sibling is killed and a window keeps its (index, name)', () => {
+		// tmux keeps window_index stable on a kill (no renumber): `shell` stays at
+		// index 1, so its identity is unchanged → not a rename.
+		const prev = state({ windows: [win(0, 'editor'), win(1, 'shell')] });
+		const next = state({ windows: [win(1, 'shell')] });
+		expect(obs().diff(prev, next).renamedWindow).toBeUndefined();
+	});
+
+	it('session renames are unaffected (session names are unique)', () => {
+		const prev = state({ sessions: ['main'], windows: [win(0, 'zsh')] });
+		const next = state({ sessions: ['renamed'], windows: [win(0, 'zsh')] });
+		expect(obs().diff(prev, next).renamedSession).toEqual({ from: 'main', to: 'renamed' });
+	});
+});

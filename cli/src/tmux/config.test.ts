@@ -461,3 +461,56 @@ describe('expectedSinkEventsFor(args, liveHooks) — exact per-machine multiset 
 		}
 	});
 });
+
+// ---------------------------------------------------------------------------
+// R3 — new-session create-AND-switch (interface §11.3). `new-session -d`
+// bypasses tmux's nested guard but leaves the client in its old session; an
+// APPENDED `after-new-session` hook switches the client into the freshly
+// created session. Because a `switch-client` run FROM a hook does not fire
+// after-switch-client, this adds NO sink line — accounting is unchanged.
+// ---------------------------------------------------------------------------
+
+describe('appended after-new-session switch-client hook (R3, interface §11.3)', () => {
+	const text = buildIsolatedConfig({ eventSink: SINK }).text;
+	const lines = text.split('\n');
+
+	it('appends a switch-client hook so `tmux new` switches the client into the new session', () => {
+		// `-ga` APPENDS to the event's hook list, kept SEPARATE from the
+		// sink-writing `after-new-session` hook (both bindings coexist).
+		const line = lines.find(
+			(l) => l.startsWith('set-hook -ga after-new-session ') && l.includes('switch-client')
+		);
+		expect(
+			line,
+			'missing appended `set-hook -ga after-new-session ... switch-client` line'
+		).toBeDefined();
+	});
+
+	it('keeps the original sink-writing after-new-session hook (both bindings coexist)', () => {
+		const sinkLine = lines.find(
+			(l) =>
+				l.startsWith('set-hook -g after-new-session ') &&
+				l.includes(`echo after-new-session >> ${SINK}`)
+		);
+		expect(sinkLine, 'the sink-writing after-new-session hook must remain').toBeDefined();
+	});
+
+	it('keeps after-new-session in SINK_HOOKS', () => {
+		expect(SINK_HOOKS ?? EXPECTED_HOOKS).toContain('after-new-session');
+	});
+
+	it('the appended switch hook writes NO sink line — new-session accounting is unchanged (§11.3)', () => {
+		expect(typeof expectedSinkEventsFor, 'config.ts must export expectedSinkEventsFor').toBe(
+			'function'
+		);
+		// live hook → alias write + live-hook write (both `after-new-session`),
+		// and NOTHING from the appended switch-client hook.
+		expect(
+			[
+				...expectedSinkEventsFor!(['new-session', '-d', '-s', 'x'], new Set(['after-new-session']))
+			].sort()
+		).toEqual(['after-new-session', 'after-new-session']);
+		// dead hook → alias write only.
+		expect(expectedSinkEventsFor!(['new-session', '-d'], new Set())).toEqual(['after-new-session']);
+	});
+});
