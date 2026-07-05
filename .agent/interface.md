@@ -983,9 +983,8 @@ hint CLI-side (do **not** touch the shared `practice-flow.ts`).
 - Build a `commandName → shortcut` lookup once from `TMUX_COMMANDS` (imported from
   `$lib/data/tmux-commands`).
 - For a `kind: 'command'` step, `view()` returns
-  `{ prompt: \`${step.prompt} — ${shortcut}\`, index, total }` (e.g.
-  `Rename the current window — prefix + ,`). If a `commandName` has no `TMUX_COMMANDS` match
-  (shouldn't happen), fall back to the bare `step.prompt` (no trailing separator).
+  `{ prompt: \`${step.prompt} — ${shortcut}\`, index, total }`(e.g.`Rename the current window — prefix + ,`). If a `commandName`has no`TMUX_COMMANDS`match
+(shouldn't happen), fall back to the bare`step.prompt` (no trailing separator).
 - For a `kind: 'copy-mode-action'` step, `view()` returns `step.prompt` **verbatim** (it is already a
   step-by-step instruction — no shortcut appended).
 - Only `view()`'s `prompt` changes; `detectionStep()`, `seedInput()`, `trySubmit()` are unchanged.

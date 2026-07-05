@@ -556,7 +556,7 @@ index — and report a window whose name changed:
 - In `observer.diff`, replace the name-list `detectRename` call for **windows** with a pass that
   builds `Map<"session:index", name>` from `prev.windows` and, for each `next.window` with the same
   key present in both, detects `prevName !== nextName`. Emit `renamedWindow = { from: prevName,
-  to: nextName }` for such a window. If several changed in one delta (rare — renames are one action
+to: nextName }` for such a window. If several changed in one delta (rare — renames are one action
   per ~150 ms tick), prefer the one whose `to` is unique/most recent; a single result is sufficient
   because the detector only needs `renamedWindow.to` to equal `step.requiredInput`.
 - Keep `renamedSession` on the existing name-set `detectRename` (unique names ⇒ correct).
@@ -569,7 +569,7 @@ identity-based detection this now fires regardless of window count or name colli
 
 **Edge cases:** a window renamed to a name another window already has is still detected (identity,
 not name, is the key). A rename in the same tick as a window add/remove still works — only keys
-present in *both* snapshots are compared, so an added/removed window can't masquerade as a rename.
+present in _both_ snapshots are compared, so an added/removed window can't masquerade as a rename.
 A window that changes index (e.g. after a kill) with an unchanged name is not a rename and is
 correctly ignored (its key changes, so it isn't matched). ONESHOT (OS1) holds: one rename action
 advances the step from any state.
@@ -593,8 +593,8 @@ the CLI's `PracticeController` (`cli/src/tmux/controller.ts`), which already imp
 - Build a `commandName → shortcut` lookup from `TMUX_COMMANDS` (imported from
   `$lib/data/tmux-commands`).
 - In the practice `StepEngine.view()`, for a `kind: 'command'` step return
-  `prompt: \`${step.prompt} — ${shortcut}\`` (e.g. `Rename the current window — prefix + ,`).
-  For `kind: 'copy-mode-action'` steps keep `step.prompt` (already a step-by-step instruction).
+  `prompt: \`${step.prompt} — ${shortcut}\``(e.g.`Rename the current window — prefix + ,`).
+For `kind: 'copy-mode-action'`steps keep`step.prompt` (already a step-by-step instruction).
 - Keep the composed prompt within the status-line sanitize cap (118 chars, `status-line.ts`) — the
   StatusLine already truncates, so no extra handling is needed, but keep the hint concise.
 - Challenge mode is intentionally **not** given hints (it tests recall). Only practice changes.
@@ -623,7 +623,7 @@ append `switch-client` in the alias itself.
 
 **Fix for (b) — switch via the `after-new-session` hook (robust; args-safe).** `after-new-session`
 is a genuine tmux run-time hook (unlike the many `after-*` names tmux's whitelist rejects — see
-§8.3d; it is one of the *live* hooks, and must be confirmed present in `server.liveHooks` in
+§8.3d; it is one of the _live_ hooks, and must be confirmed present in `server.liveHooks` in
 implementation). When `new-session -d` runs, that hook fires with the **new** session as its target,
 so the hook can switch the requesting client into it without any dependence on the alias tail. In
 `buildIsolatedConfig`, append a second, appended hook binding:
@@ -662,7 +662,7 @@ confirm:
   by a lower-index default entry), fix the interception so it reliably wins — options to evaluate:
   assign at the front of the array / append with `-a` semantics, add the exact spellings the user
   types, or (last resort) rebind the relevant key table. The integration assertion in §9.5 must
-  cover the *typed nested-guard* case, not just event accounting.
+  cover the _typed nested-guard_ case, not just event accounting.
 
 Both fixes are config-level (`config.ts` / `buildIsolatedConfig`), so **challenge and practice get
 them from the same shared `buildIsolatedConfig`** — satisfying "for both modes" with no per-command
@@ -701,14 +701,14 @@ window or running `tmux new` in `debug` should print the `rename-window`/`new-se
 
 ### 9.5 Files to change (delta on §4/§8.4)
 
-| File                                  | Change                                                                                                                                                             |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cli/src/tmux/observer.ts`            | §9.1: identity-based (`session:index`) window-rename detection in `diff`; `detectRename` kept for sessions only                                                    |
-| `cli/src/tmux/config.ts`              | §9.3b: appended `set-hook -ga after-new-session 'switch-client …'` in `buildIsolatedConfig`; verify/repair typed-form alias interception for `new`/`attach`/`ls`  |
-| `cli/src/tmux/controller.ts`          | §9.2: practice `StepEngine.view()` appends the command shortcut hint (lookup from `TMUX_COMMANDS`); challenge unchanged                                            |
-| `cli/src/commands/debug.ts` (NEW)     | §9.4: the `debug` command                                                                                                                                         |
-| `cli/src/index.ts`, `commands/help.ts`| §9.4: register + document `debug`                                                                                                                                 |
-| tests (§9.6)                          | `observer.test.ts`, `config.test.ts`, `detector.test.ts`, controller/practice test, `debug` test, `live-server.integration.test.ts`                               |
+| File                                   | Change                                                                                                                                                           |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli/src/tmux/observer.ts`             | §9.1: identity-based (`session:index`) window-rename detection in `diff`; `detectRename` kept for sessions only                                                  |
+| `cli/src/tmux/config.ts`               | §9.3b: appended `set-hook -ga after-new-session 'switch-client …'` in `buildIsolatedConfig`; verify/repair typed-form alias interception for `new`/`attach`/`ls` |
+| `cli/src/tmux/controller.ts`           | §9.2: practice `StepEngine.view()` appends the command shortcut hint (lookup from `TMUX_COMMANDS`); challenge unchanged                                          |
+| `cli/src/commands/debug.ts` (NEW)      | §9.4: the `debug` command                                                                                                                                        |
+| `cli/src/index.ts`, `commands/help.ts` | §9.4: register + document `debug`                                                                                                                                |
+| tests (§9.6)                           | `observer.test.ts`, `config.test.ts`, `detector.test.ts`, controller/practice test, `debug` test, `live-server.integration.test.ts`                              |
 
 No web (`src/`), API, generator, or canonical-answer changes. `practice-flow.ts` is deliberately
 **not** modified (§9.2). `.agent/interface.md` §4 (observer rename), §2.1/§2.2 (the extra
@@ -760,7 +760,7 @@ where they conflict; the interface stage should reconcile them.
   Verify on real tmux; if it warns, gate the hook on `#{?client…}` or accept it inside the
   drain→resetBaseline window.
 - **Typed-form interception may still fail on some tmux versions** (§9.3a): the integration test
-  must exercise the *nested-guard* path (a client with `$TMUX` set), so a version where the alias
+  must exercise the _nested-guard_ path (a client with `$TMUX` set), so a version where the alias
   loses to the builtin fails CI rather than stranding the user with the nested error again.
 - **`debug` must not weaken ISO1/LIFE1**: it uses the same isolated server + teardown; assert no
   orphan `tmux -L tmux-speedrun-*` after it exits.
