@@ -183,10 +183,11 @@ export class TmuxObserver {
 			.filter((p) => !nextPaneIds.has(p.paneId))
 			.map((p) => p.paneId);
 
-		const renamedWindow = detectRename(
-			prev.windows.map((w) => w.name),
-			next.windows.map((w) => w.name)
-		);
+		// Windows are matched by IDENTITY (`session:index`, stable across a rename)
+		// rather than name-set membership, which breaks whenever any window name is
+		// shared (issue #45 R3 §9.1: renaming one of two `zsh` windows).
+		const renamedWindow = detectWindowRename(prev.windows, next.windows);
+		// Session names are unique in tmux, so name-set membership is correct.
 		const renamedSession = detectRename(prev.sessions, next.sessions);
 
 		const prevActive = prev.panes.find((p) => p.active);
@@ -416,6 +417,29 @@ function detectRename(prev: string[], next: string[]): { from: string; to: strin
 	const added = next.filter((n) => !prev.includes(n));
 	if (removed.length === 1 && added.length === 1) {
 		return { from: removed[0], to: added[0] };
+	}
+	return undefined;
+}
+
+/**
+ * Identity-based window-rename detection (issue #45 R3 §9.1). A window's
+ * `(session, index)` is stable across a rename while its `name` changes; keying
+ * on that identity detects the rename regardless of window count or duplicate
+ * names — unlike the name-set comparison, which is blind to any shared name.
+ * Only windows present in BOTH snapshots are compared, so an added/removed
+ * window can never masquerade as a rename.
+ */
+function detectWindowRename(
+	prev: TmuxState['windows'],
+	next: TmuxState['windows']
+): { from: string; to: string } | undefined {
+	const key = (w: { session: string; index: number }) => `${w.session}:${w.index}`;
+	const prevByKey = new Map(prev.map((w) => [key(w), w.name]));
+	for (const w of next) {
+		const before = prevByKey.get(key(w));
+		if (before !== undefined && before !== w.name) {
+			return { from: before, to: w.name };
+		}
 	}
 	return undefined;
 }

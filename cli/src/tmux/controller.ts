@@ -18,6 +18,15 @@ import type { StateDelta } from '../engine/types';
 import type { DecryptedStep } from '$lib/client/challenge-core';
 import type { PracticeItem } from '$lib/data/practice-flow';
 import { expectedSinkEventsFor, RUNNER_ATTACH_COMMAND } from './config';
+import { TMUX_COMMANDS } from '$lib/data/tmux-commands';
+
+/**
+ * Practice mode guides the user through each command, so it surfaces HOW to
+ * perform it: the command's `shortcut` (keystrokes / typed form) is appended to
+ * the step prompt (issue #45 R3 §9.2). Challenge mode is deliberately NOT hinted
+ * — it tests recall.
+ */
+const COMMAND_SHORTCUTS = new Map(TMUX_COMMANDS.map((c) => [c.name, c.shortcut]));
 
 export type ChallengeRunResult = { completed: boolean; finish?: FinishResponse; aborted?: boolean };
 
@@ -255,7 +264,15 @@ export class PracticeController {
 
 		const engine: StepEngine = {
 			isComplete: () => index >= total,
-			view: () => ({ prompt: item.steps[index].prompt, index, total }),
+			view: () => {
+				const step = item.steps[index];
+				// Only `command` steps get a shortcut hint; `copy-mode-action` steps
+				// already carry a step-by-step instruction and keep their prompt verbatim.
+				const shortcut =
+					step.kind === 'command' ? COMMAND_SHORTCUTS.get(step.commandName) : undefined;
+				const prompt = shortcut ? `${step.prompt} — ${shortcut}` : step.prompt;
+				return { prompt, index, total };
+			},
 			detectionStep: () => ({ prompt: item.steps[index].prompt, seedInput: item.seedInput }),
 			seedInput: () => item.seedInput,
 			trySubmit: async (candidates, delta) => {

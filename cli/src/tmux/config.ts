@@ -236,6 +236,20 @@ export function buildIsolatedConfig(opts: { eventSink: string }): GeneratedConfi
 		return `set-hook -g ${evt} 'run-shell "echo ${line} >> ${sink} || true"'`;
 	});
 
+	// R3 §9.3: `new-session -d` (the nested-guard-bypassing shim) creates the
+	// session detached, leaving the client in its old session. This APPENDED
+	// (`-ga`) after-new-session hook switches the requesting client into the
+	// freshly created session so `tmux new` creates AND switches, per feedback.
+	// A `switch-client` run from a hook does not fire after-switch-client, so it
+	// writes no sink line — accounting is unchanged. For runner-origin detached
+	// creates (no attached client) it is a quiet no-op.
+	// Gate on a present client (`#{client_tty}` non-empty) so runner-origin
+	// detached creates — where there is no attached client — are a quiet no-op
+	// instead of a "no current client" error that would surface as the command's
+	// exit code (§9.3 risk note).
+	const switchOnNewSessionHook =
+		'set-hook -ga after-new-session \'if-shell -F "#{client_tty}" "switch-client -t \\"#{hook_session}\\""\'';
+
 	const write = (events: readonly string[]) =>
 		events.map((evt) => `echo ${evt} >> ${sink} || true`).join('; ');
 
@@ -264,6 +278,7 @@ export function buildIsolatedConfig(opts: { eventSink: string }): GeneratedConfi
 		'set -g status-right-length 120',
 		"set -g status-style 'bg=colour24,fg=white'",
 		...hookLines,
+		switchOnNewSessionHook,
 		...rebindLines,
 		...aliasConfigLines,
 		''
