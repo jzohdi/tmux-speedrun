@@ -126,6 +126,27 @@ export function commandPopulatesTerminalInput(commandName?: CommandIdType): bool
 	return commandName !== undefined && INPUT_POPULATING_COMMANDS.has(commandName);
 }
 
+/**
+ * Commands whose effect is to open a component-owned input overlay (currently the
+ * command-prompt). A consumer that clears/refocuses the terminal after a command must leave
+ * these alone, or it will dismiss the just-opened overlay and steal focus from it.
+ * Kept as a data-driven set so future overlay-opening commands are easy to add.
+ *
+ * Disjoint from INPUT_POPULATING_COMMANDS: a command either populates the pane input
+ * (paste-buffer: skip clear, keep focus) or opens an overlay (command-prompt: skip clear
+ * *and* skip focus), never both.
+ */
+const OVERLAY_INPUT_COMMANDS: ReadonlySet<CommandIdType> = new Set([CommandId.COMMAND_PROMPT]);
+
+/**
+ * True only for commands that open a component-owned input overlay (currently command-prompt).
+ * Consumers use this to skip clearing/refocusing the terminal, which would dismiss the overlay.
+ * Returns false for undefined (e.g. the raw `command` signal, which carries no commandName).
+ */
+export function commandOpensInputOverlay(commandName?: CommandIdType): boolean {
+	return commandName !== undefined && OVERLAY_INPUT_COMMANDS.has(commandName);
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================
