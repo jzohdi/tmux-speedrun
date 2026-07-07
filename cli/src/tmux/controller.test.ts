@@ -62,7 +62,7 @@ function makeDelta(over: Partial<StateDelta> = {}): StateDelta {
 	} as StateDelta;
 }
 
-type PromptView = { prompt: string; index: number; total: number };
+type PromptView = { prompt: string; index: number; total: number; hotkey?: string };
 
 /**
  * Fakes that drive the real `runAttachLoop`: every attach ends immediately and
@@ -131,8 +131,8 @@ function commandStepItem(id: string, commandName: string): PracticeItem {
 	} as unknown as PracticeItem;
 }
 
-describe('PracticeController — R3 command-step hint, migrated to items[] (interface §11.2)', () => {
-	it('appends the command shortcut to a `command` step prompt', async () => {
+describe('PracticeController — R3 command-step hint, migrated to items[] (interface §11.2 + issue #53)', () => {
+	it('carries the command shortcut as a separate `hotkey` field, not joined into the prompt', async () => {
 		const cmd = TMUX_COMMANDS.find((c) => c.name === 'rename-window')!;
 		const item = commandStepItem('rename-window', 'rename-window');
 
@@ -145,11 +145,18 @@ describe('PracticeController — R3 command-step hint, migrated to items[] (inte
 		} as never).run();
 
 		expect(f.promptViews.length, 'the run loop never rendered a prompt').toBeGreaterThan(0);
-		// e.g. "Rename the current window — prefix + ,"
+		// The prompt is the plain description; the shortcut is now surfaced
+		// separately so the status line can emphasize it (issue #53). The em-dash
+		// join is gone, so the shortcut no longer bleeds into the prompt text.
 		expect(f.promptViews[0].prompt).toContain(cmd.description);
-		expect(f.promptViews[0].prompt, 'practice must surface the keystroke/typed form').toContain(
-			cmd.shortcut
-		);
+		expect(
+			f.promptViews[0].hotkey,
+			'practice must surface the keystroke as structured data'
+		).toBe(cmd.shortcut);
+		expect(
+			f.promptViews[0].prompt,
+			'the shortcut must NOT be concatenated into the prompt text anymore'
+		).not.toContain(cmd.shortcut);
 	});
 
 	it('returns a `copy-mode-action` step prompt verbatim (no bogus hint appended)', async () => {
@@ -245,13 +252,14 @@ describe('PracticeController — R4 continuous run over all drills (interface §
 		}
 		const renameShortcut = TMUX_COMMANDS.find((c) => c.name === 'rename-window')!.shortcut;
 		expect(
-			f.promptViews.some((v) => v.prompt.includes(renameShortcut)),
-			'command step must show its shortcut hint'
+			f.promptViews.some((v) => v.hotkey === renameShortcut),
+			'command step must surface its shortcut on the hotkey field'
 		).toBe(true);
-		// The copy-mode-action step is rendered verbatim (no hint separator).
+		// The copy-mode-action step is rendered verbatim, with NO hotkey (no
+		// shortcut to emphasize).
 		expect(
-			f.promptViews.some((v) => v.prompt === copyPrompt),
-			'copy-mode-action prompt must be verbatim'
+			f.promptViews.some((v) => v.prompt === copyPrompt && v.hotkey === undefined),
+			'copy-mode-action prompt must be verbatim with no hotkey'
 		).toBe(true);
 	});
 
