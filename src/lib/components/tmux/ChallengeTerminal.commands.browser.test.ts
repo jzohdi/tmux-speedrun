@@ -2,8 +2,25 @@ import { userEvent } from 'vitest/browser';
 import { describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import ChallengeTerminal from './ChallengeTerminal.svelte';
-import { CommandId } from '$lib/utils/tmux-commands';
+import { CommandId, commandPopulatesTerminalInput } from '$lib/utils/tmux-commands';
+import * as tmuxCommands from '$lib/utils/tmux-commands';
 import type { TmuxSignal } from '$lib/utils/pane-tree';
+
+/**
+ * Issue #50: the challenge route must NOT dismiss/refocus away from the command-prompt overlay.
+ * The real gate is `commandOpensInputOverlay(commandName)` in `$lib/utils/tmux-commands`, which
+ * does not exist yet. We reach it through the module namespace on purpose: a *named* import of a
+ * not-yet-created export hard-fails the whole browser bundle (esbuild "No matching export"), which
+ * would report "no tests" for this file instead of a clean per-test failure. A namespace property
+ * access is simply `undefined` until the feature lands, so this file stays importable and the test
+ * below goes red for the right reason (the predicate is missing → the overlay gets dismissed) and
+ * green once `commandOpensInputOverlay` is implemented. The export itself is unit-locked in
+ * tmux-commands.test.ts.
+ */
+function opensInputOverlay(commandName: TmuxSignal['commandName']): boolean {
+	const predicate = (tmuxCommands as unknown as Record<string, unknown>).commandOpensInputOverlay;
+	return typeof predicate === 'function' && predicate(commandName) === true;
+}
 
 /**
  * The challenge route preserves the input for input-populating commands via
@@ -149,5 +166,103 @@ describe('ChallengeTerminal paste survives a clearing consumer (challenge-route 
 		await userEvent.keyboard('list-windows{Enter}');
 
 		await expect.element(input).toHaveValue('');
+	});
+});
+
+describe('ChallengeTerminal command-prompt survives the challenge-route consumer (issue #50)', () => {
+	/**
+	 * Mimics the real challenge route (`src/routes/challenge/[id]/+page.svelte` `handleSignal`):
+	 * it is async and awaits `submitAnswer` before clearing/refocusing the terminal, so the
+	 * clear/focus land on a later microtask — AFTER `ChallengeTerminal.handleCommand` has opened
+	 * the command-prompt overlay. That ordering is exactly what makes the bug observable: a
+	 * synchronous consumer would run before the overlay opens and never dismiss it.
+	 *
+	 * The gate mirrors the route's intended fix: skip `clearInput()` for input-populating
+	 * (paste-buffer) OR overlay-opening (command-prompt) commands, and skip `focus()` for
+	 * overlay-opening commands so the cursor is not pulled out of the overlay input. `focus()`
+	 * for every other command is unchanged.
+	 */
+	async function mountWithClearingAndFocusingConsumer(): Promise<{
+		screen: Screen;
+		signals: TmuxSignal[];
+	}> {
+		const signals: TmuxSignal[] = [];
+		const holder: { api: { clearInput: () => void; focus: () => Promise<void> } | null } = {
+			api: null
+		};
+		const screen = await render(ChallengeTerminal, {
+			onSignal: (signal: TmuxSignal) => {
+				signals.push(signal);
+				if (signal.type !== 'command-executed') {
+					return;
+				}
+				// Defer like the real async handler (which awaits submitAnswer) so the clear/focus
+				// run after the overlay has opened.
+				void (async () => {
+					await Promise.resolve();
+					const opensOverlay = opensInputOverlay(signal.commandName);
+					if (!commandPopulatesTerminalInput(signal.commandName) && !opensOverlay) {
+						holder.api?.clearInput();
+					}
+					if (!opensOverlay) {
+						await holder.api?.focus();
+					}
+				})();
+			}
+		});
+		holder.api = screen.component as unknown as {
+			clearInput: () => void;
+			focus: () => Promise<void>;
+		};
+		return { screen, signals };
+	}
+
+	/** Flush microtasks + one animation frame so the deferred consumer clear/focus has run. */
+	async function flushConsumer(): Promise<void> {
+		await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+		await Promise.resolve();
+	}
+
+	it('keeps the orange command-prompt overlay open and focused, and still scores, after prefix + :', async () => {
+		const { screen, signals } = await mountWithClearingAndFocusingConsumer();
+
+		await userEvent.click(getTerminal(screen));
+		await userEvent.keyboard('{Control>}b{/Control}:');
+
+		// Let the route-mimicking consumer's deferred clearInput()/focus() run. Before the fix
+		// they dismiss the just-opened overlay (clearInput sets inputModeCommand = null) and steal
+		// focus back to the pane; after the fix the gate skips both for command-prompt.
+		await flushConsumer();
+
+		const statusInput = document.querySelector('.status-input') as HTMLInputElement | null;
+		expect(statusInput).not.toBeNull();
+		// The overlay's own auto-focus keeps the cursor in the prompt (the consumer skipped focus()).
+		expect(document.activeElement).toBe(statusInput);
+
+		// Scoring parity: the command-prompt step is still verified from the signal emitted when
+		// the prompt opens, exactly as today.
+		const promptSignal = signals.find(
+			(s) => s.type === 'command-executed' && s.commandName === CommandId.COMMAND_PROMPT
+		);
+		expect(promptSignal).toBeDefined();
+	});
+
+	it('lets the user type a command into the surviving overlay and run it', async () => {
+		const { screen } = await mountWithClearingAndFocusingConsumer();
+
+		await userEvent.click(getTerminal(screen));
+		await userEvent.keyboard('{Control>}b{/Control}:');
+		await flushConsumer();
+
+		// Precondition (red before the fix): the cursor is in the overlay, not the pane — so the
+		// keystrokes below genuinely go through the command-prompt path rather than the pane input.
+		const statusInput = document.querySelector('.status-input') as HTMLInputElement | null;
+		expect(document.activeElement).toBe(statusInput);
+
+		await userEvent.keyboard('list-windows{Enter}');
+
+		// Submitting the overlay runs the command (its output shows) and closes the overlay.
+		await expect.element(screen.getByText(/0: main/)).toBeVisible();
+		expect(document.querySelector('.status-input')).toBeNull();
 	});
 });
