@@ -35,13 +35,24 @@
 	let selectedIndex = $state(0);
 	let listData = $state<Array<{ id: string; display: string }>>([]);
 
-	let inputRef = $state<HTMLInputElement | null>(null);
+	let inputRef = $state<HTMLTextAreaElement | null>(null);
 	let terminalRef = $state<HTMLDivElement | null>(null);
 	let containerRef = $state<HTMLButtonElement | null>(null);
 	// Binds to whichever pager is active ('man' or 'lb-pager' — never both)
 	let pagerRef = $state<HTMLDivElement | null>(null);
 	let historyLengthBeforeMode = $state(0); // Track history length to clear on quit
 	let isMaximized = $state(false);
+
+	/**
+	 * Resize the auto-growing input textarea to fit its wrapped content. Reset to
+	 * `auto` first so the box can shrink as well as grow, then match its
+	 * scrollHeight. Called on input, after programmatic clears, and on resize.
+	 */
+	function autoGrow() {
+		if (!inputRef) return;
+		inputRef.style.height = 'auto'; // reset so scrollHeight can shrink too
+		inputRef.style.height = `${inputRef.scrollHeight}px`;
+	}
 
 	function scrollToBottom() {
 		if (terminalRef) {
@@ -375,6 +386,9 @@
 			event.preventDefault();
 			processCommand(inputValue);
 			inputValue = '';
+			// oninput doesn't fire on programmatic clears, so collapse the box back
+			// to one line once the emptied value is applied to the DOM.
+			tick().then(autoGrow);
 		}
 	}
 
@@ -398,7 +412,12 @@
 		inputValue = ''; // mirror the Enter handler, which clears the input
 		// A command may change `mode` (e.g. `tsr ls` → list, `man tmux` → man), so
 		// defer the focus call until after the mode-driven DOM change is applied.
-		tick().then(() => focusInput());
+		// Also collapse the textarea back to one line — oninput doesn't fire on the
+		// programmatic clear above.
+		tick().then(() => {
+			focusInput();
+			autoGrow();
+		});
 	}
 
 	// Scroll to bottom when history changes
@@ -406,6 +425,17 @@
 		if (history.length > 0) {
 			scrollToBottom();
 		}
+	});
+
+	// Recompute the input textarea height whenever its width changes (terminal /
+	// window resize, maximize toggle). Reading `inputRef` makes this re-run when
+	// the textarea is created/destroyed across mode changes; ResizeObserver also
+	// fires once on observe, giving the correct initial height.
+	$effect(() => {
+		if (!inputRef) return;
+		const ro = new ResizeObserver(() => autoGrow());
+		ro.observe(inputRef);
+		return () => ro.disconnect();
 	});
 
 	// Focus the container when entering non-default modes
@@ -510,16 +540,17 @@
 			{#if mode === 'default'}
 				<div class="input-line">
 					<span class="prompt">$</span>
-					<input
-						type="text"
+					<textarea
+						rows="1"
 						class="terminal-input"
 						bind:value={inputValue}
 						bind:this={inputRef}
+						oninput={autoGrow}
 						autocomplete="off"
-						autocorrect="off"
 						autocapitalize="off"
 						spellcheck="false"
-					/>
+						{...{ autocorrect: 'off' }}
+					></textarea>
 				</div>
 			{/if}
 		{/if}
@@ -688,7 +719,7 @@
 
 	.input-line {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		margin-top: 4px;
 	}
 
@@ -707,6 +738,13 @@
 		font-family: inherit;
 		font-size: inherit;
 		caret-color: #50fa7b;
+		resize: none;
+		overflow: hidden;
+		white-space: pre-wrap;
+		word-break: break-word;
+		padding: 0;
+		margin: 0;
+		line-height: inherit;
 	}
 
 	.terminal-input::placeholder {
