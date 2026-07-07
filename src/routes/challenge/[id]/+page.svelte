@@ -5,6 +5,7 @@
 	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
 	import PromptBox from '$lib/components/PromptBox.svelte';
 	import { createChallengeStore } from '$lib/client/challenge-store.svelte';
+	import { commandPopulatesTerminalInput } from '$lib/utils/tmux-commands';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -180,8 +181,11 @@
 			const wasCorrect = await challenge.submitAnswer(answer);
 			console.debug('[Signal] Answer submitted, wasCorrect:', wasCorrect);
 
-			// Clear input regardless of result
-			terminalRef?.clearInput();
+			// Clear input after the command, unless the command's whole effect was to populate
+			// the pane input (paste-buffer) — clearing it would erase the paste on screen.
+			if (!commandPopulatesTerminalInput(signal.commandName)) {
+				terminalRef?.clearInput();
+			}
 
 			// Focus terminal for next input
 			if (challenge.status === 'active') {
@@ -200,7 +204,11 @@
 
 			// Submit raw command (not type-safe, likely won't match)
 			await challenge.submitAnswer(command);
-			terminalRef?.clearInput();
+			// The raw `command` signal carries no commandName, so the predicate returns false
+			// and clearing continues exactly as before.
+			if (!commandPopulatesTerminalInput(signal.commandName)) {
+				terminalRef?.clearInput();
+			}
 
 			if (challenge.status === 'active') {
 				terminalRef?.focus();

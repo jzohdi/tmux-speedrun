@@ -2485,6 +2485,20 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 				});
 				break;
 			}
+			case 'paste': {
+				const buffer = findPasteBuffer(operation.name);
+
+				// Empty / unknown buffer → silent no-op mirroring real tmux (no throw, no error line).
+				if (!buffer || !buffer.content) {
+					return;
+				}
+
+				// Append the buffer content to the focused pane's current input value.
+				const pane = getFocusedPaneState();
+				const currentValue = pane?.inputValue ?? '';
+				setInput(currentValue + buffer.content);
+				break;
+			}
 		}
 	}
 
