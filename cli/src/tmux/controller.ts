@@ -34,7 +34,7 @@ export type ChallengeRunResult = { completed: boolean; finish?: FinishResponse; 
 export type StepEngine = {
 	isComplete(): boolean;
 	/** Current step for display; index is 0-based. Only valid while !isComplete(). */
-	view(): { prompt: string; index: number; total: number };
+	view(): { prompt: string; index: number; total: number; hotkey?: string };
 	/** The step object handed to deriveCandidates. */
 	detectionStep(): DecryptedStep;
 	seedInput(): string | undefined;
@@ -274,8 +274,9 @@ export class PracticeController {
 				// already carry a step-by-step instruction and keep their prompt verbatim.
 				const shortcut =
 					step.kind === 'command' ? COMMAND_SHORTCUTS.get(step.commandName) : undefined;
-				const prompt = shortcut ? `${step.prompt} — ${shortcut}` : step.prompt;
-				return { prompt, index, total };
+				// Carry the shortcut as a SEPARATE field so the status line can escape
+				// the prompt text and style the hotkey independently (issue #53).
+				return { prompt: step.prompt, index, total, hotkey: shortcut };
 			},
 			detectionStep: () => ({
 				prompt: flat[index].step.prompt,
