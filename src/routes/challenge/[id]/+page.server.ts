@@ -1,10 +1,8 @@
 import { error } from '@sveltejs/kit';
 import {
-	getChallengeByIndex,
-	getChallengeCount,
-	getMaxChallengeIndex,
-	getDifficultyLabel,
-	type Challenge
+	isValidChallengeId,
+	getChallengePoolCount,
+	getAllChallengeMetadata
 } from '$lib/data/challenges';
 import { PENDING_RESULT_COOKIE_NAME } from '$lib/server/env';
 import { verifyPendingResultToken } from '$lib/server/challenges/pending';
@@ -12,7 +10,6 @@ import type { SessionUser } from '$lib/server/auth/session';
 import type { PageServerLoad } from './$types';
 
 export type ChallengePageData = {
-	challenge: Challenge;
 	challengeIndex: number;
 	totalChallenges: number;
 	difficultyLabel: string;
@@ -37,12 +34,11 @@ export const load: PageServerLoad = async ({
 		});
 	}
 
-	const challenge = getChallengeByIndex(numericId);
-
-	if (!challenge) {
-		const maxIndex = getMaxChallengeIndex();
+	// Derive the accepted id range from the metadata source the home page renders,
+	// so the route can never again drift from what's listed (issue #43).
+	if (!isValidChallengeId(numericId)) {
 		error(404, {
-			message: `Challenge ${numericId} not found. Available challenges: 0-${maxIndex}.`
+			message: `Challenge ${numericId} not found. Available challenges: 0-${getChallengePoolCount() - 1}.`
 		});
 	}
 
@@ -56,10 +52,9 @@ export const load: PageServerLoad = async ({
 	}
 
 	return {
-		challenge,
 		challengeIndex: numericId,
-		totalChallenges: getChallengeCount(),
-		difficultyLabel: getDifficultyLabel(challenge.difficulty),
+		totalChallenges: getChallengePoolCount(),
+		difficultyLabel: getAllChallengeMetadata()[numericId].difficultyLabel,
 		user: locals.user,
 		pendingResult
 	};
