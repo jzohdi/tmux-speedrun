@@ -44,4 +44,19 @@ describe('challenge metadata', () => {
 		expect(isValidChallengeId(6)).toBe(false);
 		expect(isValidChallengeId(1.5)).toBe(false);
 	});
+
+	it('keeps the valid-id range coupled to the metadata length (source of truth)', () => {
+		// The route loader must derive its accepted id range from this metadata, so the
+		// pool count and the metadata array can never disagree.
+		expect(getChallengePoolCount()).toBe(getAllChallengeMetadata().length);
+
+		// The last metadata index is valid; one past the end is not.
+		const lastIndex = getAllChallengeMetadata().length - 1;
+		expect(isValidChallengeId(lastIndex)).toBe(true);
+		expect(isValidChallengeId(getChallengePoolCount())).toBe(false);
+
+		// Challenge 5 (the one the home page lists but the legacy array dropped) is valid.
+		expect(isValidChallengeId(5)).toBe(true);
+		expect(isValidChallengeId(6)).toBe(false);
+	});
 });
