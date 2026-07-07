@@ -5,7 +5,10 @@
 	import { ChallengeTerminal, type TmuxSignal } from '$lib/components/tmux';
 	import PromptBox from '$lib/components/PromptBox.svelte';
 	import { createChallengeStore } from '$lib/client/challenge-store.svelte';
-	import { commandPopulatesTerminalInput } from '$lib/utils/tmux-commands';
+	import {
+		commandPopulatesTerminalInput,
+		commandOpensInputOverlay
+	} from '$lib/utils/tmux-commands';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -181,14 +184,18 @@
 			const wasCorrect = await challenge.submitAnswer(answer);
 			console.debug('[Signal] Answer submitted, wasCorrect:', wasCorrect);
 
+			const opensOverlay = commandOpensInputOverlay(signal.commandName);
+
 			// Clear input after the command, unless the command's whole effect was to populate
-			// the pane input (paste-buffer) — clearing it would erase the paste on screen.
-			if (!commandPopulatesTerminalInput(signal.commandName)) {
+			// the pane input (paste-buffer) — clearing would erase the paste — or to open a
+			// component-owned overlay (command-prompt) — clearing would dismiss the overlay.
+			if (!commandPopulatesTerminalInput(signal.commandName) && !opensOverlay) {
 				terminalRef?.clearInput();
 			}
 
-			// Focus terminal for next input
-			if (challenge.status === 'active') {
+			// Focus terminal for next input, unless an overlay is open — stealing focus would
+			// pull the cursor out of the overlay input (command-prompt).
+			if (challenge.status === 'active' && !opensOverlay) {
 				terminalRef?.focus();
 			}
 			return;
@@ -204,13 +211,15 @@
 
 			// Submit raw command (not type-safe, likely won't match)
 			await challenge.submitAnswer(command);
-			// The raw `command` signal carries no commandName, so the predicate returns false
-			// and clearing continues exactly as before.
-			if (!commandPopulatesTerminalInput(signal.commandName)) {
+			// The raw `command` signal carries no commandName, so both predicates return false
+			// and clearing/focusing continue exactly as before. Kept in sync with the
+			// command-executed branch defensively so an overlay can never be dismissed here.
+			const opensOverlay = commandOpensInputOverlay(signal.commandName);
+			if (!commandPopulatesTerminalInput(signal.commandName) && !opensOverlay) {
 				terminalRef?.clearInput();
 			}
 
-			if (challenge.status === 'active') {
+			if (challenge.status === 'active' && !opensOverlay) {
 				terminalRef?.focus();
 			}
 		}
