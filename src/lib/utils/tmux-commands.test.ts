@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	CommandId,
+	commandOpensInputOverlay,
 	commandPopulatesTerminalInput,
 	executeCommand
 } from './tmux-commands';
@@ -29,6 +30,42 @@ describe('commandPopulatesTerminalInput', () => {
 
 	it('returns false for undefined (the raw command signal carries no commandName)', () => {
 		expect(commandPopulatesTerminalInput(undefined)).toBe(false);
+	});
+});
+
+/**
+ * Issue #50: `prefix + :` (command-prompt) must open its orange input overlay in challenge
+ * mode, at parity with practice mode.
+ *
+ * `commandOpensInputOverlay` is the challenge route's overlay gate: it must return `true` only
+ * for commands whose effect is to open a component-owned input overlay (currently just
+ * `command-prompt`). The challenge consumer uses it to skip BOTH `clearInput()` and `focus()`
+ * so it does not dismiss the just-opened overlay or steal the cursor out of it.
+ *
+ * It is a deliberate sibling of `commandPopulatesTerminalInput` (paste-buffer): the two sets
+ * stay disjoint — paste-buffer skips clearing but keeps focus; command-prompt skips both.
+ */
+describe('commandOpensInputOverlay', () => {
+	it('returns true for command-prompt (its effect is to open an input overlay)', () => {
+		expect(commandOpensInputOverlay(CommandId.COMMAND_PROMPT)).toBe(true);
+	});
+
+	it('returns false for a representative sample of non-overlay commands', () => {
+		expect(commandOpensInputOverlay(CommandId.LIST_WINDOWS)).toBe(false);
+		expect(commandOpensInputOverlay(CommandId.SPLIT_VERTICAL)).toBe(false);
+		expect(commandOpensInputOverlay(CommandId.KILL_PANE)).toBe(false);
+		expect(commandOpensInputOverlay(CommandId.RENAME_WINDOW)).toBe(false);
+	});
+
+	it('returns false for undefined (the raw command signal carries no commandName)', () => {
+		expect(commandOpensInputOverlay(undefined)).toBe(false);
+	});
+
+	it('stays disjoint from the input-populating (paste-buffer) gate', () => {
+		// paste-buffer populates the pane input but does NOT open an overlay.
+		expect(commandOpensInputOverlay(CommandId.PASTE_BUFFER)).toBe(false);
+		// command-prompt opens an overlay but does NOT populate the pane input.
+		expect(commandPopulatesTerminalInput(CommandId.COMMAND_PROMPT)).toBe(false);
 	});
 });
 
