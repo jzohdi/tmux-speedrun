@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { load } from './+page.server';
+import { load, type ChallengePageData } from './+page.server';
 
 type LoadEvent = Parameters<typeof load>[0];
 
@@ -29,6 +29,16 @@ function makeEvent(id: string): LoadEvent {
 		cookies: { get: () => undefined },
 		locals: { user: null }
 	} as unknown as LoadEvent;
+}
+
+/**
+ * Invoke `load` and return its resolved data. `PageServerLoad`'s declared return
+ * type is a `void | PageData` union (a `load` may legally return nothing), so we
+ * narrow to the loader's own `ChallengePageData` here — a type-only cast that
+ * leaves every runtime assertion below untouched.
+ */
+async function loadData(id: string): Promise<ChallengePageData> {
+	return (await load(makeEvent(id))) as ChallengePageData;
 }
 
 /** Invoke `load` and return the caught throw (or `undefined` if it resolved). */
@@ -43,7 +53,7 @@ async function loadError(id: string): Promise<unknown> {
 
 describe('GET /challenge/[id] loader — reachability (issue #43)', () => {
 	it('loads challenge 5 (previously a 404) as a playable challenge', async () => {
-		const data = await load(makeEvent('5'));
+		const data = await loadData('5');
 
 		expect(data.challengeIndex).toBe(5);
 		expect(data.totalChallenges).toBe(6);
@@ -52,7 +62,7 @@ describe('GET /challenge/[id] loader — reachability (issue #43)', () => {
 	});
 
 	it('loads challenge 0 (lower bound) with the metadata-derived total', async () => {
-		const data = await load(makeEvent('0'));
+		const data = await loadData('0');
 
 		expect(data.challengeIndex).toBe(0);
 		expect(data.totalChallenges).toBe(6);
