@@ -81,9 +81,9 @@
 	<div class="bg-grid"></div>
 	<div class="bg-glow"></div>
 
-	<!-- Hero Section -->
-	<section class="hero">
-		<div class="hero-content">
+	<!-- Top Navbar -->
+	<nav class="navbar">
+		<div class="nav-inner">
 			<a
 				href="https://github.com/jzohdi/tmux-speedrun"
 				target="_blank"
@@ -104,7 +104,7 @@
 				<span>Open Source</span>
 			</a>
 
-			<div class="auth-bar">
+			<div class="nav-auth">
 				{#if data.user}
 					<span class="signed-in" title="Verified GitHub identity">
 						<span class="dot" aria-hidden="true">●</span>
@@ -129,7 +129,12 @@
 					</button>
 				{/if}
 			</div>
+		</div>
+	</nav>
 
+	<!-- Hero Section -->
+	<section class="hero">
+		<div class="hero-content">
 			<h1 class="title">
 				<span class="title-accent">tmux</span>-speedrun
 			</h1>
@@ -224,11 +229,39 @@
 		z-index: 0;
 	}
 
+	/* Top Navbar */
+	.navbar {
+		position: relative;
+		z-index: 1;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+	}
+
+	.nav-inner {
+		max-width: 1100px;
+		margin: 0 auto;
+		padding: 16px 24px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 12px;
+	}
+
+	.nav-auth {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 12px;
+		min-width: 0;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 13px;
+	}
+
 	/* Hero Section */
 	.hero {
 		position: relative;
 		z-index: 1;
-		padding: 80px 24px 40px;
+		padding: 56px 24px 40px;
 		text-align: center;
 	}
 
@@ -250,7 +283,6 @@
 		color: #50fa7b;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
-		margin-bottom: 24px;
 		text-decoration: none;
 		transition:
 			background 0.2s ease,
@@ -268,23 +300,13 @@
 		flex-shrink: 0;
 	}
 
-	/* Auth bar (signed-in indicator / sign-in button) */
-	.auth-bar {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-wrap: wrap;
-		gap: 12px;
-		margin-bottom: 24px;
-		font-family: 'JetBrains Mono', monospace;
-		font-size: 13px;
-	}
-
 	.signed-in {
 		display: inline-flex;
 		align-items: center;
 		gap: 8px;
+		min-width: 0;
 		color: #a0a0a0;
+		word-break: break-word;
 	}
 
 	.signed-in .dot {
@@ -426,8 +448,12 @@
 
 	/* Responsive */
 	@media (max-width: 640px) {
+		.nav-inner {
+			padding: 12px 16px;
+		}
+
 		.hero {
-			padding: 60px 16px 30px;
+			padding: 40px 16px 30px;
 		}
 
 		.command-hints {
