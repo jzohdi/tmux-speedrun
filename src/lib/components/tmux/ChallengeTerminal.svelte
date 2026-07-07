@@ -778,9 +778,9 @@
 				tmux.setInput(nextValue);
 				restoreFocusedPaneInputSelection(nextCaretPosition);
 				emitCompositeSequenceSignal(
-				createCopyPasteSequenceAction(latestPasteBuffer.content),
-				CommandId.PASTE_BUFFER
-			);
+					createCopyPasteSequenceAction(latestPasteBuffer.content),
+					CommandId.PASTE_BUFFER
+				);
 				emitPracticeStepSignal(CommandId.PASTE_BUFFER);
 				break;
 			}
