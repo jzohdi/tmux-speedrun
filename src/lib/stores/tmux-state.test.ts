@@ -843,6 +843,135 @@ describe('createTmuxStore capture-pane command', () => {
 	});
 });
 
+describe('createTmuxStore paste-buffer command', () => {
+	it('appends the latest buffer content to the focused pane input via executeRegisteredTmuxCommand', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // buffer0001
+		store.pushPasteBuffer('world'); // buffer0002 (latest)
+
+		store.executeRegisteredTmuxCommand('paste-buffer');
+
+		expect(store.focusedPane?.inputValue).toBe('world');
+	});
+
+	it('appends to any existing pane input rather than replacing it', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.setInput('echo ');
+		store.pushPasteBuffer('world');
+
+		store.executeRegisteredTmuxCommand('paste-buffer');
+
+		expect(store.focusedPane?.inputValue).toBe('echo world');
+	});
+
+	it('pastes via processCommand (the command-prompt path) without a tmux prefix', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('pasted-text');
+
+		store.processCommand('paste-buffer');
+
+		expect(store.focusedPane?.inputValue).toBe('pasted-text');
+	});
+
+	it('targets a named buffer with -b', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello'); // buffer0001
+		store.pushPasteBuffer('world'); // buffer0002
+
+		store.executeRegisteredTmuxCommand('paste-buffer -b buffer0001');
+
+		expect(store.focusedPane?.inputValue).toBe('hello');
+	});
+
+	it('is a silent no-op when there are no buffers (no throw, input unchanged)', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.setInput('untouched');
+
+		expect(() => store.executeRegisteredTmuxCommand('paste-buffer')).not.toThrow();
+
+		expect(store.focusedPane?.inputValue).toBe('untouched');
+		// No error line should be added to history.
+		expect(store.focusedPane?.history.at(-1)?.type).not.toBe('error');
+	});
+
+	it('is a silent no-op when the named buffer is unknown', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.setInput('untouched');
+		store.pushPasteBuffer('hello');
+
+		expect(() =>
+			store.executeRegisteredTmuxCommand('paste-buffer -b buffer9999')
+		).not.toThrow();
+
+		expect(store.focusedPane?.inputValue).toBe('untouched');
+	});
+
+	it('emits command-executed with commandName paste-buffer', () => {
+		tmuxConfigStore.resetForTesting();
+		const commandNames: string[] = [];
+		const store = createTmuxStore({
+			onSignal: (signal) => {
+				if (signal.type === 'command-executed' && signal.commandName) {
+					commandNames.push(signal.commandName);
+				}
+			}
+		});
+		store.pushPasteBuffer('world');
+
+		store.processCommand('paste-buffer');
+
+		expect(commandNames).toContain('paste-buffer');
+	});
+
+	it('resolves the pasteb alias', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('world');
+
+		store.executeRegisteredTmuxCommand('pasteb');
+
+		expect(store.focusedPane?.inputValue).toBe('world');
+	});
+});
+
+describe('createTmuxStore query commands via processCommand (command-prompt path)', () => {
+	// Regression lock: list/query commands typed in the command prompt (no `tmux ` prefix)
+	// must still produce their normal output regardless of the current challenge step.
+	it('list-buffers produces its normal output', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+		store.pushPasteBuffer('hello');
+
+		store.processCommand('list-buffers');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toBe('buffer0001: 5 bytes: "hello"');
+	});
+
+	it('list-windows produces its normal output', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.processCommand('list-windows');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toContain('main');
+	});
+
+	it('list-sessions produces its normal output', () => {
+		tmuxConfigStore.resetForTesting();
+		const store = createTmuxStore();
+
+		store.processCommand('list-sessions');
+
+		expect(store.focusedPane?.history.at(-1)?.content).toContain('0:');
+	});
+});
+
 describe('createTmuxStore list-keys command', () => {
 	it('lists the default prefix key bindings', () => {
 		tmuxConfigStore.resetForTesting();

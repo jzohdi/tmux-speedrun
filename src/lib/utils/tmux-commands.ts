@@ -111,6 +111,21 @@ export function isValidCommandId(value: string): value is CommandIdType {
 	return Object.values(CommandId).includes(value as CommandIdType);
 }
 
+/**
+ * Commands whose entire effect is to populate the focused pane's text input.
+ * Kept as a data-driven set so future input-populating commands are easy to add.
+ */
+const INPUT_POPULATING_COMMANDS: ReadonlySet<CommandIdType> = new Set([CommandId.PASTE_BUFFER]);
+
+/**
+ * True only for commands whose effect is to populate the pane input (currently paste-buffer).
+ * Consumers use this to decide whether clearing the input after a command would erase its effect.
+ * Returns false for undefined (e.g. the raw `command` signal, which carries no commandName).
+ */
+export function commandPopulatesTerminalInput(commandName?: CommandIdType): boolean {
+	return commandName !== undefined && INPUT_POPULATING_COMMANDS.has(commandName);
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -185,7 +200,8 @@ export type ConfigOperation = {
 export type BufferOperation =
 	| { type: 'show'; name?: string }
 	| { type: 'delete'; name?: string }
-	| { type: 'capture' };
+	| { type: 'capture' }
+	| { type: 'paste'; name?: string }; // paste a buffer into the focused pane input
 
 /**
  * Result returned from a command handler.
@@ -630,6 +646,59 @@ registerCommand({
 		handled: true,
 		bufferOperation: { type: 'capture' }
 	})
+});
+
+/**
+ * Paste a paste buffer into the focused pane input (tmux-style).
+ * Supports: tmux paste-buffer, tmux pasteb, paste-buffer, pasteb, optionally -b <name>.
+ * Without -b, pastes the most-recent buffer. The store appends the buffer content to the
+ * focused pane's input; an empty / unknown buffer is a silent no-op.
+ */
+registerCommand({
+	name: CommandId.PASTE_BUFFER,
+	matchPatterns: ['tmux paste-buffer', 'tmux pasteb', 'paste-buffer', 'pasteb'],
+	matchMode: 'prefix',
+	description: 'Paste a buffer into the focused pane',
+	handler: (ctx) => ({
+		handled: true,
+		bufferOperation: { type: 'paste', name: getFlagValue(ctx.args, '-b') }
+	})
+});
+
+/**
+ * Enter copy mode (tmux-style). Registered so the command prompt can resolve its canonical
+ * id from typed text; the visible effect is owned by ChallengeTerminal.executeLocalCommand.
+ */
+registerCommand({
+	name: CommandId.COPY_MODE,
+	matchPatterns: ['tmux copy-mode', 'copy-mode'],
+	matchMode: 'prefix',
+	description: 'Enter copy mode',
+	handler: () => ({ handled: true }) // view effect owned by the component
+});
+
+/**
+ * Briefly display pane indicators (tmux-style). Registered as a resolver; the visible effect
+ * is owned by the component.
+ */
+registerCommand({
+	name: CommandId.DISPLAY_PANES,
+	matchPatterns: ['tmux display-panes', 'tmux displayp', 'display-panes', 'displayp'],
+	matchMode: 'prefix',
+	description: 'Briefly display pane indicators',
+	handler: () => ({ handled: true }) // view effect owned by the component
+});
+
+/**
+ * Display the clock (tmux-style). Registered as a resolver; the visible effect is owned by
+ * the component.
+ */
+registerCommand({
+	name: CommandId.SHOW_TIME,
+	matchPatterns: ['tmux clock-mode', 'clock-mode', 'show-time'],
+	matchMode: 'prefix',
+	description: 'Display the clock',
+	handler: () => ({ handled: true }) // view effect owned by the component
 });
 
 /**

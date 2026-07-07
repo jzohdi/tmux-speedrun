@@ -10,7 +10,12 @@
 		type Keybinding
 	} from '$lib/data/keybindings';
 	import { getCommandByName, type TmuxCommand } from '$lib/data/tmux-commands';
-	import { CommandId, type CommandIdType, isValidCommandId } from '$lib/utils/tmux-commands';
+	import {
+		CommandId,
+		type CommandIdType,
+		executeCommand,
+		isValidCommandId
+	} from '$lib/utils/tmux-commands';
 	import {
 		createCopySurface,
 		extractCopySurfaceText,
@@ -136,6 +141,18 @@
 	/**
 	 * Handle status bar input submission.
 	 */
+	/**
+	 * Commands whose visible effect is component-owned (overlays / copy surface / DOM focus)
+	 * rather than store-handled. When typed into the command prompt they are resolved to their
+	 * canonical id and dispatched through executeLocalCommand — the same path prefix keys use.
+	 * PASTE_BUFFER is intentionally excluded: it is store-handled via processCommand.
+	 */
+	const VIEW_EFFECT_COMMANDS: ReadonlySet<CommandIdType> = new Set([
+		CommandId.COPY_MODE,
+		CommandId.DISPLAY_PANES,
+		CommandId.SHOW_TIME
+	]);
+
 	function handleStatusBarInputSubmit(value: string): void {
 		const trimmedValue = value.trim();
 
@@ -167,9 +184,22 @@
 				return;
 			}
 
-			// Forward the command to processCommand - it handles everything generically
-			// This will execute the command and emit the appropriate signal
-			tmux.processCommand(trimmedValue);
+			// Resolve the typed text to a canonical command id. View-effect commands
+			// (copy-mode, display-panes, show-time) own their visible effect in the component,
+			// so route them through the same local path prefix keys use. Everything else —
+			// paste-buffer, the list-* query commands, etc. — runs generically in the store.
+			const resolved = executeCommand(
+				trimmedValue,
+				tmux.focusedPaneId,
+				tmux.focusedPane?.mode ?? 'tmux'
+			)?.commandName;
+
+			if (resolved && VIEW_EFFECT_COMMANDS.has(resolved)) {
+				tmux.executeTmuxCommand(resolved); // scoring signal, same as prefix path
+				executeLocalCommand(resolved); // component-owned view effect (overlay / copy surface)
+			} else {
+				tmux.processCommand(trimmedValue);
+			}
 
 			// Reset input mode and restore focus
 			inputModeCommand = null;
@@ -335,10 +365,11 @@
 		});
 	}
 
-	function emitCompositeSequenceSignal(command: string): void {
+	function emitCompositeSequenceSignal(command: string, commandName?: CommandIdType): void {
 		onSignal?.({
 			type: 'command-executed',
-			command
+			command,
+			...(commandName ? { commandName } : {})
 		});
 	}
 
@@ -746,7 +777,10 @@
 
 				tmux.setInput(nextValue);
 				restoreFocusedPaneInputSelection(nextCaretPosition);
-				emitCompositeSequenceSignal(createCopyPasteSequenceAction(latestPasteBuffer.content));
+				emitCompositeSequenceSignal(
+					createCopyPasteSequenceAction(latestPasteBuffer.content),
+					CommandId.PASTE_BUFFER
+				);
 				emitPracticeStepSignal(CommandId.PASTE_BUFFER);
 				break;
 			}
