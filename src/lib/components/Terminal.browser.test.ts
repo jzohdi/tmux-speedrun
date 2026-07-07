@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import { userEvent } from 'vitest/browser';
 import Terminal from './Terminal.svelte';
 
 // The home-page terminal creates a TanStack Query at init, which needs a
@@ -96,5 +97,94 @@ describe('Terminal.runCommand (clickable command-hint support)', () => {
 		await vi.waitFor(() => {
 			expect(document.activeElement).toBe(input);
 		});
+	});
+});
+
+// Issue #51: long CLI command input must wrap onto subsequent lines within the
+// terminal width instead of scrolling horizontally / getting cut off. The fix
+// converts the single-line `<input type="text">` into an auto-growing, wrapping
+// `<textarea>`. These tests pin the wrapping/auto-grow behavior that does not
+// exist yet — they fail against the current single-line `<input>`.
+describe('Terminal input wrapping (issue #51)', () => {
+	// A long single-token string (no spaces) that cannot fit on one line at any
+	// realistic terminal width, so it must wrap when the control supports it.
+	const LONG_COMMAND = 'a'.repeat(600);
+
+	// Reads the live rendered height of the interactive control. The control is
+	// selected by `.terminal-input`; offsetHeight reflects its wrapped content.
+	function inputHeight(): number {
+		const el = document.querySelector<HTMLElement>('.terminal-input');
+		if (!el) throw new Error('.terminal-input not found');
+		return el.offsetHeight;
+	}
+
+	it('renders the interactive control as a wrapping <textarea>', async () => {
+		await render(Terminal);
+
+		const el = document.querySelector('.terminal-input');
+		expect(el).not.toBeNull();
+		// A single-line <input> cannot wrap; the wrapping control must be a
+		// <textarea> (which still reports role="textbox" for existing tests).
+		expect(el?.tagName).toBe('TEXTAREA');
+	});
+
+	it('grows in height as a long command wraps onto multiple lines', async () => {
+		const screen = await render(Terminal);
+		const input = screen.getByRole('textbox');
+
+		// Baseline: the empty, single-line height.
+		const baseline = inputHeight();
+
+		// Type a long command that must wrap within the terminal width.
+		await input.fill(LONG_COMMAND);
+		await expect.element(input).toHaveValue(LONG_COMMAND);
+
+		// The control must grow taller than the one-line baseline to show the
+		// full wrapped command instead of clipping / scrolling horizontally.
+		await vi.waitFor(() => {
+			expect(inputHeight()).toBeGreaterThan(baseline);
+		});
+	});
+
+	it('collapses back to the one-line baseline after the command is submitted', async () => {
+		const screen = await render(Terminal);
+		const api = screen.component as unknown as TerminalApi;
+		const input = screen.getByRole('textbox');
+
+		const baseline = inputHeight();
+
+		// Fill with a wrapping command and confirm it grew.
+		await input.fill(LONG_COMMAND);
+		await vi.waitFor(() => {
+			expect(inputHeight()).toBeGreaterThan(baseline);
+		});
+
+		// Submit via the same path as pressing Enter; stays in default mode.
+		api.runCommand('tsr start <id>');
+
+		// Value clears AND the box collapses back to the one-line baseline
+		// (programmatic clears must re-run the auto-grow logic).
+		await expect.element(screen.getByRole('textbox')).toHaveValue('');
+		await vi.waitFor(() => {
+			expect(inputHeight()).toBeLessThanOrEqual(baseline + 1);
+		});
+	});
+
+	it('submits on Enter and clears the input without inserting a newline', async () => {
+		const screen = await render(Terminal);
+		const input = screen.getByRole('textbox');
+
+		await input.fill('tsr start <id>');
+		// Enter must submit (bubbling to the container handler) and must NOT
+		// insert a literal newline into the textarea value.
+		await userEvent.keyboard('{Enter}');
+
+		// The command was processed (echoed to history) ...
+		await expect.element(screen.getByText(/^\$ tsr start <id>$/)).toBeVisible();
+		// ... and the input is cleared with no residual newline.
+		const el = document.querySelector<HTMLTextAreaElement>('.terminal-input');
+		expect(el).not.toBeNull();
+		expect(el?.value).toBe('');
+		expect(el?.value ?? '').not.toContain('\n');
 	});
 });
