@@ -1,15 +1,18 @@
 name: Release CLI to npm
 
-# Automatically publishes the cli/ workspace package to npm whenever CLI
-# code (or the shared src/lib code that tsup bundles into it) lands on
-# main. If cli/package.json's version was bumped in the merge, that exact
-# version is published; otherwise the patch version is bumped
-# automatically and the bump is committed back to main. Uses OIDC trusted
-# publishing (configure on npmjs.com: repo jzohdi/tmux-speedrun, workflow
+# Publishes the cli/ workspace package to npm whenever CLI code (or the
+# shared src/lib code that tsup bundles into it) lands on main, provided
+# cli/package.json's version isn't already on npm. To cut a release, bump
+# cli/package.json's version in your PR; when it merges, that exact version
+# is published and tagged. Merges that don't change the version are a no-op
+# (the publish/tag steps are skipped). Uses OIDC trusted publishing
+# (configure on npmjs.com: repo jzohdi/tmux-speedrun, workflow
 # release-cli.yml) — no NPM_TOKEN secret required.
 #
-# workflow_dispatch acts as a "force release" button: it always results
-# in a publish (auto-bumping if the current version is already on npm).
+# The workflow deliberately does NOT auto-bump the version itself: main is a
+# protected branch that rejects direct pushes, so the bump must come from a
+# PR. workflow_dispatch re-runs the publish for the current version if it
+# isn't on npm yet; otherwise it's a no-op.
 
 on:
   push:
@@ -20,7 +23,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # push the auto-bump commit and release tag
+  contents: write # push the release tag
   id-token: write # npm OIDC trusted publishing
 
 concurrency:
@@ -70,27 +73,24 @@ jobs:
         run: |
           current="$(node -p "require('./cli/package.json').version")"
           if npm view "tmux-speedrun@${current}" version >/dev/null 2>&1; then
-            # Version already on npm -> auto-bump patch and push it to main.
-            # (A push from GITHUB_TOKEN cannot retrigger workflows, so no loop.)
-            new="$(cd cli && npm version patch --no-git-tag-version)"
-            new="${new#v}"
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add cli/package.json
-            git commit -m "Release tmux-speedrun ${new} [skip ci]"
-            git pull --rebase origin main
-            git push origin HEAD:main
-            echo "version=${new}" >> "$GITHUB_OUTPUT"
+            # Already published. Branch protection blocks the workflow from
+            # committing an auto-bump back to main, so a release requires
+            # bumping cli/package.json in a PR. Nothing to do this run.
+            echo "::notice::tmux-speedrun@${current} is already on npm; skipping publish. Bump cli/package.json in a PR to release a new version."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
           else
-            # Version was bumped manually in the merge -> publish it as-is.
+            # Version was bumped in the merged PR -> publish it as-is.
             echo "version=${current}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish to npm
+        if: steps.version.outputs.publish == 'true'
         working-directory: cli
         run: npm publish
 
       - name: Tag release
+        if: steps.version.outputs.publish == 'true'
         run: |
           git tag "v${{ steps.version.outputs.version }}"
           git push origin "v${{ steps.version.outputs.version }}"
