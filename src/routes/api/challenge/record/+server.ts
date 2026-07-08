@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ cookies, locals }) => {
 		error(400, { message: 'No result to record.' });
 	}
 
-	const { challengeId, durationMs } = pending;
+	const { challengeId, durationMs, sessionId } = pending;
 
 	// Identity resolution (invariant II0.1): the only named entries are verified
 	// GitHub identities; anonymous entries are always null. No request body is
@@ -45,17 +45,23 @@ export const POST: RequestHandler = async ({ cookies, locals }) => {
 				challengeId: String(challengeId),
 				durationMs,
 				username: user.username,
-				githubId: user.githubId
+				githubId: user.githubId,
+				sessionId
 			}
 		: {
 				challengeId: String(challengeId),
 				durationMs,
-				username: null
+				username: null,
+				sessionId
 			};
 
 	let leaderboardPosition: number | undefined;
 	try {
-		await db.insert(leaderboard).values(insertValues);
+		// onConflictDoNothing on the unique sessionId: replaying a retained pending
+		// cookie (the client controls its cookie jar) cannot duplicate the row.
+		await db.insert(leaderboard).values(insertValues).onConflictDoNothing({
+			target: leaderboard.sessionId
+		});
 
 		// Final rank: count of strictly-faster entries + 1.
 		const result = await db

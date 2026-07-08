@@ -31,6 +31,14 @@ export type SessionUser = {
 	username: string;
 };
 
+/**
+ * Server-side session lifetime, matching SESSION_COOKIE_OPTIONS.maxAge (30d).
+ * Enforced in verifySessionToken so a leaked token (e.g. from the CLI's token
+ * store) cannot be replayed indefinitely — the browser cookie's maxAge alone
+ * only limits the browser's copy.
+ */
+export const MAX_SESSION_AGE_MS = 60 * 60 * 24 * 30 * 1000;
+
 // --- base64url helpers (URL/cookie-safe, padding stripped) -----------------
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -89,8 +97,14 @@ export async function verifySessionToken(raw: string): Promise<SessionUser | nul
 			typeof payload !== 'object' ||
 			payload === null ||
 			typeof payload.githubId !== 'number' ||
-			typeof payload.username !== 'string'
+			typeof payload.username !== 'string' ||
+			typeof payload.iat !== 'number'
 		) {
+			return null;
+		}
+
+		// Expiry: an old-enough token is anonymous, even with a valid signature.
+		if (Date.now() - payload.iat > MAX_SESSION_AGE_MS) {
 			return null;
 		}
 

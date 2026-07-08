@@ -33,6 +33,7 @@ import {
 export type PendingResultPayload = {
 	challengeId: number; // challenge index (0-based), matches the route param
 	durationMs: number;
+	sessionId: string; // challenge crypto session id — replay guard at record time
 	iat: number; // issued-at, epoch ms
 };
 
@@ -40,6 +41,7 @@ export type PendingResultPayload = {
 export type PendingResult = {
 	challengeId: number;
 	durationMs: number;
+	sessionId: string;
 };
 
 /** Single source of truth for pending-result expiry (1h) — equals the challenge TTL. */
@@ -101,6 +103,7 @@ export async function verifyPendingResultToken(raw: string): Promise<PendingResu
 			payload === null ||
 			typeof payload.challengeId !== 'number' ||
 			typeof payload.durationMs !== 'number' ||
+			typeof payload.sessionId !== 'string' ||
 			typeof payload.iat !== 'number'
 		) {
 			return null;
@@ -111,7 +114,11 @@ export async function verifyPendingResultToken(raw: string): Promise<PendingResu
 			return null;
 		}
 
-		return { challengeId: payload.challengeId, durationMs: payload.durationMs };
+		return {
+			challengeId: payload.challengeId,
+			durationMs: payload.durationMs,
+			sessionId: payload.sessionId
+		};
 	} catch {
 		return null;
 	}

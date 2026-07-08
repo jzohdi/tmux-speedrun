@@ -24,6 +24,17 @@ function padRight(value: string, width: number): string {
 	return value.length >= width ? value : value + ' '.repeat(width - value.length);
 }
 
+/**
+ * Strip control characters from server-provided text before writing it to the
+ * user's terminal, so a stored leaderboard name can never smuggle ANSI escape
+ * sequences (title changes, OSC clipboard writes, …) into this TTY.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+function sanitizeForTerminal(text: string): string {
+	return text.replace(CONTROL_CHARS, '');
+}
+
 /** Render a single challenge's entries as an aligned text block. */
 function renderChallenge(challengeId: string, entries: LeaderboardEntry[]): string {
 	const heading = `Challenge ${challengeId}`;
@@ -33,11 +44,14 @@ function renderChallenge(challengeId: string, entries: LeaderboardEntry[]): stri
 	}
 
 	// A trailing check-mark marks a verified GitHub identity (verified = githubId != null).
-	const rows = entries.map((entry) => [
-		String(entry.rank),
-		entry.verified ? `${entry.username} ✓` : entry.username,
-		entry.time
-	]);
+	const rows = entries.map((entry) => {
+		const username = sanitizeForTerminal(entry.username);
+		return [
+			String(entry.rank),
+			entry.verified ? `${username} ✓` : username,
+			sanitizeForTerminal(entry.time)
+		];
+	});
 
 	const widths = HEADERS.map((header, column) =>
 		Math.max(header.length, ...rows.map((row) => row[column].length))

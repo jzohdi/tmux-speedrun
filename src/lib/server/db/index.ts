@@ -7,12 +7,12 @@ import { env } from '$env/dynamic/private';
 
 if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not set');
 
-// Validate DATABASE_URL format
+// Validate DATABASE_URL format. Never echo the value — it embeds credentials.
 try {
 	new URL(env.DATABASE_URL);
-} catch (error) {
+} catch {
 	throw new Error(
-		`Invalid DATABASE_URL format: ${env.DATABASE_URL}. Expected format: postgresql://user:password@host:port/database`
+		'Invalid DATABASE_URL format. Expected format: postgresql://user:password@host:port/database'
 	);
 }
 

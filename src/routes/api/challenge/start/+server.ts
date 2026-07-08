@@ -17,6 +17,7 @@ import type { RequestHandler } from './$types';
 import { generateEcdhKeyPair, exportPublicKeyJwk, ecdhExchange, bytesToBase64 } from '$lib/crypto';
 import { generateInstructions, isValidChallengeId, prepareChallenge } from '$lib/server/challenges';
 import { parseStartRequest, type ChallengeSessionCookie } from '$lib/server/challenges/schemas';
+import { createChallengeSessionToken } from '$lib/server/challenges/session-cookie';
 import { getSessionSecret, CHALLENGE_COOKIE_NAME, COOKIE_OPTIONS } from '$lib/server/env';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
@@ -50,7 +51,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	let sharedSecret: ArrayBuffer;
 	try {
 		sharedSecret = await ecdhExchange(serverKeyPair.privateKey, clientPublicKeyJwk);
-	} catch (err) {
+	} catch {
 		error(400, { message: 'Invalid client public key' });
 	}
 
@@ -72,8 +73,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		startTime: Date.now()
 	};
 
-	// Set session cookie
-	cookies.set(CHALLENGE_COOKIE_NAME, JSON.stringify(sessionData), COOKIE_OPTIONS);
+	// Set the HMAC-signed session cookie. Signing makes startTime/challengeId
+	// server-authoritative — a client-edited cookie fails verification at finish.
+	cookies.set(
+		CHALLENGE_COOKIE_NAME,
+		await createChallengeSessionToken(sessionData),
+		COOKIE_OPTIONS
+	);
 
 	// Return response
 	return json({

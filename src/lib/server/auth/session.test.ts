@@ -20,6 +20,7 @@ import {
 	verifySessionToken,
 	setSessionCookie,
 	clearSessionCookie,
+	MAX_SESSION_AGE_MS,
 	type SessionPayload
 } from './session';
 import { SESSION_COOKIE_NAME } from '$lib/server/env';
@@ -33,7 +34,7 @@ function b64urlDecode(s: string): string {
 	return atob(padded);
 }
 
-const payload: SessionPayload = { githubId: 12345, username: 'octocat', iat: 1_700_000_000_000 };
+const payload: SessionPayload = { githubId: 12345, username: 'octocat', iat: Date.now() };
 
 describe('createSessionToken / verifySessionToken', () => {
 	it('round-trips a payload to the exposed SessionUser', async () => {
@@ -90,6 +91,33 @@ describe('createSessionToken / verifySessionToken', () => {
 
 		const token = await createSessionToken(payload);
 		expect(await verifySessionToken(token.slice(0, token.length - 4))).toBeNull();
+	});
+
+	it('rejects a token older than MAX_SESSION_AGE_MS (expired ⇒ anonymous)', async () => {
+		const stale: SessionPayload = {
+			...payload,
+			iat: Date.now() - MAX_SESSION_AGE_MS - 1000
+		};
+		const token = await createSessionToken(stale);
+		expect(await verifySessionToken(token)).toBeNull();
+	});
+
+	it('accepts a token just inside MAX_SESSION_AGE_MS', async () => {
+		const recent: SessionPayload = {
+			...payload,
+			iat: Date.now() - (MAX_SESSION_AGE_MS - 60_000)
+		};
+		const token = await createSessionToken(recent);
+		expect(await verifySessionToken(token)).toEqual({
+			githubId: payload.githubId,
+			username: payload.username
+		});
+	});
+
+	it('rejects a signature-valid payload that lacks an iat', async () => {
+		const noIat = { githubId: 1, username: 'octocat' } as unknown as SessionPayload;
+		const token = await createSessionToken(noIat);
+		expect(await verifySessionToken(token)).toBeNull();
 	});
 });
 

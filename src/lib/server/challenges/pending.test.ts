@@ -38,16 +38,26 @@ function b64urlDecode(s: string): string {
 }
 
 function freshPayload(overrides: Partial<PendingResultPayload> = {}): PendingResultPayload {
-	return { challengeId: 2, durationMs: 12_340, iat: Date.now(), ...overrides };
+	return {
+		challengeId: 2,
+		durationMs: 12_340,
+		sessionId: 'sess-pending-1',
+		iat: Date.now(),
+		...overrides
+	};
 }
 
 describe('createPendingResultToken / verifyPendingResultToken', () => {
-	it('round-trips to { challengeId, durationMs } (iat dropped, no username)', async () => {
+	it('round-trips to { challengeId, durationMs, sessionId } (iat dropped, no username)', async () => {
 		const payload = freshPayload();
 		const token = await createPendingResultToken(payload);
 		const result = await verifyPendingResultToken(token);
 
-		expect(result).toEqual({ challengeId: payload.challengeId, durationMs: payload.durationMs });
+		expect(result).toEqual({
+			challengeId: payload.challengeId,
+			durationMs: payload.durationMs,
+			sessionId: payload.sessionId
+		});
 		// The username must never travel in this cookie.
 		expect(JSON.stringify(result)).not.toContain('username');
 	});
@@ -111,7 +121,8 @@ describe('createPendingResultToken / verifyPendingResultToken', () => {
 
 		expect(await verifyPendingResultToken(token)).toEqual({
 			challengeId: recent.challengeId,
-			durationMs: recent.durationMs
+			durationMs: recent.durationMs,
+			sessionId: recent.sessionId
 		});
 	});
 });
@@ -135,7 +146,8 @@ describe('setPendingResultCookie / clearPendingResultCookie', () => {
 		expect(name).toBe(PENDING_RESULT_COOKIE_NAME);
 		expect(await verifyPendingResultToken(value)).toEqual({
 			challengeId: payload.challengeId,
-			durationMs: payload.durationMs
+			durationMs: payload.durationMs,
+			sessionId: payload.sessionId
 		});
 		expect(options).toMatchObject({ httpOnly: true, path: '/', sameSite: 'lax' });
 	});

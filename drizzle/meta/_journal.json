@@ -15,6 +15,13 @@
       "when": 1782923531888,
       "tag": "0001_spotty_swarm",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783531550347,
+      "tag": "0002_big_riptide",
+      "breakpoints": true
     }
   ]
 }
