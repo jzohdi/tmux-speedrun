@@ -14,6 +14,9 @@ vi.mock('$lib/queries/leaderboard', () => ({
 // The Open Source badge must keep pointing at the repo and open in a new tab.
 const OPEN_SOURCE_HREF = 'https://github.com/jzohdi/tmux-speedrun';
 
+// The npm badge links to the published CLI package.
+const NPM_HREF = 'https://www.npmjs.com/package/tmux-speedrun';
+
 // A representative signed-in user (mirrors the server `SessionUser` shape).
 const SIGNED_IN_USER = { githubId: 4242, username: 'octocat' };
 
@@ -52,6 +55,25 @@ describe('landing page navbar — structure', () => {
 		expect(badge!.getAttribute('target')).toBe('_blank');
 		expect(badge!.getAttribute('rel')).toBe('noopener noreferrer');
 		expect(badge!.textContent).toContain('Open Source');
+	});
+
+	it('adds an npm badge in the brand cell without displacing Open Source as the first badge', async () => {
+		await render(Page);
+
+		const brand = document.querySelector('nav.navbar .nav-brand');
+		expect(brand).not.toBeNull();
+
+		// Open Source stays the primary (first) brand link; npm sits beside it.
+		const badges = brand!.querySelectorAll('a.badge');
+		expect(badges).toHaveLength(2);
+		expect(badges[0].textContent).toContain('Open Source');
+
+		const npm = brand!.querySelector('a.badge-npm');
+		expect(npm).not.toBeNull();
+		expect(npm!.getAttribute('href')).toBe(NPM_HREF);
+		expect(npm!.getAttribute('target')).toBe('_blank');
+		expect(npm!.getAttribute('rel')).toBe('noopener noreferrer');
+		expect(npm!.textContent).toContain('npm');
 	});
 
 	it('places the auth control inside the navbar via a .nav-auth cell', async () => {
