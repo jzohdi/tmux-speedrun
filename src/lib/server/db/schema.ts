@@ -7,6 +7,9 @@ export const leaderboard = pgTable('leaderboard', {
 	username: text('username'),
 	// Verified GitHub numeric id (nullable). GitHub ids fit in JS safe-integer range.
 	githubId: bigint('github_id', { mode: 'number' }),
+	// Challenge crypto session id (nullable for legacy rows). UNIQUE so a replayed
+	// finish/record cookie+proof cannot insert duplicate rows for one session.
+	sessionId: text('session_id').unique(),
 	durationMs: integer('duration_ms').notNull(),
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 });

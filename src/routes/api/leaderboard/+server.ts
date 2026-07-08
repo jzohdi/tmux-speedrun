@@ -38,6 +38,16 @@ function formatDuration(ms: number): string {
 	return `${minutes}m ${remainingSeconds.toFixed(2)}s`;
 }
 
+/**
+ * Strip control characters from a username before serving it. Current writes
+ * are GitHub logins (safe charset), but legacy rows may hold free-text names;
+ * without this a stored name could smuggle ANSI escapes into terminal clients.
+ */
+function sanitizeUsername(name: string): string {
+	// eslint-disable-next-line no-control-regex
+	return name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '');
+}
+
 export type LeaderboardEntry = {
 	rank: number;
 	username: string;
@@ -70,7 +80,7 @@ export const GET: RequestHandler = async ({ setHeaders }) => {
 				challengeId: id,
 				entries: entries.map((entry, index) => ({
 					rank: index + 1,
-					username: entry.username ?? 'Anonymous',
+					username: sanitizeUsername(entry.username ?? 'Anonymous'),
 					time: formatDuration(entry.durationMs),
 					durationMs: entry.durationMs,
 					verified: entry.githubId != null

@@ -15,7 +15,8 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { eq, lt, and, count } from 'drizzle-orm';
 import { validateChallenge } from '$lib/server/challenges';
-import { parseFinishRequest, parseSessionCookie } from '$lib/server/challenges/schemas';
+import { parseFinishRequest } from '$lib/server/challenges/schemas';
+import { verifyChallengeSessionToken } from '$lib/server/challenges/session-cookie';
 import { getSessionSecret, CHALLENGE_COOKIE_NAME } from '$lib/server/env';
 import { setPendingResultCookie } from '$lib/server/challenges/pending';
 import { db } from '$lib/server/db';
@@ -48,12 +49,10 @@ export const POST: RequestHandler = async ({ request, cookies, locals }) => {
 		error(400, { message: 'No active challenge session. Start a challenge first.' });
 	}
 
-	// Parse and validate session data
-	let sessionData;
-	try {
-		const parsed = JSON.parse(sessionCookieRaw);
-		sessionData = parseSessionCookie(parsed);
-	} catch {
+	// Verify the HMAC-signed session cookie — a tampered/unsigned cookie is
+	// rejected, so startTime and challengeId are server-authoritative.
+	const sessionData = await verifyChallengeSessionToken(sessionCookieRaw);
+	if (!sessionData) {
 		error(400, { message: 'Invalid session data. Please start a new challenge.' });
 	}
 
@@ -62,6 +61,13 @@ export const POST: RequestHandler = async ({ request, cookies, locals }) => {
 	// Calculate duration
 	const endTime = Date.now();
 	const durationMs = endTime - startTime;
+
+	// A signed cookie can still only come from this server, so a non-positive
+	// duration means clock corruption — never a legitimate run.
+	if (durationMs <= 0) {
+		cookies.delete(CHALLENGE_COOKIE_NAME, { path: '/' });
+		error(400, { message: 'Invalid challenge timing. Please start a new challenge.' });
+	}
 
 	// Check if challenge has expired
 	if (durationMs > MAX_CHALLENGE_DURATION_MS) {
@@ -111,12 +117,18 @@ export const POST: RequestHandler = async ({ request, cookies, locals }) => {
 	if (user) {
 		let leaderboardPosition: number | undefined;
 		try {
-			await db.insert(leaderboard).values({
-				challengeId: String(challengeId),
-				durationMs,
-				username: user.username,
-				githubId: user.githubId
-			});
+			// onConflictDoNothing on the unique sessionId: a replayed cookie+proof
+			// cannot insert a second row for the same challenge session.
+			await db
+				.insert(leaderboard)
+				.values({
+					challengeId: String(challengeId),
+					durationMs,
+					username: user.username,
+					githubId: user.githubId,
+					sessionId
+				})
+				.onConflictDoNothing({ target: leaderboard.sessionId });
 			leaderboardPosition = await computeRank();
 		} catch (dbError) {
 			// Log error but don't fail the request - the challenge was still valid
@@ -133,7 +145,8 @@ export const POST: RequestHandler = async ({ request, cookies, locals }) => {
 	}
 
 	// Anonymous: defer the result behind a signed cookie; provide a provisional rank.
-	await setPendingResultCookie(cookies, { challengeId, durationMs, iat: Date.now() });
+	// sessionId travels in the signed payload so record's insert stays replay-proof.
+	await setPendingResultCookie(cookies, { challengeId, durationMs, sessionId, iat: Date.now() });
 
 	let leaderboardPosition: number | undefined;
 	try {

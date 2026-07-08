@@ -23,10 +23,17 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { insertValues, selectWhere } = vi.hoisted(() => ({
-	insertValues: vi.fn(),
-	selectWhere: vi.fn()
-}));
+const { insertValues, onConflictDoNothing, selectWhere } = vi.hoisted(() => {
+	const onConflictDoNothing = vi.fn();
+	return {
+		insertValues: vi.fn((values: Record<string, unknown>) => {
+			void values;
+			return { onConflictDoNothing };
+		}),
+		onConflictDoNothing,
+		selectWhere: vi.fn()
+	};
+});
 
 vi.mock('$env/dynamic/private', () => ({
 	env: { SESSION_SECRET: 'test-session-secret-at-least-32-chars-long-xxxx' }
@@ -60,7 +67,12 @@ async function makeEvent(opts: {
 	const pending =
 		'pending' in opts
 			? opts.pending
-			: await createPendingResultToken({ challengeId, durationMs, iat: Date.now() });
+			: await createPendingResultToken({
+					challengeId,
+					durationMs,
+					sessionId: 'sess-record-1',
+					iat: Date.now()
+				});
 
 	return {
 		request: { json: async () => body },
@@ -74,7 +86,8 @@ async function makeEvent(opts: {
 }
 
 beforeEach(() => {
-	insertValues.mockReset().mockResolvedValue(undefined);
+	insertValues.mockReset().mockImplementation(() => ({ onConflictDoNothing }));
+	onConflictDoNothing.mockReset().mockResolvedValue(undefined);
 	selectWhere.mockReset().mockResolvedValue([{ count: 2 }]);
 });
 
@@ -179,6 +192,7 @@ describe('POST /api/challenge/record — no valid pending result', () => {
 		const good = await createPendingResultToken({
 			challengeId: 3,
 			durationMs: 5000,
+			sessionId: 'sess-record-1',
 			iat: Date.now()
 		});
 		const [payloadPart, sigPart] = good.split('.');

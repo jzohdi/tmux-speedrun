@@ -19,11 +19,18 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { insertValues, selectWhere, validateChallengeMock } = vi.hoisted(() => ({
-	insertValues: vi.fn(),
-	selectWhere: vi.fn(),
-	validateChallengeMock: vi.fn()
-}));
+const { insertValues, onConflictDoNothing, selectWhere, validateChallengeMock } = vi.hoisted(() => {
+	const onConflictDoNothing = vi.fn();
+	return {
+		insertValues: vi.fn((values: Record<string, unknown>) => {
+			void values;
+			return { onConflictDoNothing };
+		}),
+		onConflictDoNothing,
+		selectWhere: vi.fn(),
+		validateChallengeMock: vi.fn()
+	};
+});
 
 vi.mock('$env/dynamic/private', () => ({
 	env: { SESSION_SECRET: 'test-session-secret-at-least-32-chars-long-xxxx' }
@@ -40,20 +47,33 @@ vi.mock('$lib/server/db', () => ({
 
 import { POST } from './+server';
 import { CHALLENGE_COOKIE_NAME, PENDING_RESULT_COOKIE_NAME } from '$lib/server/env';
+import { createChallengeSessionToken } from '$lib/server/challenges/session-cookie';
 
 type MaybeUser = { githubId: number; username: string } | null;
 
-function makeEvent(user: MaybeUser, body: Record<string, unknown> = { proofB64: 'proof-abc' }) {
+async function makeEvent(
+	user: MaybeUser,
+	body: Record<string, unknown> = { proofB64: 'proof-abc' },
+	sessionOverrides: Partial<{
+		challengeId: number;
+		sessionId: string;
+		encryptedProof: string;
+		startTime: number;
+	}> = {},
+	rawCookie?: string
+) {
 	const session = {
 		challengeId: 0,
 		sessionId: 'sess-1',
 		encryptedProof: 'encrypted-proof',
-		startTime: Date.now() - 1000
+		startTime: Date.now() - 1000,
+		...sessionOverrides
 	};
+	const cookieValue = rawCookie ?? (await createChallengeSessionToken(session));
 	return {
 		request: { json: async () => body },
 		cookies: {
-			get: (name: string) => (name === CHALLENGE_COOKIE_NAME ? JSON.stringify(session) : undefined),
+			get: (name: string) => (name === CHALLENGE_COOKIE_NAME ? cookieValue : undefined),
 			delete: vi.fn(),
 			set: vi.fn()
 		},
@@ -61,19 +81,20 @@ function makeEvent(user: MaybeUser, body: Record<string, unknown> = { proofB64: 
 	};
 }
 
-function pendingCookieCalls(event: ReturnType<typeof makeEvent>) {
-	return event.cookies.set.mock.calls.filter((c) => c[0] === PENDING_RESULT_COOKIE_NAME);
+function pendingCookieCalls(event: Awaited<ReturnType<typeof makeEvent>>) {
+	return event.cookies.set.mock.calls.filter((c: unknown[]) => c[0] === PENDING_RESULT_COOKIE_NAME);
 }
 
 beforeEach(() => {
-	insertValues.mockReset().mockResolvedValue(undefined);
+	insertValues.mockReset().mockImplementation(() => ({ onConflictDoNothing }));
+	onConflictDoNothing.mockReset().mockResolvedValue(undefined);
 	selectWhere.mockReset().mockResolvedValue([{ count: 0 }]);
 	validateChallengeMock.mockReset().mockResolvedValue(true);
 });
 
 describe('POST /api/challenge/finish — signed in (records immediately)', () => {
 	it('stamps the verified GitHub username/id and returns recorded: true', async () => {
-		const event = makeEvent({ githubId: 12345, username: 'octocat' });
+		const event = await makeEvent({ githubId: 12345, username: 'octocat' });
 		const res = await POST(event as never);
 
 		expect(insertValues).toHaveBeenCalledTimes(1);
@@ -81,6 +102,8 @@ describe('POST /api/challenge/finish — signed in (records immediately)', () =>
 		expect(values.username).toBe('octocat');
 		expect(values.githubId).toBe(12345);
 		expect(values.challengeId).toBe('0');
+		// The crypto session id rides along so the unique index blocks replays.
+		expect(values.sessionId).toBe('sess-1');
 
 		const data = await res.json();
 		expect(data.valid).toBe(true);
@@ -90,7 +113,7 @@ describe('POST /api/challenge/finish — signed in (records immediately)', () =>
 	});
 
 	it('does NOT set a pending-result cookie for a signed-in finish', async () => {
-		const event = makeEvent({ githubId: 12345, username: 'octocat' });
+		const event = await makeEvent({ githubId: 12345, username: 'octocat' });
 		await POST(event as never);
 
 		expect(pendingCookieCalls(event)).toHaveLength(0);
@@ -99,7 +122,7 @@ describe('POST /api/challenge/finish — signed in (records immediately)', () =>
 
 describe('POST /api/challenge/finish — anonymous (defers the result)', () => {
 	it('does NOT insert a row for an anonymous finish', async () => {
-		const event = makeEvent(null);
+		const event = await makeEvent(null);
 		await POST(event as never);
 
 		expect(insertValues).not.toHaveBeenCalled();
@@ -107,7 +130,7 @@ describe('POST /api/challenge/finish — anonymous (defers the result)', () => {
 
 	it('sets a signed pending-result cookie and returns recorded: false with a provisional rank', async () => {
 		selectWhere.mockResolvedValue([{ count: 4 }]); // 4 faster entries ⇒ provisional #5
-		const event = makeEvent(null);
+		const event = await makeEvent(null);
 		const res = await POST(event as never);
 
 		const pending = pendingCookieCalls(event);
@@ -122,7 +145,7 @@ describe('POST /api/challenge/finish — anonymous (defers the result)', () => {
 	});
 
 	it('never lets a client-supplied username get recorded (deferred, not spoofable)', async () => {
-		const event = makeEvent(null, { proofB64: 'proof-abc', username: 'hacker' });
+		const event = await makeEvent(null, { proofB64: 'proof-abc', username: 'hacker' });
 		await POST(event as never);
 
 		// Nothing is inserted at finish time, so no client value can reach a row.
@@ -133,12 +156,65 @@ describe('POST /api/challenge/finish — anonymous (defers the result)', () => {
 describe('POST /api/challenge/finish — invalid proof (unchanged)', () => {
 	it('returns { valid: false } and records nothing when the proof is invalid', async () => {
 		validateChallengeMock.mockResolvedValue(false);
-		const event = makeEvent(null);
+		const event = await makeEvent(null);
 		const res = await POST(event as never);
 
 		const data = await res.json();
 		expect(data.valid).toBe(false);
 		expect(insertValues).not.toHaveBeenCalled();
 		expect(pendingCookieCalls(event)).toHaveLength(0);
+	});
+});
+
+describe('POST /api/challenge/finish — signed session cookie (anti-forgery)', () => {
+	async function expect400(event: unknown) {
+		await expect(POST(event as never)).rejects.toMatchObject({ status: 400 });
+		expect(insertValues).not.toHaveBeenCalled();
+	}
+
+	it('400s on an UNSIGNED plain-JSON cookie (the pre-signing format)', async () => {
+		const plain = JSON.stringify({
+			challengeId: 0,
+			sessionId: 'sess-1',
+			encryptedProof: 'encrypted-proof',
+			startTime: Date.now() - 1000
+		});
+		await expect400(await makeEvent({ githubId: 1, username: 'octocat' }, undefined, {}, plain));
+	});
+
+	it('400s when the signed payload was tampered (startTime rewrite)', async () => {
+		const good = await createChallengeSessionToken({
+			challengeId: 0,
+			sessionId: 'sess-1',
+			encryptedProof: 'encrypted-proof',
+			startTime: Date.now() - 60_000
+		});
+		const [payloadPart, sigPart] = good.split('.');
+		// Rewrite the payload (any change) while keeping the original signature.
+		const decoded = JSON.parse(
+			Buffer.from(payloadPart.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+		);
+		decoded.startTime = Date.now() - 1; // pretend the run took ~0ms
+		const forgedPayload = Buffer.from(JSON.stringify(decoded))
+			.toString('base64')
+			.replace(/\+/g, '-')
+			.replace(/\//g, '_')
+			.replace(/=+$/, '');
+		await expect400(
+			await makeEvent(
+				{ githubId: 1, username: 'octocat' },
+				undefined,
+				{},
+				`${forgedPayload}.${sigPart}`
+			)
+		);
+	});
+
+	it('400s when a (signed) startTime is in the future — non-positive duration', async () => {
+		await expect400(
+			await makeEvent({ githubId: 1, username: 'octocat' }, undefined, {
+				startTime: Date.now() + 60_000
+			})
+		);
 	});
 });

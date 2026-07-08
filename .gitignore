@@ -26,3 +26,7 @@ vite.config.ts.timestamp-*
 /cli/dist
 /cli/node_modules
 /cli/coverage
+
+# Agent/session scratch (never commit)
+.agent-work/
+.claude/

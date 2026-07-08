@@ -23,7 +23,8 @@ export type LoopbackServer = {
 
 const CLOSE_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>tmux-speedrun</title></head>
 <body style="font-family: system-ui, sans-serif; text-align: center; padding: 4rem;">
-<h1>✓ Signed in</h1><p>You can close this tab and return to your terminal.</p></body></html>`;
+<h1>✓ Signed in</h1><p>You can close this tab and return to your terminal.</p>
+<script>history.replaceState(null, "", "/")</script></body></html>`;
 
 /** URL-safe random CLI CSRF token, [A-Za-z0-9_-]{32}. */
 function generateCliState(): string {
