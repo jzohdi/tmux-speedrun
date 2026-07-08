@@ -2532,7 +2532,22 @@ export function createTmuxStore(options: TmuxStoreOptions = {}) {
 	// ========================================================================
 
 	function executeRegisteredTmuxCommand(commandText: string): boolean {
-		if (!focusedPane || focusedPane.mode !== 'tmux') {
+		if (!focusedPane) {
+			return false;
+		}
+
+		// A dead server (no sessions) can't run tmux commands. Mirror real tmux's
+		// "no server running" error instead of silently ignoring the call.
+		if (state.sessions.length === 0) {
+			addHistory({
+				type: 'error',
+				content: 'no server running',
+				timestamp: Date.now()
+			});
+			return false;
+		}
+
+		if (focusedPane.mode !== 'tmux') {
 			return false;
 		}
 
