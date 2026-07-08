@@ -130,7 +130,12 @@ export async function createIsolatedTmuxServer(opts?: {
 		} catch {
 			// no server / already gone — ignore
 		}
-		rmSync(tempDir, { recursive: true, force: true });
+		// An in-flight sink hook (a `run-shell` child spawned by the server) can
+		// re-create `events.log` in tempDir after kill-server returns but before it
+		// fully dies, so a plain recursive rm races it and throws ENOTEMPTY. Retry
+		// with backoff — Node retries recursive rm on ENOTEMPTY/EBUSY/EPERM — so the
+		// straggler write lands and gets swept on a later pass.
+		rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 	};
 
 	// Bulletproof cleanup on every exit path (ISO1). Idempotent teardown.
@@ -143,7 +148,7 @@ export async function createIsolatedTmuxServer(opts?: {
 		if (!toreDown) {
 			try {
 				spawn('tmux', ['-L', socketName, 'kill-server'], { stdio: 'ignore' }).unref();
-				rmSync(tempDir, { recursive: true, force: true });
+				rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 			} catch {
 				// ignore
 			}
