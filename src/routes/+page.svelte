@@ -6,8 +6,6 @@
 	// component can also be rendered standalone (e.g. in unit/browser tests).
 	let { data = { user: null } }: { data?: PageData } = $props();
 
-	type Hint = { command: string; description: string };
-
 	function signIn() {
 		// Full navigation — this is a server redirect to an external origin (GitHub).
 		window.location.href = '/api/auth/github/login';
@@ -18,19 +16,6 @@
 		// Reload so the layout re-loads without a session (anonymous state).
 		window.location.reload();
 	}
-
-	// Single source of truth for the command-hint row: the string shown IS the
-	// string executed when the hint is clicked — no separate mapping (per #31).
-	const hints: Hint[] = [
-		{ command: 'tsr ls', description: 'list challenges' },
-		{ command: 'tsr lb', description: 'view leaderboards' },
-		{ command: 'tsr start <id>', description: 'begin a challenge' },
-		{ command: 'tsr practice', description: 'learn step by step' },
-		{ command: 'tsr config', description: 'customize tmux.conf' },
-		{ command: 'man tmux', description: 'command reference' }
-	];
-
-	let terminal: Terminal | undefined = $state();
 
 	// The published CLI. The blurb/install command point people who'd rather run
 	// against their own native tmux at the npm package (see cli/README.md).
@@ -188,11 +173,8 @@
 			<div class="npm-cta">
 				<p class="npm-cta__text">
 					Prefer your native terminal? Get the
-					<a
-						href={NPM_URL}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="npm-cta__link">CLI on npm</a
+					<a href={NPM_URL} target="_blank" rel="noopener noreferrer" class="npm-cta__link"
+						>CLI on npm</a
 					>.
 				</p>
 				<div class="install">
@@ -210,46 +192,13 @@
 					</button>
 				</div>
 			</div>
-
-			<div class="command-hints">
-				{#each hints as hint (hint.command)}
-					<button
-						type="button"
-						class="hint"
-						aria-label={`Run command: ${hint.command}`}
-						onclick={() => terminal?.runCommand(hint.command)}
-					>
-						<code>{hint.command}</code>
-						<span>{hint.description}</span>
-					</button>
-				{/each}
-			</div>
 		</div>
 	</section>
 
 	<!-- Terminal Section -->
 	<section class="terminal-section">
-		<Terminal bind:this={terminal} user={data.user} />
+		<Terminal user={data.user} />
 	</section>
-
-	<!-- Features Section -->
-	<!-- <section class="features">
-		<div class="feature">
-			<div class="feature-icon">⚡</div>
-			<h3>Speed Challenges</h3>
-			<p>Race against the clock to complete tmux tasks. Every millisecond counts.</p>
-		</div>
-		<div class="feature">
-			<div class="feature-icon">🏆</div>
-			<h3>Global Leaderboards</h3>
-			<p>Compete with terminal enthusiasts worldwide. Can you reach #1?</p>
-		</div>
-		<div class="feature">
-			<div class="feature-icon">📚</div>
-			<h3>Learn by Doing</h3>
-			<p>No boring tutorials. Learn tmux through hands-on challenges.</p>
-		</div>
-	</section> -->
 
 	<!-- Footer -->
 	<footer class="footer"></footer>
@@ -331,7 +280,7 @@
 	.hero {
 		position: relative;
 		z-index: 1;
-		padding: 56px 24px 40px;
+		padding: 44px 24px 36px;
 		text-align: center;
 	}
 
@@ -469,13 +418,14 @@
 		margin-right: auto;
 	}
 
-	/* npm CLI callout: one-line blurb + copyable install command. */
+	/* npm CLI callout: one-line blurb + copyable install command. The hero's
+	   bottom padding provides the gap to the terminal below. */
 	.npm-cta {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: 12px;
-		margin: 0 0 36px;
+		margin: 0;
 	}
 
 	.npm-cta__text {
@@ -559,60 +509,6 @@
 		color: #50fa7b;
 	}
 
-	/* Command Hints */
-	.command-hints {
-		display: flex;
-		flex-wrap: wrap;
-		/* justify-content: center; */
-		gap: 16px;
-		margin-bottom: 40px;
-	}
-
-	.hint {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 10px 16px;
-		background: rgba(255, 255, 255, 0.03);
-		border: 1px solid rgba(255, 255, 255, 0.06);
-		border-radius: 8px;
-		/* Button reset so the <button> matches the old <div> appearance */
-		margin: 0;
-		font-family: inherit;
-		color: inherit;
-		text-align: left;
-		/* Interactivity affordance (clickable hint) */
-		cursor: pointer;
-		transition:
-			background 0.2s ease,
-			border-color 0.2s ease,
-			transform 0.2s ease;
-	}
-
-	.hint:hover {
-		background: rgba(255, 255, 255, 0.06);
-		border-color: rgba(50, 255, 150, 0.3);
-		transform: translateY(-1px);
-	}
-
-	.hint:focus-visible {
-		outline: none;
-		border-color: rgba(50, 255, 150, 0.5);
-		background: rgba(255, 255, 255, 0.06);
-	}
-
-	.hint code {
-		font-family: 'JetBrains Mono', monospace;
-		font-size: 13px;
-		color: #50fa7b;
-		font-weight: 500;
-	}
-
-	.hint span {
-		font-size: 13px;
-		color: #666;
-	}
-
 	/* Terminal Section */
 	.terminal-section {
 		position: relative;
@@ -623,7 +519,6 @@
 		min-height: 400px;
 	}
 
-	/* Features Section */
 	/* Footer */
 	.footer {
 		position: relative;
@@ -640,18 +535,7 @@
 		}
 
 		.hero {
-			padding: 40px 16px 30px;
-		}
-
-		.command-hints {
-			flex-direction: column;
-			align-items: center;
-		}
-
-		.hint {
-			width: 100%;
-			max-width: 280px;
-			justify-content: center;
+			padding: 36px 16px 28px;
 		}
 
 		.terminal-section {
