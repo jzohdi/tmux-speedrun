@@ -4,6 +4,10 @@
 	import faviconSvg from '$lib/assets/favicon/favicon.svg';
 	import appleIcon from '$lib/assets/favicon/apple-touch-icon.png';
 	import favicon96 from '$lib/assets/favicon/favicon-96x96.png';
+	import { dev } from '$app/environment';
+	import { injectAnalytics } from '@vercel/analytics/sveltekit';	
+
+	injectAnalytics({ mode: dev ? 'development' : 'production' });
 
 	let { children } = $props();
 
