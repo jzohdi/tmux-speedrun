@@ -71,6 +71,11 @@ export type EncryptedStep = {
 export type StartChallengeRequest = {
 	challengeId: number;
 	clientPublicKeyJwk: JsonWebKey;
+	/**
+	 * Opt in to receiving a final-check step (see StartChallengeResponse.steps).
+	 * Omitted by legacy clients.
+	 */
+	finalCheck?: boolean;
 };
 
 /**
@@ -79,7 +84,15 @@ export type StartChallengeRequest = {
 export type StartChallengeResponse = {
 	serverPublicKeyJwk: JsonWebKey;
 	sessionSaltB64: string;
+	/**
+	 * The encrypted real steps — plus, when the request set `finalCheck: true`,
+	 * one trailing final-check step encrypted under Kfinal. The final-check
+	 * step is never displayed; clients trial-decrypt it to verify the last
+	 * real answer locally.
+	 */
 	steps: EncryptedStep[];
+	/** Number of REAL steps (excludes the final-check step, when present). */
+	totalSteps: number;
 };
 
 /**

@@ -33,7 +33,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		error(400, { message: 'Invalid request: ' + String(err) });
 	}
 
-	const { challengeId, clientPublicKeyJwk } = requestData;
+	const { challengeId, clientPublicKeyJwk, finalCheck } = requestData;
 
 	// Validate challenge ID
 	if (!isValidChallengeId(challengeId)) {
@@ -58,11 +58,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	// Get server secret for proof encryption
 	const serverSecret = getSessionSecret();
 
-	// Prepare challenge (derive keys, encrypt steps, encrypt proof)
+	// Prepare challenge (derive keys, encrypt steps, encrypt proof). Clients
+	// that opt in via `finalCheck` get one extra trailing step encrypted under
+	// Kfinal, so they can verify the LAST real answer locally instead of
+	// discovering a wrong final command as a failed proof at /finish.
 	const { sessionSalt, sessionId, encryptedSteps, encryptedProof } = await prepareChallenge(
 		sharedSecret,
 		instructions,
-		serverSecret
+		serverSecret,
+		{ finalCheckStep: finalCheck === true }
 	);
 
 	// Create session cookie data
@@ -81,10 +85,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		COOKIE_OPTIONS
 	);
 
-	// Return response
+	// Return response. `totalSteps` counts REAL steps only — when a final-check
+	// step was appended, `steps` has one extra trailing entry that clients must
+	// not display or count.
 	return json({
 		serverPublicKeyJwk,
 		sessionSaltB64: bytesToBase64(sessionSalt),
-		steps: encryptedSteps
+		steps: encryptedSteps,
+		totalSteps: instructions.length
 	});
 };

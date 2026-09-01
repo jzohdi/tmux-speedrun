@@ -162,13 +162,13 @@ export function createChallengeStore() {
 			currentStepIndex = session.getCurrentStepIndex();
 
 			if (session.isComplete()) {
-				// Challenge complete - submit proof to server for final validation
-				// Don't show "Correct!" yet - wait for server confirmation
+				// All steps verified locally (the last one against the final-check
+				// step) — submit the proof to the server to record the time.
 				console.debug('[Challenge] All steps complete, submitting proof to server...');
 				lastFeedback = { correct: true, message: 'Verifying...' };
 				await finishChallenge();
 			} else {
-				// Non-last step - we know it's correct because next step decrypted
+				// We know it's correct because the next step decrypted
 				lastFeedback = { correct: true, message: 'Correct!' };
 				// Decrypt next step
 				const step = await session.decryptCurrentStep();

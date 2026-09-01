@@ -26,7 +26,14 @@ export const jwkPublicKeySchema = z.object({
  */
 export const startChallengeRequestSchema = z.object({
 	challengeId: z.number().int().min(0).max(5),
-	clientPublicKeyJwk: jwkPublicKeySchema
+	clientPublicKeyJwk: jwkPublicKeySchema,
+	/**
+	 * Client opt-in: append a final-check step (encrypted under Kfinal) to the
+	 * response so the last real answer can be verified locally, like every
+	 * other step. Optional so legacy clients (which would misread the extra
+	 * step as a real one) keep the old accept-blindly last-step behavior.
+	 */
+	finalCheck: z.boolean().optional()
 });
 
 /**

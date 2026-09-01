@@ -170,6 +170,28 @@ describe('Start Challenge Request Schema', () => {
 		expect(() => parseStartRequest(request)).toThrow();
 	});
 
+	it('accepts optional finalCheck opt-in flag', () => {
+		const jwk = { kty: 'EC', crv: 'P-256', x: 'abc', y: 'def' };
+
+		const withFlag = parseStartRequest({
+			challengeId: 1,
+			clientPublicKeyJwk: jwk,
+			finalCheck: true
+		});
+		expect(withFlag.finalCheck).toBe(true);
+
+		const withoutFlag = parseStartRequest({ challengeId: 1, clientPublicKeyJwk: jwk });
+		expect(withoutFlag.finalCheck).toBeUndefined();
+	});
+
+	it('rejects a non-boolean finalCheck', () => {
+		const jwk = { kty: 'EC', crv: 'P-256', x: 'abc', y: 'def' };
+
+		expect(() =>
+			parseStartRequest({ challengeId: 1, clientPublicKeyJwk: jwk, finalCheck: 'yes' })
+		).toThrow();
+	});
+
 	it('rejects missing clientPublicKeyJwk', () => {
 		const request = {
 			challengeId: 0

@@ -294,6 +294,22 @@ export function generateSessionId(): string {
 }
 
 /**
+ * Fixed payload of the final-check step (see `prepareChallenge`).
+ *
+ * Its content is never shown to the user — clients only trial-decrypt it to
+ * verify the LAST real answer locally (AES-GCM auth-tag check), exactly like
+ * every earlier step verifies against its successor. Without it, the client
+ * has no material to check the final answer against: any command would be
+ * silently accepted, and a wrong one would only surface as a failed proof at
+ * /api/challenge/finish — failing the entire run.
+ *
+ * A fixed, known plaintext leaks nothing: recovering the key from it is no
+ * easier than the offline answer brute-force already possible against every
+ * other step's ciphertext.
+ */
+const FINAL_CHECK_PAYLOAD: StepPayload = { prompt: '' };
+
+/**
  * Complete server-side challenge preparation.
  *
  * This function performs all the cryptographic operations needed to start a challenge:
@@ -306,12 +322,16 @@ export function generateSessionId(): string {
  * @param sharedSecret - ECDH shared secret with client
  * @param instructions - Generated challenge instructions
  * @param serverSecret - Server's secret key for proof encryption
+ * @param options.finalCheckStep - Append one extra step encrypted under Kfinal
+ *   so the client can verify the last real answer locally. Only sent to
+ *   clients that opt in (`finalCheck: true`), keeping legacy clients working.
  * @returns All data needed for the challenge start response and session cookie
  */
 export async function prepareChallenge(
 	sharedSecret: ArrayBuffer,
 	instructions: Instruction[],
-	serverSecret: Uint8Array<ArrayBuffer>
+	serverSecret: Uint8Array<ArrayBuffer>,
+	options: { finalCheckStep?: boolean } = {}
 ): Promise<{
 	sessionSalt: Uint8Array<ArrayBuffer>;
 	sessionId: string;
@@ -336,6 +356,14 @@ export async function prepareChallenge(
 
 	// Encrypt all steps (step i uses key i)
 	const encryptedSteps = await encryptAllSteps(keys, instructions);
+
+	// Final-check step: encrypted under Kfinal, so the client can trial-decrypt
+	// it to verify the LAST real answer before submitting the proof.
+	if (options.finalCheckStep) {
+		const finalCheck = await encryptStep(kfinal, FINAL_CHECK_PAYLOAD);
+		finalCheck.index = instructions.length;
+		encryptedSteps.push(finalCheck);
+	}
 
 	// Encrypt proof for cookie storage
 	const encryptedProof = await encryptProof(serverSecret, kfinal, sessionId);

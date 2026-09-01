@@ -114,11 +114,6 @@
 	const progressPercent = $derived(
 		challenge.totalSteps > 0 ? ((challenge.currentStepIndex + 1) / challenge.totalSteps) * 100 : 0
 	);
-	// Check if user is on the last step (needs to be extra careful - no client-side validation)
-	const isLastStep = $derived(
-		challenge.totalSteps > 0 && challenge.currentStepIndex === challenge.totalSteps - 1
-	);
-
 	$effect(() => {
 		const seedInput = challenge.currentSeedInput;
 		const isActive = challenge.status === 'active';
@@ -371,14 +366,6 @@
 				class:incorrect={!challenge.lastFeedback.correct}
 			>
 				{challenge.lastFeedback.message}
-			</div>
-		{/if}
-
-		<!-- Last Step Warning -->
-		{#if isLastStep && challenge.status === 'active'}
-			<div class="last-step-warning">
-				<span class="warning-icon">⚠</span>
-				<span class="warning-text">Final step — double-check before submitting</span>
 			</div>
 		{/if}
 
@@ -722,30 +709,6 @@
 	.feedback.incorrect {
 		background: rgba(255, 85, 85, 0.15);
 		color: #ff5555;
-	}
-
-	/* Last Step Warning */
-	.last-step-warning {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		padding: 10px 16px;
-		background: rgba(255, 184, 108, 0.1);
-		border: 1px solid rgba(255, 184, 108, 0.3);
-		border-radius: 6px;
-		font-size: 13px;
-		color: #ffb86c;
-		animation: fadeIn 0.3s ease;
-	}
-
-	.last-step-warning .warning-icon {
-		font-size: 14px;
-	}
-
-	.last-step-warning .warning-text {
-		font-family: 'JetBrains Mono', monospace;
-		letter-spacing: 0.3px;
 	}
 
 	@keyframes fadeIn {

@@ -30,6 +30,42 @@ const COMMAND_SHORTCUTS = new Map(TMUX_COMMANDS.map((c) => [c.name, c.shortcut])
 
 export type ChallengeRunResult = { completed: boolean; finish?: FinishResponse; aborted?: boolean };
 
+/**
+ * Candidates that do NOT count as a definitive wrong attempt when unmatched,
+ * so the loop stays silent instead of flashing "not it" (issue: wrong-command
+ * clarity). These are exploratory/read-only commands, navigation the user does
+ * while looking around, and legitimate intermediates of composite flows —
+ * `copy-mode` en route to a copy-paste step, `command-prompt` while typing any
+ * command's `:` form, attach/detach from the loop's own recovery re-attaches.
+ * Everything else (splits, kills, renames, swaps, buffer writes, …) changes
+ * real state, so an unmatched one means the user ran the wrong command.
+ */
+const NON_ATTEMPT_CANDIDATES = new Set([
+	'command-prompt',
+	'copy-mode',
+	'attach-session',
+	'detach',
+	'list-keys',
+	'list-sessions',
+	'list-windows',
+	'list-buffers',
+	'show-buffer',
+	'capture-pane',
+	'display-panes',
+	'show-time',
+	'select-window',
+	'next-window',
+	'previous-window',
+	'last-window',
+	'select-pane',
+	'last-pane',
+	'next-session',
+	'previous-session'
+]);
+
+/** Status-line message flashed when a definitive wrong command is observed. */
+export const WRONG_COMMAND_FLASH = "That's not it — check the step prompt and try again.";
+
 /** One abstraction over challenge & practice step progression (interface §6.1). */
 export type StepEngine = {
 	isComplete(): boolean;
@@ -45,7 +81,7 @@ export type StepEngine = {
 export type RunLoopDeps = {
 	server: Pick<IsolatedTmuxServer, 'attach' | 'isAlive' | 'ensureRunning' | 'liveHooks'>;
 	observer: Pick<TmuxObserver, 'watch' | 'resetBaseline' | 'drainDelta' | 'exec' | 'expectEvents'>;
-	ui: Pick<StatusLine, 'setPrompt' | 'clear'>;
+	ui: Pick<StatusLine, 'setPrompt' | 'clear' | 'flash'>;
 	engine: StepEngine;
 	/** One-line notices printed to the launching terminal between attaches. */
 	notify?: (message: string) => void;
@@ -86,7 +122,15 @@ export async function runAttachLoop(deps: RunLoopDeps): Promise<RunLoopResult> {
 		const run = async (): Promise<boolean> => {
 			if (engine.isComplete()) return false;
 			const candidates = deriveCandidates(delta, engine.detectionStep());
-			if (!(await engine.trySubmit(candidates, delta))) return false;
+			if (!(await engine.trySubmit(candidates, delta))) {
+				// A definitive wrong command (any non-exploratory candidate) gets
+				// immediate feedback; the prompt itself stays on the same step.
+				// Best-effort: the flash may race a dying server — never fatal.
+				if (candidates.some((c) => !NON_ATTEMPT_CANDIDATES.has(c))) {
+					await ui.flash(WRONG_COMMAND_FLASH).catch(() => {});
+				}
+				return false;
+			}
 			advancedThisIteration = true;
 			if (engine.isComplete()) {
 				await ui.clear();

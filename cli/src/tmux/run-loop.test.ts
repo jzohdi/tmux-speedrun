@@ -192,7 +192,9 @@ function makeHarness(opts: {
 		clear: async () => {
 			ops.push('clear');
 		},
-		flash: async () => {}
+		flash: async (message: string) => {
+			ops.push(`flash:${message}`);
+		}
 	};
 
 	const deps: Record<string, unknown> = {
@@ -421,5 +423,59 @@ describe('runAttachLoop — rapid-exit guard (never traps the user in a dead loo
 		expect(result).toMatchObject({ completed: false, aborted: true });
 		expect(h.attachCount()).toBe(4);
 		expect(h.stepIndex()).toBe(1);
+	});
+});
+
+describe('runAttachLoop — wrong-command feedback (final-check UX)', () => {
+	it('flashes on a definitive wrong command, then advances silently on the right one', async () => {
+		const loop = requireLoop();
+		const h = makeHarness({
+			answers: ['new-window'],
+			attaches: [
+				{
+					// kill-pane is a definitive (state-changing) wrong action → flash;
+					// then the right command advances mid-attach with no flash.
+					midAttachEvents: [['after-kill-pane'], ['after-new-window']]
+				}
+			]
+		});
+		const result = await loop(h.deps);
+		expect(result).toMatchObject({ completed: true, aborted: false });
+		const flashes = h.ops.filter((op) => op.startsWith('flash:'));
+		expect(flashes).toEqual([
+			`flash:${(controllerModule as unknown as { WRONG_COMMAND_FLASH: string }).WRONG_COMMAND_FLASH}`
+		]);
+		assertOrder(h.ops, 'attach:1', 'flash:', 'advance:1');
+	});
+
+	it('stays silent on exploratory/intermediate actions (help, navigation, command-prompt)', async () => {
+		const loop = requireLoop();
+		const h = makeHarness({
+			answers: ['new-window'],
+			attaches: [
+				{
+					midAttachEvents: [
+						['after-list-keys'], // looking up how to do it
+						['after-select-window'], // navigating around
+						['after-command-prompt'], // typing a `:` command
+						['after-new-window'] // the actual answer
+					]
+				}
+			]
+		});
+		const result = await loop(h.deps);
+		expect(result).toMatchObject({ completed: true, aborted: false });
+		expect(h.ops.filter((op) => op.startsWith('flash:'))).toHaveLength(0);
+	});
+
+	it('does not flash on a correct command', async () => {
+		const loop = requireLoop();
+		const h = makeHarness({
+			answers: ['kill-pane'],
+			attaches: [{ midAttachEvents: [['after-kill-pane']] }]
+		});
+		const result = await loop(h.deps);
+		expect(result).toMatchObject({ completed: true, aborted: false });
+		expect(h.ops.filter((op) => op.startsWith('flash:'))).toHaveLength(0);
 	});
 });

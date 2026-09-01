@@ -558,3 +558,79 @@ describe('End-to-End Challenge Flow', () => {
 		await expect(decryptStep(k0, encryptedSteps[2])).rejects.toThrow();
 	});
 });
+
+/**
+ * Final-check step (last-answer local verification).
+ */
+describe('prepareChallenge final-check step', () => {
+	const instructions: Instruction[] = [
+		{ index: 0, prompt: 'Prompt 0', expectedAction: 'action-0' },
+		{ index: 1, prompt: 'Prompt 1', expectedAction: 'action-1' }
+	];
+
+	it('appends no extra step by default (legacy clients)', async () => {
+		const { encryptedSteps } = await prepareChallenge(
+			randomBytes(32).buffer,
+			instructions,
+			randomBytes(32)
+		);
+
+		expect(encryptedSteps.length).toBe(instructions.length);
+	});
+
+	it('appends one trailing step encrypted under Kfinal when requested', async () => {
+		const sharedSecret = randomBytes(32);
+		const { sessionSalt, encryptedSteps } = await prepareChallenge(
+			sharedSecret.buffer,
+			instructions,
+			randomBytes(32),
+			{ finalCheckStep: true }
+		);
+
+		expect(encryptedSteps.length).toBe(instructions.length + 1);
+		expect(encryptedSteps[instructions.length].index).toBe(instructions.length);
+
+		// The final-check step decrypts under Kfinal (all answers correct)...
+		const k0 = await deriveK0(sharedSecret, sessionSalt);
+		const kfinal = await deriveKfinal(k0, ['action-0', 'action-1']);
+		await expect(decryptStep(kfinal, encryptedSteps[instructions.length])).resolves.toBeDefined();
+	});
+
+	it('rejects a wrong LAST answer via the final-check trial decrypt', async () => {
+		const sharedSecret = randomBytes(32);
+		const { sessionSalt, encryptedSteps } = await prepareChallenge(
+			sharedSecret.buffer,
+			instructions,
+			randomBytes(32),
+			{ finalCheckStep: true }
+		);
+
+		const k0 = await deriveK0(sharedSecret, sessionSalt);
+		const wrongKfinal = await deriveKfinal(k0, ['action-0', 'WRONG-LAST']);
+
+		await expect(decryptStep(wrongKfinal, encryptedSteps[instructions.length])).rejects.toThrow();
+	});
+
+	it('final-check step does not change the expected proof', async () => {
+		const sharedSecret = randomBytes(32);
+		const serverSecret = randomBytes(32);
+		const { sessionSalt, sessionId, encryptedProof } = await prepareChallenge(
+			sharedSecret.buffer,
+			instructions,
+			serverSecret,
+			{ finalCheckStep: true }
+		);
+
+		// The client's Kfinal after the REAL steps still validates at /finish.
+		const k0 = await deriveK0(sharedSecret, sessionSalt);
+		const kfinal = await deriveKfinal(k0, ['action-0', 'action-1']);
+		const isValid = await validateChallenge(
+			serverSecret,
+			sessionId,
+			encryptedProof,
+			bytesToBase64(new Uint8Array(kfinal))
+		);
+
+		expect(isValid).toBe(true);
+	});
+});

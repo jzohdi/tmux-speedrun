@@ -14,8 +14,9 @@ import {
 } from '$lib/crypto';
 import {
 	deriveK0,
-	deriveNextKey,
 	decryptStep,
+	tryAdvanceKey,
+	resolveTotalSteps,
 	type DecryptedStep,
 	type EncryptedStep
 } from '$lib/client/challenge-core';
@@ -25,6 +26,12 @@ export type StartResponse = {
 	serverPublicKeyJwk: JsonWebKey;
 	sessionSaltB64: string;
 	steps: EncryptedStep[];
+	/**
+	 * Number of REAL steps. When the server honored `finalCheck: true`, `steps`
+	 * has one extra trailing final-check step (encrypted under Kfinal) used
+	 * only to verify the last real answer. Absent on legacy servers.
+	 */
+	totalSteps?: number;
 };
 
 export type FinishResponse = {
@@ -52,27 +59,35 @@ export class CliChallengeSession {
 		private api: ApiClient,
 		public readonly challengeId: number,
 		steps: EncryptedStep[],
+		totalSteps: number,
 		k0: ArrayBuffer
 	) {
 		this.encryptedSteps = steps;
 		this.currentKeyRaw = k0;
-		this.totalStepsValue = steps.length;
+		// REAL steps only — `steps` may carry one extra trailing final-check
+		// step (encrypted under Kfinal), never displayed or counted.
+		this.totalStepsValue = totalSteps;
 	}
 
-	/** POST /api/challenge/start { challengeId, clientPublicKeyJwk }; derive K0; capture cookies. */
+	/** POST /api/challenge/start { challengeId, clientPublicKeyJwk, finalCheck }; derive K0; capture cookies. */
 	static async start(api: ApiClient, challengeId: number): Promise<CliChallengeSession> {
 		const { keyPair, publicKeyJwk } = await generateKeyPairForExchange();
 
 		const data = await api.postJson<StartResponse>('/api/challenge/start', {
 			challengeId,
-			clientPublicKeyJwk: publicKeyJwk
+			clientPublicKeyJwk: publicKeyJwk,
+			// Opt in to the final-check step so the last answer is verified
+			// locally like every other step (wrong ≠ failed challenge).
+			finalCheck: true
 		});
+
+		const totalSteps = resolveTotalSteps(data.steps, data.totalSteps);
 
 		const sharedSecret = await ecdhExchange(keyPair.privateKey, data.serverPublicKeyJwk);
 		const sessionSalt = base64ToBytes(data.sessionSaltB64);
 		const k0 = await deriveK0(sharedSecret, sessionSalt);
 
-		return new CliChallengeSession(api, challengeId, data.steps, k0);
+		return new CliChallengeSession(api, challengeId, data.steps, totalSteps, k0);
 	}
 
 	/** Decrypt the current (not-yet-solved) step for prompting. */
@@ -84,30 +99,29 @@ export class CliChallengeSession {
 	}
 
 	/**
-	 * Trial-decrypt step n+1 with K(n+1)=deriveNextKey(Kn, answer, n). On success
-	 * advance + return true; on the LAST step accept without a trial-decrypt and
-	 * store Kfinal. On failure return false and stay put. Pure-local; no network.
+	 * Trial-decrypt step n+1 with K(n+1)=deriveNextKey(Kn, answer, n). On
+	 * success advance + return true; on failure return false and stay put —
+	 * for EVERY step, including the last, which verifies against the server's
+	 * final-check step (a wrong final command no longer corrupts the proof and
+	 * fails the run). Pure-local; no network.
 	 */
 	async submitAnswer(answer: string): Promise<boolean> {
 		if (this.currentStepIndexValue >= this.totalStepsValue) return false;
 
-		const nextKey = await deriveNextKey(this.currentKeyRaw, answer, this.currentStepIndexValue);
+		// `encryptedSteps[i + 1]` is the next real step, or the final-check step
+		// on the last one (undefined only against a legacy server — see
+		// tryAdvanceKey for the fallback behavior).
+		const nextKey = await tryAdvanceKey(
+			this.currentKeyRaw,
+			answer,
+			this.currentStepIndexValue,
+			this.encryptedSteps[this.currentStepIndexValue + 1]
+		);
+		if (nextKey === null) return false;
 
-		// Last step: no next step to trial-decrypt — store Kfinal (the proof).
-		if (this.currentStepIndexValue + 1 >= this.totalStepsValue) {
-			this.currentKeyRaw = nextKey;
-			this.currentStepIndexValue++;
-			return true;
-		}
-
-		try {
-			await decryptStep(nextKey, this.encryptedSteps[this.currentStepIndexValue + 1]);
-			this.currentKeyRaw = nextKey;
-			this.currentStepIndexValue++;
-			return true;
-		} catch {
-			return false;
-		}
+		this.currentKeyRaw = nextKey;
+		this.currentStepIndexValue++;
+		return true;
 	}
 
 	isComplete(): boolean {

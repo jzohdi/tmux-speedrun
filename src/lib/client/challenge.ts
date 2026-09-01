@@ -18,8 +18,9 @@ import {
 } from '$lib/crypto';
 import {
 	deriveK0,
-	deriveNextKey,
 	decryptStep,
+	tryAdvanceKey,
+	resolveTotalSteps,
 	formatDuration,
 	type DecryptedStep,
 	type EncryptedStep
@@ -90,6 +91,7 @@ export class ChallengeSession {
 	private constructor(
 		challengeId: number,
 		encryptedSteps: EncryptedStep[],
+		totalSteps: number,
 		k0: ArrayBuffer,
 		startTime: number
 	) {
@@ -97,7 +99,10 @@ export class ChallengeSession {
 		this.encryptedSteps = encryptedSteps;
 		this.currentKeyRaw = k0;
 		this.currentStepIndex = 0;
-		this.totalSteps = encryptedSteps.length;
+		// REAL steps only — `encryptedSteps` may carry one extra trailing
+		// final-check step (encrypted under Kfinal) used purely for verifying
+		// the last real answer; it is never displayed or counted.
+		this.totalSteps = totalSteps;
 		this.startTime = startTime;
 	}
 
@@ -121,7 +126,10 @@ export class ChallengeSession {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				challengeId,
-				clientPublicKeyJwk: publicKeyJwk
+				clientPublicKeyJwk: publicKeyJwk,
+				// Opt in to the final-check step so the last answer is verified
+				// locally like every other step (wrong ≠ failed challenge).
+				finalCheck: true
 			})
 		});
 
@@ -133,6 +141,8 @@ export class ChallengeSession {
 		const data = await response.json();
 		const { serverPublicKeyJwk, sessionSaltB64, steps } = data;
 
+		const totalSteps = resolveTotalSteps(steps, data.totalSteps);
+
 		// Derive shared secret
 		const sharedSecret = await ecdhExchange(keyPair.privateKey, serverPublicKeyJwk);
 
@@ -140,7 +150,7 @@ export class ChallengeSession {
 		const sessionSalt = base64ToBytes(sessionSaltB64);
 		const k0 = await deriveK0(sharedSecret, sessionSalt);
 
-		return new ChallengeSession(challengeId, steps, k0, Date.now());
+		return new ChallengeSession(challengeId, steps, totalSteps, k0, Date.now());
 	}
 
 	/**
@@ -178,8 +188,10 @@ export class ChallengeSession {
 	/**
 	 * Attempt to advance to the next step using the provided answer.
 	 *
-	 * If the answer is correct, derives the next key and advances.
-	 * If incorrect, decryption will fail and false is returned.
+	 * Every step — including the last — is verified by trial-decrypting the
+	 * following encrypted step (the final-check step, for the last real one).
+	 * A wrong answer fails that decryption and simply returns false; the user
+	 * stays on the current step and can try again.
 	 *
 	 * @param answer - The canonical action (e.g., "split-vertical" or "rename-window:swift-tiger-42")
 	 * @returns true if answer was correct and advanced to next step
@@ -189,32 +201,24 @@ export class ChallengeSession {
 			return false;
 		}
 
-		// Derive next key using the answer
-		const nextKey = await deriveNextKey(this.currentKeyRaw, answer, this.currentStepIndex);
+		// `encryptedSteps[i + 1]` is the next real step, or the final-check step
+		// on the last one (undefined only against a legacy server — see
+		// tryAdvanceKey for the fallback behavior).
+		const nextKey = await tryAdvanceKey(
+			this.currentKeyRaw,
+			answer,
+			this.currentStepIndex,
+			this.encryptedSteps[this.currentStepIndex + 1]
+		);
 
-		// Check if we've completed all steps
-		if (this.currentStepIndex + 1 >= this.totalSteps) {
-			// This was the last step, store the final key for proof
-			this.currentKeyRaw = nextKey;
-			this.currentStepIndex++;
-
-			return true;
-		}
-
-		// Try to decrypt the next step with the derived key
-		const nextEncryptedStep = this.encryptedSteps[this.currentStepIndex + 1];
-
-		try {
-			await decryptStep(nextKey, nextEncryptedStep);
-			// Decryption succeeded - answer was correct
-			this.currentKeyRaw = nextKey;
-			this.currentStepIndex++;
-
-			return true;
-		} catch {
-			// Decryption failed - answer was wrong
+		if (nextKey === null) {
 			return false;
 		}
+
+		this.currentKeyRaw = nextKey;
+		this.currentStepIndex++;
+
+		return true;
 	}
 
 	/**

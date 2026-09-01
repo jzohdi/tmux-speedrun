@@ -64,6 +64,17 @@ export const challengeCommand: Command = {
 			}
 
 			const finish = result.finish;
+
+			// With the final-check step every answer is verified locally, so a
+			// rejected proof means an expired/replayed session — not user error.
+			if (!finish.valid) {
+				error(
+					finish.message ??
+						'The server could not verify this run. Start a new challenge to try again.'
+				);
+				return EXIT_RUNTIME;
+			}
+
 			info(`Completed in ${bold(formatDuration(finish.durationMs))}.`);
 
 			if (finish.recorded) {

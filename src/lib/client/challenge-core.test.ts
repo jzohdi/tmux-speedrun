@@ -19,13 +19,18 @@ import {
 	deriveK0,
 	deriveNextKey,
 	decryptStep,
+	tryAdvanceKey,
+	resolveTotalSteps,
 	formatDuration,
 	type EncryptedStep
 } from './challenge-core';
 
 // --- Server-side simulation (independent of challenge-core) -----------------
 
-function serverDeriveK0(sharedSecret: ArrayBuffer, salt: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer> {
+function serverDeriveK0(
+	sharedSecret: ArrayBuffer,
+	salt: Uint8Array<ArrayBuffer>
+): Promise<ArrayBuffer> {
 	return hkdf(sharedSecret, salt, 'k0', 32);
 }
 
@@ -108,7 +113,10 @@ describe('challenge-core: deriveNextKey', () => {
 describe('challenge-core: decryptStep', () => {
 	it('decrypts a step encrypted under the matching key', async () => {
 		const k0 = await deriveK0(randomBytes(32).buffer, randomBytes(16));
-		const payload = { prompt: "Rename the window to 'swift-tiger-42'", requiredInput: 'swift-tiger-42' };
+		const payload = {
+			prompt: "Rename the window to 'swift-tiger-42'",
+			requiredInput: 'swift-tiger-42'
+		};
 		const encrypted = await serverEncryptStep(k0, payload, 0);
 
 		const decrypted = await decryptStep(k0, encrypted);
@@ -187,5 +195,82 @@ describe('challenge-core: full-chain byte-parity (CC1)', () => {
 		clientKey = await deriveNextKey(clientKey, 'WRONG', 1); // wrong answer at step 1
 
 		await expect(decryptStep(clientKey, encryptedSteps[2])).rejects.toThrow();
+	});
+});
+
+describe('challenge-core: tryAdvanceKey', () => {
+	/** Build a 2-step chain + final-check step; return everything a client gets. */
+	async function makeChain() {
+		const sharedSecret = randomBytes(32).buffer;
+		const sessionSalt = randomBytes(16);
+		const answers = ['a0', 'a1'];
+
+		let serverKey = await serverDeriveK0(sharedSecret, sessionSalt);
+		const encryptedSteps: EncryptedStep[] = [];
+		for (let i = 0; i < answers.length; i++) {
+			encryptedSteps.push(await serverEncryptStep(serverKey, { prompt: `s${i}` }, i));
+			serverKey = await serverDeriveNextKey(serverKey, answers[i], i);
+		}
+		// serverKey is now Kfinal — the final-check step is encrypted under it.
+		encryptedSteps.push(await serverEncryptStep(serverKey, { prompt: '' }, answers.length));
+
+		const k0 = await deriveK0(sharedSecret, sessionSalt);
+		return { k0, answers, encryptedSteps, expectedProof: b64(serverKey) };
+	}
+
+	it('advances on a correct answer (verified against the next step)', async () => {
+		const { k0, answers, encryptedSteps } = await makeChain();
+
+		const k1 = await tryAdvanceKey(k0, answers[0], 0, encryptedSteps[1]);
+
+		expect(k1).not.toBeNull();
+		await expect(decryptStep(k1!, encryptedSteps[1])).resolves.toMatchObject({ prompt: 's1' });
+	});
+
+	it('returns null on a wrong answer instead of advancing', async () => {
+		const { k0, encryptedSteps } = await makeChain();
+
+		expect(await tryAdvanceKey(k0, 'WRONG', 0, encryptedSteps[1])).toBeNull();
+	});
+
+	it('verifies the LAST real answer against the final-check step', async () => {
+		const { k0, answers, encryptedSteps, expectedProof } = await makeChain();
+
+		const k1 = await tryAdvanceKey(k0, answers[0], 0, encryptedSteps[1]);
+
+		// Wrong final answer: rejected locally — the run is NOT failed.
+		expect(await tryAdvanceKey(k1!, 'WRONG-FINAL', 1, encryptedSteps[2])).toBeNull();
+
+		// Correct final answer: accepted, and the key IS the expected proof.
+		const kfinal = await tryAdvanceKey(k1!, answers[1], 1, encryptedSteps[2]);
+		expect(kfinal).not.toBeNull();
+		expect(b64(kfinal!)).toBe(expectedProof);
+	});
+
+	it('accepts blindly when no verify step exists (legacy server fallback)', async () => {
+		const { k0 } = await makeChain();
+
+		// Even a wrong answer advances — the historical last-step behavior.
+		const key = await tryAdvanceKey(k0, 'ANYTHING', 0, undefined);
+		expect(key).not.toBeNull();
+		expect(key!.byteLength).toBe(32);
+	});
+});
+
+describe('challenge-core: resolveTotalSteps', () => {
+	const steps = (n: number): EncryptedStep[] =>
+		Array.from({ length: n }, (_, i) => ({ index: i, nonceB64: '', ciphertextB64: '' }));
+
+	it('uses the server count when sane (final-check protocol)', () => {
+		expect(resolveTotalSteps(steps(4), 3)).toBe(3);
+		expect(resolveTotalSteps(steps(4), 4)).toBe(4);
+	});
+
+	it('falls back to steps.length for a missing or insane count (legacy server)', () => {
+		expect(resolveTotalSteps(steps(4), undefined)).toBe(4);
+		expect(resolveTotalSteps(steps(4), 0)).toBe(4);
+		expect(resolveTotalSteps(steps(4), 5)).toBe(4);
+		expect(resolveTotalSteps(steps(4), 2.5)).toBe(4);
+		expect(resolveTotalSteps(steps(4), '3')).toBe(4);
 	});
 });
