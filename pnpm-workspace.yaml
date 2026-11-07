@@ -2,8 +2,10 @@ packages:
   - '.'
   - 'cli'
 
+# Install scripts allowed to run. pnpm 11+ reads only allowBuilds (it replaced
+# onlyBuiltDependencies); pnpm 10.28 reads it too.
 allowBuilds:
   esbuild: true
 
-onlyBuiltDependencies:
-  - esbuild
+# Moved here from .npmrc: pnpm 11+ no longer reads engine-strict from a project .npmrc.
+engineStrict: true

@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
 	entry: ['src/index.ts'],
 	format: ['esm'],
-	target: 'node20',
+	target: 'node22',
 	platform: 'node',
 	clean: true,
 	sourcemap: true,
