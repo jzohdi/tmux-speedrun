@@ -549,8 +549,7 @@
 						autocomplete="off"
 						autocapitalize="off"
 						spellcheck="false"
-						{...{ autocorrect: 'off' }}
-					></textarea>
+						{...{ autocorrect: 'off' }}></textarea>
 				</div>
 			{/if}
 		{/if}
