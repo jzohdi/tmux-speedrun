@@ -444,8 +444,7 @@
 				oninput={handleEditorInput}
 				onkeydown={handleEditorKeyDown}
 				readonly={!editorState.insertMode}
-				spellcheck="false"
-			></textarea>
+				spellcheck="false"></textarea>
 			<div class="editor-status">
 				<span class="editor-file">{editorState.filePath}</span>
 				<span class="editor-mode">

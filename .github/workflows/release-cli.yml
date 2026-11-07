@@ -34,23 +34,28 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to full commit SHAs (version in the comment).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@v4
-        with:
-          # Matches the pnpm major Vercel resolves for this lockfile.
-          version: 10
+      # No `version:`: the action reads the exact pnpm from package.json's
+      # `packageManager` field.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: pnpm
 
-      # Trusted publishing requires npm >= 11.5.1.
-      - name: Update npm for OIDC support
+      # Trusted publishing requires npm >= 11.5.1. Node 24 bundles a newer npm,
+      # so use it as is rather than installing an unpinned npm@latest.
+      - name: Check npm supports trusted publishing
         run: |
-          npm install -g npm@latest
           npm --version
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!ok) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }
+          ' "$(npm --version)"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -2,8 +2,21 @@ packages:
   - '.'
   - 'cli'
 
+# Install scripts allowed to run. pnpm 11+ reads only allowBuilds (it replaced
+# onlyBuiltDependencies); pnpm 10.28 reads it too.
 allowBuilds:
   esbuild: true
 
-onlyBuiltDependencies:
-  - esbuild
+# Moved here from .npmrc: pnpm 11+ no longer reads engine-strict from a project .npmrc.
+engineStrict: true
+
+# Security overrides (remove when upstream catches up):
+# - glob 13 (GHSA-3g3m, fixed 14.0.2) via @vercel/nft, and minimatch 10 (GHSA-g3hv, fixed 11.0.1)
+#   via eslint/typescript-eslint and glob. glob 14 is built for minimatch 11; glob 13 is not.
+# - cookie 0.6 (GHSA-pxg6, fixed 0.7.0), pinned by Kit 2.
+# - esbuild 0.18 (GHSA-67mh) via drizzle-kit's unused @esbuild-kit/core-utils.
+overrides:
+  '@vercel/nft>glob': 14.0.3
+  'minimatch@>=10 <12': 11.0.4
+  '@sveltejs/kit>cookie': 0.7.2
+  '@esbuild-kit/core-utils>esbuild': 0.25.12

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import './layout.css';
-	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
+	import { QueryClientProvider } from '@tanstack/svelte-query';
+	import { createQueryClient } from '$lib/queries/client';
 	import faviconSvg from '$lib/assets/favicon/favicon.svg';
 	import appleIcon from '$lib/assets/favicon/apple-touch-icon.png';
 	import favicon96 from '$lib/assets/favicon/favicon-96x96.png';
@@ -11,15 +12,7 @@
 
 	let { children } = $props();
 
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				// Global defaults - can be overridden per-query
-				staleTime: 60 * 1000, // Consider data fresh for 60 seconds
-				gcTime: 5 * 60 * 1000 // Keep unused data in cache for 5 minutes
-			}
-		}
-	});
+	const queryClient = createQueryClient();
 </script>
 
 <svelte:head>

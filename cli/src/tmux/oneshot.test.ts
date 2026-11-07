@@ -39,8 +39,7 @@ const { KEY_REBINDS, COMMAND_ALIASES } = configModule as unknown as {
 const bareKey = (key: string) => key.replace(/^'(.*)'$/, '$1');
 
 type ParsedForm =
-	| { source: string; kind: 'key'; keys: string[] }
-	| { source: string; kind: 'typed'; word: string };
+	{ source: string; kind: 'key'; keys: string[] } | { source: string; kind: 'typed'; word: string };
 
 /**
  * Tolerant parser for the heterogeneous shortcut formats in

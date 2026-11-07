@@ -99,8 +99,7 @@
 						class="config-editor"
 						bind:value={draftText}
 						spellcheck="false"
-						autocomplete="off"
-					></textarea>
+						autocomplete="off"></textarea>
 				</div>
 			</section>
 

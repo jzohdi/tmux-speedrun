@@ -12,7 +12,7 @@ npm install -g tmux-speedrun
 npx tmux-speedrun help
 ```
 
-Requires **Node ≥ 20** and **tmux ≥ 3.0**. On Windows, run inside WSL (tmux is not native to Windows).
+Requires **Node ≥ 22** and **tmux ≥ 3.0**. On Windows, run inside WSL (tmux is not native to Windows).
 
 ## Commands
 
