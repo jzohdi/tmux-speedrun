@@ -4,7 +4,7 @@
 	import faviconSvg from '$lib/assets/favicon/favicon.svg';
 	import appleIcon from '$lib/assets/favicon/apple-touch-icon.png';
 	import favicon96 from '$lib/assets/favicon/favicon-96x96.png';
-	import { dev } from '$app/environment';
+	import { browser, dev } from '$app/environment';
 	import { injectAnalytics } from '@vercel/analytics/sveltekit';	
 
 	injectAnalytics({ mode: dev ? 'development' : 'production' });
@@ -14,6 +14,10 @@
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
+				// Queries run in the browser only. Newer svelte-query 6 releases also
+				// subscribe during SSR, which would call the global fetch with a relative
+				// URL on the server. Nothing is prefetched there, so stay client-only.
+				enabled: browser,
 				// Global defaults - can be overridden per-query
 				staleTime: 60 * 1000, // Consider data fresh for 60 seconds
 				gcTime: 5 * 60 * 1000 // Keep unused data in cache for 5 minutes
