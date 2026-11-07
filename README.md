@@ -15,6 +15,8 @@ I built this to help myself learn tmux. This is a browser-based game for practic
 
 ## Quick Start
 
+Requires Node 24 and pnpm 12. With Corepack (`corepack enable`), `pnpm` runs the exact version pinned in `package.json`.
+
 ```bash
 # Install dependencies
 pnpm install
